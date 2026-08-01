@@ -293,7 +293,16 @@ def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
         from src.chatgpt_subscription import chatgpt_headers
         return chatgpt_headers(api_key)
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        if "fal.run" in base.lower() or "fal.ai" in base.lower() or api_key.startswith("Key ") or provider == "fal":
+            # Strip common env-var prefixes users paste by mistake
+            fal_key = api_key
+            for prefix in ("FAL_KEY=", "fal_key=", "FAL_KEY_SECRET=", "fal_key_secret="):
+                if fal_key.startswith(prefix):
+                    fal_key = fal_key[len(prefix):]
+                    break
+            headers["Authorization"] = fal_key if fal_key.startswith("Key ") else f"Key {fal_key}"
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
     if provider == "openrouter":
         headers.setdefault("HTTP-Referer", "https://github.com/odysseus-dev/odysseus")
         headers.setdefault("X-OpenRouter-Title", "Odysseus")
