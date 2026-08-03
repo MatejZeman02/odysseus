@@ -86,6 +86,24 @@ class QwenServeClient:
             raise QwenHarnessError("Qwen Serve returned no session id")
         return str(session_id)
 
+    async def prompt(self, session_id: str, text: str) -> tuple[str, str]:
+        """Admit a text-only turn; completion is observed through replayable SSE."""
+        response = await self._client.post(
+            f"{self.base_url}/session/{session_id}/prompt", headers=self._headers,
+            json={"prompt": [{"type": "text", "text": text}]},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        prompt_id = payload.get("promptId")
+        if not prompt_id:
+            raise QwenHarnessError("Qwen Serve admitted no prompt id")
+        return str(prompt_id), str(payload.get("lastEventId") or "0")
+
+    async def cancel(self, session_id: str) -> None:
+        response = await self._client.post(f"{self.base_url}/session/{session_id}/cancel", headers=self._headers)
+        if response.status_code not in {204, 404}:
+            response.raise_for_status()
+
     async def events(self, session_id: str, *, last_event_id: str = "0") -> AsyncIterator[dict[str, Any]]:
         async with self._client.stream("GET", f"{self.base_url}/session/{session_id}/events", headers={**self._headers, "Last-Event-ID": last_event_id}) as response:
             response.raise_for_status()
@@ -97,3 +115,15 @@ class QwenServeClient:
                         continue
                     if isinstance(event, dict):
                         yield event
+
+
+def normalize_event(event: dict[str, Any]) -> dict[str, Any]:
+    """Keep UI-facing state stable while safely retaining unknown daemon frames."""
+    event_type = str(event.get("type") or event.get("event") or "unknown")
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    kind = {
+        "session_update": "assistant_update", "turn_complete": "completion",
+        "turn_error": "failure", "session_died": "worker_death",
+        "client_evicted": "reconnect_required", "permission_request": "permission",
+    }.get(event_type, "unknown")
+    return {"kind": kind, "event_type": event_type, "data": data}

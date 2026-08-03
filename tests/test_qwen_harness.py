@@ -4,7 +4,7 @@ import stat
 import httpx
 import pytest
 
-from src.qwen_harness import QwenHarnessError, QwenServeClient, create_disposable_config
+from src.qwen_harness import QwenHarnessError, QwenServeClient, create_disposable_config, normalize_event
 
 
 def test_disposable_qwen_config_is_private_and_contains_only_bridge_contract(tmp_path):
@@ -38,8 +38,22 @@ async def test_qwen_client_authenticates_capabilities_and_creates_session():
             return httpx.Response(200, json={"features": ["health", "capabilities", "session_create", "session_events", "require_auth"]})
         if request.url.path == "/session":
             return httpx.Response(201, json={"id": "qwen-session"})
+        if request.url.path.endswith("/prompt"):
+            assert json.loads(request.content) == {"prompt": [{"type": "text", "text": "hello"}]}
+            return httpx.Response(202, json={"promptId": "p1", "lastEventId": 7})
+        if request.url.path.endswith("/cancel"):
+            return httpx.Response(204)
         return httpx.Response(404)
     async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as raw:
         client = QwenServeClient("http://127.0.0.1:4170", "daemon-token", client=raw)
         assert (await client.verify_capabilities())["features"][-1] == "require_auth"
         assert await client.create_session(cwd="/read-only", model_service_id="odysseus-bridge") == "qwen-session"
+        assert await client.prompt("qwen-session", "hello") == ("p1", "7")
+        await client.cancel("qwen-session")
+
+
+def test_unknown_qwen_events_are_safe_and_terminal_events_are_normalized():
+    assert normalize_event({"type": "turn_complete", "data": {"stopReason": "end_turn"}})["kind"] == "completion"
+    assert normalize_event({"type": "new_future_event", "data": {"x": 1}}) == {
+        "kind": "unknown", "event_type": "new_future_event", "data": {"x": 1},
+    }
