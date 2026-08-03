@@ -31,6 +31,13 @@ class DisposableQwenConfig:
     server_token: str
 
 
+@dataclass(frozen=True)
+class QwenLaunchSpec:
+    """A reviewable launch contract; executing it remains caller-authorized."""
+    command: tuple[str, ...]
+    environment: dict[str, str]
+
+
 def create_disposable_config(*, root: Path, bridge_url: str, bridge_model: str, ephemeral_bridge_token: str) -> DisposableQwenConfig:
     """Write a 0600 settings file containing only bridge-facing credentials."""
     if not bridge_url.startswith("http://127.0.0.1") and not bridge_url.startswith("http://localhost"):
@@ -48,11 +55,34 @@ def create_disposable_config(*, root: Path, bridge_url: str, bridge_model: str, 
         "memory": {"enabled": False},
         "ui": {"web": False},
     }
-    path = root / "settings.json"
+    qwen_home = home / ".qwen"
+    qwen_home.mkdir(mode=0o700, exist_ok=True)
+    path = qwen_home / "settings.json"
     path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
     os.chmod(path, 0o600)
     # The server token is distinct from the single-use bridge token.
     return DisposableQwenConfig(path, home, token_env_key, secrets.token_urlsafe(32))
+
+
+def build_read_only_launch(*, binary: str, config: DisposableQwenConfig, workspace_root: Path, bridge_token: str, port: int) -> QwenLaunchSpec:
+    """Build, but do not run, the isolated Qwen Serve invocation."""
+    workspace = workspace_root.resolve(strict=True)
+    if port < 1024 or port > 65535:
+        raise ValueError("Qwen Serve port must be unprivileged")
+    environment = {
+        "HOME": str(config.home),
+        "PATH": os.environ.get("PATH", ""),
+        config.token_env_key: bridge_token,
+        "QWEN_SERVER_TOKEN": config.server_token,
+        # Defence in depth against ambient configuration and auto-memory.
+        "QWEN_SERVE_NO_MCP_POOL": "1",
+    }
+    command = (
+        binary, "serve", "--hostname", "127.0.0.1", "--port", str(port),
+        "--workspace", str(workspace), "--no-web", "--require-auth",
+        "--token", config.server_token,
+    )
+    return QwenLaunchSpec(command, environment)
 
 
 class QwenServeClient:

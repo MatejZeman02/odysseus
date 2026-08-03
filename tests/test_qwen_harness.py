@@ -4,7 +4,7 @@ import stat
 import httpx
 import pytest
 
-from src.qwen_harness import QwenHarnessError, QwenServeClient, create_disposable_config, normalize_event
+from src.qwen_harness import QwenHarnessError, QwenServeClient, build_read_only_launch, create_disposable_config, normalize_event
 
 
 def test_disposable_qwen_config_is_private_and_contains_only_bridge_contract(tmp_path):
@@ -13,12 +13,27 @@ def test_disposable_qwen_config_is_private_and_contains_only_bridge_contract(tmp
     )
     payload = json.loads(config.path.read_text())
     assert stat.S_IMODE(config.path.stat().st_mode) == 0o600
+    assert config.path == tmp_path / "worker" / "home" / ".qwen" / "settings.json"
     assert payload["modelProviders"]["openai"][0] == {
         "id": "odysseus-bridge", "baseUrl": "http://127.0.0.1:9191/v1", "envKey": "ODYSSEUS_QWEN_BRIDGE_TOKEN"
     }
     assert "secret" not in config.path.read_text()
     assert payload["tools"]["allowed"] == []
     assert payload["mcpServers"] == {}
+
+
+def test_launch_spec_is_loopback_private_and_only_exposes_ephemeral_bridge_token(tmp_path):
+    config = create_disposable_config(
+        root=tmp_path / "worker", bridge_url="http://127.0.0.1:9191/v1", bridge_model="odysseus-bridge", ephemeral_bridge_token="unused",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    spec = build_read_only_launch(binary="/opt/qwen/bin/qwen", config=config, workspace_root=workspace, bridge_token="ephemeral", port=4170)
+    assert spec.command[:6] == ("/opt/qwen/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170")
+    assert "--no-web" in spec.command and "--require-auth" in spec.command
+    assert spec.environment["HOME"] == str(config.home)
+    assert spec.environment[config.token_env_key] == "ephemeral"
+    assert "provider.example" not in " ".join(spec.command)
 
 
 @pytest.mark.asyncio
