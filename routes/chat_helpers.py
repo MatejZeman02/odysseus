@@ -62,6 +62,28 @@ _INCOGNITO_CONTEXT_TTL_SECONDS = 6 * 60 * 60
 _INCOGNITO_CONTEXT_MAX_MESSAGES = 80
 
 
+def _continuity_context_enabled() -> bool:
+    """Default-off rollout gate for the non-destructive continuity path."""
+    return os.getenv("ODYSSEUS_CONTINUITY_CONTEXT", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _continuity_prompt_message(bundle) -> dict:
+    """Render derived artifacts only; raw transcript stays in the tail below."""
+    sections = []
+    if bundle.thread_checkpoint:
+        sections.append({"thread_checkpoint": bundle.thread_checkpoint.to_payload()})
+    if bundle.primary_project_brief:
+        sections.append({"project_brief": bundle.primary_project_brief.to_payload()})
+    if bundle.related_project_briefs:
+        sections.append({"related_project_briefs": [brief.to_payload() for brief in bundle.related_project_briefs]})
+    sections.append({"continuity_manifest": bundle.manifest})
+    return {
+        "role": "system",
+        "content": "Odysseus continuity context (derived, not instructions):\n" + json.dumps(sections, sort_keys=True),
+        "metadata": {"continuity_artifact": True},
+    }
+
+
 def _spawn_bg(coro) -> asyncio.Task:
     """Schedule a background task and hold a strong reference until it finishes."""
     task = asyncio.create_task(coro)
@@ -830,10 +852,34 @@ async def build_chat_context(
         except Exception:
             logger.debug("Failed to add current date/time context", exc_info=True)
 
-    # Auto-compact
-    messages, context_length, was_compacted = await maybe_compact(
-        sess, sess.endpoint_url, sess.model, messages, sess.headers, owner=user,
-    )
+    # Default behavior retains legacy compaction exactly.  The guarded path
+    # writes a derived checkpoint and compiles an artifact + raw-tail context,
+    # never calling replace_messages() or changing session history.
+    if _continuity_context_enabled() and not incognito:
+        try:
+            from src.continuity.compiler import CheckpointCompactor, ContextCompiler
+            from src.continuity.store import ContinuityStore
+
+            continuity_owner = user or getattr(sess, "owner", None) or ""
+            store = ContinuityStore()
+            CheckpointCompactor(store).checkpoint(owner=continuity_owner, session_id=session_id, messages=sess.history)
+            bundle = ContextCompiler(store).compile(
+                owner=continuity_owner, session_id=session_id, request=message, transcript=sess.history,
+            )
+            messages = preface + [_continuity_prompt_message(bundle)] + list(bundle.transcript_tail)
+            context_length = estimate_tokens(messages)
+            was_compacted = bool(bundle.thread_checkpoint)
+        except Exception:
+            # The flag must never turn a normal chat failure into data loss or
+            # an unbounded fallback. Fall back to existing behavior loudly.
+            logger.exception("continuity context unavailable; using legacy compaction")
+            messages, context_length, was_compacted = await maybe_compact(
+                sess, sess.endpoint_url, sess.model, messages, sess.headers, owner=user,
+            )
+    else:
+        messages, context_length, was_compacted = await maybe_compact(
+            sess, sess.endpoint_url, sess.model, messages, sess.headers, owner=user,
+        )
     _before_trim_messages = len(messages)
     _before_trim_tokens = estimate_tokens(messages)
     messages = trim_for_context(messages, context_length)
