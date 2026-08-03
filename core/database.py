@@ -35,6 +35,25 @@ class TimestampMixin:
     def updated_at(cls):
         return Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False)
 
+
+class Project(TimestampMixin, Base):
+    """Owner-scoped project identity for durable conversation continuity.
+
+    Workspace files remain the source of truth. This row only owns the stable
+    project identity, configured root, and direct related-project allowlist.
+    """
+    __tablename__ = "projects"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    workspace_root = Column(String, nullable=False)
+    settings_json = Column(Text, nullable=False, default="{}")
+
+    __table_args__ = (
+        Index("ix_projects_owner_name", "owner", "name", unique=True),
+    )
+
 # Ensure the writable data directory exists before SQLite connects.
 from src.constants import DATA_DIR, AUTH_FILE, MEMORY_FILE, USER_PREFS_FILE, SETTINGS_FILE
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
@@ -221,6 +240,10 @@ class Session(TimestampMixin, Base):
     total_output_tokens = Column(Integer, default=0)
     mode = Column(String, nullable=True)  # 'agent', 'chat', or 'research'
     crew_member_id = Column(String, nullable=True)  # links to crew_members.id
+    # Stable server-owned continuity binding. Existing rows migrate to
+    # ``general`` and are never inferred from a browser workspace selection.
+    scope_kind = Column(String, nullable=False, default="general")
+    project_id = Column(String, nullable=True, index=True)
 
     # Relationship to chat messages
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -249,7 +272,35 @@ class Session(TimestampMixin, Base):
             'total_input_tokens': self.total_input_tokens or 0,
             'total_output_tokens': self.total_output_tokens or 0,
             'crew_member_id': self.crew_member_id,
+            'scope_kind': self.scope_kind or 'general',
+            'project_id': self.project_id,
         }
+
+
+class ContinuityArtifact(TimestampMixin, Base):
+    """Versioned derived context for one session or one project.
+
+    Artifacts deliberately live outside ``chat_messages``. They may summarize
+    messages, but are never a destructive replacement for raw transcript rows.
+    """
+    __tablename__ = "continuity_artifacts"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    project_id = Column(String, nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)
+    kind = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="active")
+    revision = Column(Integer, nullable=False, default=1)
+    payload_json = Column(Text, nullable=False)
+    source_through_message_id = Column(String, nullable=True)
+    source_hash = Column(String, nullable=False)
+
+    __table_args__ = (
+        Index("ix_continuity_artifacts_session_kind_revision", "session_id", "kind", "revision"),
+        Index("ix_continuity_artifacts_project_kind_revision", "project_id", "kind", "revision"),
+        Index("ix_continuity_artifacts_source", "session_id", "kind", "source_through_message_id", "source_hash"),
+    )
 
 class ChatMessage(Base):
     """
@@ -1891,6 +1942,7 @@ def init_db():
     """
     _migrate_model_endpoints()
     Base.metadata.create_all(bind=engine)
+    _migrate_add_continuity_session_columns()
     # Lock the DB file (and any SQLite sidecars) to 0o600 — it holds bearer-token
     # + bcrypt hashes and encrypted provider keys. POSIX only; safe_chmod no-ops
     # on Windows (ACL-restricted profile dir) and the path helper returns None for
@@ -2084,6 +2136,32 @@ def _migrate_chat_messages_fts():
             conn.close()
         except Exception:
             pass
+
+
+def _migrate_add_continuity_session_columns():
+    """Add non-destructive continuity bindings to existing session tables."""
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "scope_kind" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN scope_kind TEXT NOT NULL DEFAULT 'general'")
+        if "project_id" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_sessions_scope_project ON sessions(scope_kind, project_id)"
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning("continuity session migration failed: %s", e)
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _scrub_legacy_chat_message_fts_media(conn) -> None:
