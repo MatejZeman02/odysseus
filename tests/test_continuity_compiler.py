@@ -20,6 +20,13 @@ def _store(monkeypatch):
     return ContinuityStore()
 
 
+def _add_session(local_session, session_id):
+    db = local_session()
+    db.add(DbSession(id=session_id, owner="alice", name=session_id, endpoint_url="http://x", model="m"))
+    db.commit()
+    db.close()
+
+
 def _message(role, content, number, **metadata):
     return {"role": role, "content": content, "metadata": {"_db_id": f"m{number}", **metadata}}
 
@@ -75,3 +82,30 @@ def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):
         ContextCompiler(store).compile(
             owner="alice", session_id="session", request="continue", transcript=[], related_project_ids=[denied]
         )
+
+
+def test_project_fork_receives_shared_brief_but_not_primary_raw_tail_or_checkpoint(monkeypatch):
+    store = _store(monkeypatch)
+    # Reuse the patched SQLAlchemy factory from the store fixture setup.
+    _add_session(continuity_store_module.SessionLocal, "fork")
+    _add_session(continuity_store_module.SessionLocal, "personal")
+    project = store.create_project(owner="alice", name="Dust", workspace_root="/dust")
+    store.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=project)
+    store.bind_session(owner="alice", session_id="fork", scope_kind="project", project_id=project)
+    store.bind_session(owner="alice", session_id="personal", scope_kind="personal")
+    primary = [_message("user", "Dust final crystal", 1), _message("assistant", "conflict", 2), _message("user", "continue", 3)]
+    CheckpointCompactor(store, tail_count=1).checkpoint(owner="alice", session_id="session", messages=primary)
+    store.write_project_brief(owner="alice", brief=ProjectBriefV1(project_id=project, summary="Dust conflict is unresolved"), source_hash="brief-1")
+
+    fork = ContextCompiler(store, tail_count=1).compile(
+        owner="alice", session_id="fork", request="new fork", transcript=[_message("user", "fork question", 4)]
+    )
+    personal = ContextCompiler(store, tail_count=1).compile(
+        owner="alice", session_id="personal", request="why is lemon acidic?", transcript=[_message("user", "lemon", 5)]
+    )
+    assert fork.thread_checkpoint is None
+    assert fork.primary_project_brief.summary == "Dust conflict is unresolved"
+    assert "Dust final crystal" not in str(fork.transcript_tail)
+    assert personal.primary_project_brief is None
+    assert personal.related_project_briefs == ()
+    assert "Dust" not in str(personal.manifest)
