@@ -211,6 +211,12 @@ class TestMatchProviderCurated:
     def test_kimi_code_url(self):
         assert _match_provider_curated("https://api.kimi.com/coding/v1", "openai") == "kimi-code"
 
+    def test_fal_url_has_its_own_curated_list(self):
+        assert _match_provider_curated("https://fal.run/openrouter/router/openai/v1", "fal") == "fal"
+
+    def test_fal_lookalike_does_not_match_curated_list(self):
+        assert _match_provider_curated("https://fal.run.evil.example/v1", "openai") == "openai"
+
     def test_no_url_match_returns_provider(self):
         assert _match_provider_curated("https://localhost:1234", "openai") == "openai"
 
@@ -595,6 +601,20 @@ class TestSetupProbeSafety:
         monkeypatch.setattr(model_routes.httpx, "get", fake_get)
 
         assert _probe_endpoint("https://api.groq.com/openai/v1") == _PROVIDER_CURATED["groq"]
+
+    def test_fal_probe_uses_only_its_curated_fallback(self, monkeypatch):
+        monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)
+        monkeypatch.setattr(model_routes, "_normalize_base", lambda url: url.rstrip("/"))
+        seen = []
+
+        def fake_get(url, headers=None, timeout=None, verify=None, **kwargs):
+            seen.append(url)
+            raise httpx.ConnectError("offline")
+
+        monkeypatch.setattr(model_routes.httpx, "get", fake_get)
+
+        assert _probe_endpoint("https://fal.run/openrouter/router/openai/v1") == _PROVIDER_CURATED["fal"]
+        assert seen == ["https://fal.run/openrouter/router/openai/v1/models"]
 
     def test_google_probe_uses_native_paginated_models_api(self, monkeypatch):
         monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)

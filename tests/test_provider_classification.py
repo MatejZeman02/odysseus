@@ -35,6 +35,7 @@ class TestDetectProvider:
         ("https://api.anthropic.com/v1", "anthropic"),
         ("https://anthropic.com/v1", "anthropic"),
         ("https://openrouter.ai/api/v1", "openrouter"),
+        ("https://fal.run/openrouter/router/openai/v1", "fal"),
         ("https://api.groq.com/openai/v1", "groq"),
         ("https://integrate.api.nvidia.com/v1", "nvidia"),
         ("http://localhost:11434/api", "ollama"),
@@ -61,6 +62,9 @@ class TestDetectProvider:
         # The provider domain appears only in the path, not the host.
         assert _detect_provider("https://proxy.example.com/anthropic.com/v1") == "openai"
 
+    def test_fal_lookalike_host_is_not_matched(self):
+        assert _detect_provider("https://fal.run.evil.example/v1") == "openai"
+
     def test_trailing_dot_host_still_matches(self):
         # A fully-qualified host with a trailing dot is still that host.
         assert _detect_provider("https://api.anthropic.com./v1") == "anthropic"
@@ -80,6 +84,7 @@ class TestProviderLabel:
         ("https://api.x.ai/v1", "xAI"),
         ("https://api.openai.com/v1", "OpenAI"),
         ("https://openrouter.ai/api/v1", "OpenRouter"),
+        ("https://fal.run/openrouter/router/openai/v1", "FAL"),
         ("https://api.groq.com/openai/v1", "Groq"),
         ("https://integrate.api.nvidia.com/v1", "NVIDIA"),
         ("https://api.mistral.ai/v1", "Mistral"),

@@ -198,6 +198,7 @@ def setup_webhook_routes(
         "fireworks": "https://api.fireworks.ai/inference/v1",
         "venice": "https://api.venice.ai/api/v1",
         "kimi-code": "https://api.kimi.com/coding/v1",
+        "kimicode": "https://api.kimi.com/coding/v1",
         "fal": "https://fal.run/openrouter/router/openai/v1",
         "fal.ai": "https://fal.run/openrouter/router/openai/v1",
     }

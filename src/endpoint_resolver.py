@@ -293,7 +293,7 @@ def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
         from src.chatgpt_subscription import chatgpt_headers
         return chatgpt_headers(api_key)
     if api_key:
-        if "fal.run" in base.lower() or "fal.ai" in base.lower() or api_key.startswith("Key ") or provider == "fal":
+        if provider == "fal":
             # Strip common env-var prefixes users paste by mistake
             fal_key = api_key
             for prefix in ("FAL_KEY=", "fal_key=", "FAL_KEY_SECRET=", "fal_key_secret="):

@@ -373,7 +373,8 @@ _PROVIDER_CURATED = {
     ],
     "fal": [
         "google/gemini-2.5-flash", "google/gemini-2.5-pro", "deepseek/deepseek-r1",
-        "deepseek/deepseek-chat", "openai/gpt-4o", "meta-llama/llama-3.3-70b-instruct",
+        "deepseek/deepseek-chat", "deepseek/deepseek-v4-flash", "openai/gpt-4o",
+        "meta-llama/llama-3.3-70b-instruct",
     ],
 }
 
@@ -396,8 +397,8 @@ _HOST_TO_CURATED = (
     ("nvidia.com", "nvidia"),
     ("openrouter.ai", "openrouter"),
     ("ollama.com", "ollama"),
-    ("fal.run", "openrouter"),
-    ("fal.ai", "openrouter"),
+    ("fal.run", "fal"),
+    ("fal.ai", "fal"),
 )
 
 
@@ -1031,30 +1032,12 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
         if e.response is not None and _is_loading_model_response(e.response):
             logger.info("Endpoint still loading model at %s", _redact_url_for_log(url))
             return []
-        if "fal.run" in base.lower() or "fal.ai" in base.lower():
-            try:
-                r = httpx.get("https://openrouter.ai/api/v1/models", timeout=timeout, verify=llm_verify())
-                if r.status_code == 200:
-                    models = _openai_model_ids(r.json())
-                    if models:
-                        return [m for m in models if _is_chat_model(m)]
-            except Exception as _fe:
-                logger.warning("FAL fallback failed: %s", _fe)
         if api_key:
             status = e.response.status_code if e.response is not None else "unknown"
             logger.warning("Failed to probe %s with API key: HTTP %s", _redact_url_for_log(url), status)
             return []
         logger.warning("Failed to probe %s: %s", _redact_url_for_log(url), e)
     except Exception as e:
-        if "fal.run" in base.lower() or "fal.ai" in base.lower():
-            try:
-                r = httpx.get("https://openrouter.ai/api/v1/models", timeout=timeout, verify=llm_verify())
-                if r.status_code == 200:
-                    models = _openai_model_ids(r.json())
-                    if models:
-                        return [m for m in models if _is_chat_model(m)]
-            except Exception as _fe:
-                logger.warning("FAL fallback failed: %s", _fe)
         if api_key:
             logger.warning("Failed to probe %s with API key: %s", _redact_url_for_log(url), e)
             return []
@@ -1080,15 +1063,6 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
     if fallback:
         logger.info(f"Using curated fallback for {curated_key}: {fallback}")
         return list(fallback)
-    if "fal.run" in base.lower() or "fal.ai" in base.lower():
-        try:
-            r = httpx.get("https://openrouter.ai/api/v1/models", timeout=timeout, verify=llm_verify())
-            if r.status_code == 200:
-                models = _openai_model_ids(r.json())
-                if models:
-                    return [m for m in models if _is_chat_model(m)]
-        except Exception as e:
-            logger.warning("FAL OpenRouter model list fallback failed: %s", e)
     return []
 
 

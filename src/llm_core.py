@@ -863,6 +863,8 @@ def _detect_provider(url: str) -> str:
         return "opencode-zen"
     if _host_match(url, "openrouter.ai"):
         return "openrouter"
+    if _host_match(url, "fal.run") or _host_match(url, "fal.ai"):
+        return "fal"
     if _host_match(url, "groq.com"):
         return "groq"
     if _host_match(url, "nvidia.com"):
@@ -1002,6 +1004,7 @@ def _provider_label(url: str) -> str:
     if _host_match(url, "x.ai"): return "xAI"
     if _host_match(url, "openai.com"): return "OpenAI"
     if _host_match(url, "openrouter.ai"): return "OpenRouter"
+    if _host_match(url, "fal.run") or _host_match(url, "fal.ai"): return "FAL"
     if _host_match(url, "opencode.ai/zen/go"): return "OpenCode Go"
     if _host_match(url, "opencode.ai/zen"): return "OpenCode Zen"
     if _host_match(url, "groq.com"): return "Groq"
