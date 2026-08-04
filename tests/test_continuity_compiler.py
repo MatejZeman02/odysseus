@@ -102,10 +102,12 @@ def test_project_fork_receives_shared_brief_but_not_primary_raw_tail_or_checkpoi
     # Reuse the patched SQLAlchemy factory from the store fixture setup.
     _add_session(continuity_store_module.SessionLocal, "fork")
     _add_session(continuity_store_module.SessionLocal, "personal")
+    _add_session(continuity_store_module.SessionLocal, "computer")
     project = store.create_project(owner="alice", name="Dust", workspace_root="/dust")
     store.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=project)
     store.bind_session(owner="alice", session_id="fork", scope_kind="project", project_id=project)
     store.bind_session(owner="alice", session_id="personal", scope_kind="personal")
+    store.bind_session(owner="alice", session_id="computer", scope_kind="computer")
     primary = [_message("user", "Dust final crystal", 1), _message("assistant", "conflict", 2), _message("user", "continue", 3)]
     CheckpointCompactor(store, tail_count=1).checkpoint(owner="alice", session_id="session", messages=primary)
     store.write_project_brief(owner="alice", brief=ProjectBriefV1(project_id=project, summary="Dust conflict is unresolved"), source_hash="brief-1")
@@ -116,9 +118,15 @@ def test_project_fork_receives_shared_brief_but_not_primary_raw_tail_or_checkpoi
     personal = ContextCompiler(store, tail_count=1).compile(
         owner="alice", session_id="personal", request="why is lemon acidic?", transcript=[_message("user", "lemon", 5)]
     )
+    computer = ContextCompiler(store, tail_count=1).compile(
+        owner="alice", session_id="computer", request="diagnose display", transcript=[_message("user", "display", 6)]
+    )
     assert fork.thread_checkpoint is None
     assert fork.primary_project_brief.summary == "Dust conflict is unresolved"
     assert "Dust final crystal" not in str(fork.transcript_tail)
     assert personal.primary_project_brief is None
     assert personal.related_project_briefs == ()
     assert "Dust" not in str(personal.manifest)
+    assert computer.primary_project_brief is None
+    assert computer.related_project_briefs == ()
+    assert "Dust" not in str(computer.manifest)

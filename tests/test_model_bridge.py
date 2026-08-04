@@ -20,7 +20,9 @@ async def test_bridge_uses_exact_owner_route_and_hides_provider_credentials():
         resolver=lambda endpoint_id, model, owner: ("https://provider.test/v1/chat/completions", model, {"Authorization": "Bearer secret"}),
         client_factory=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs),
     )
-    route = bridge.issue_route(owner="alice", endpoint_id="endpoint-a", model="fixed-model")
+    route = bridge.issue_route(owner="alice", endpoint_id="endpoint-a", model="fixed-model", run_id="run-1")
+    assert route.run_id == "run-1"
+    assert route.token != route.run_id
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bridge.app), base_url="http://bridge") as client:
         response = await client.post(
             "/v1/chat/completions", headers={"Authorization": f"Bearer {route.token}", "X-Provider-Key": "leak"},
@@ -40,7 +42,7 @@ async def test_bridge_uses_exact_owner_route_and_hides_provider_credentials():
 async def test_bridge_refuses_expired_or_model_drift_routes():
     bridge = ModelBridge(resolver=lambda *args, **kwargs: None)
     expired = bridge.issue_route(owner="alice", endpoint_id="endpoint-a", model="fixed-model", ttl_seconds=1)
-    bridge._routes[expired.token] = expired.__class__(expired.token, expired.run_id, expired.owner, expired.endpoint_id, expired.model, 0, 1)
+    bridge._routes[expired.token] = expired.__class__(expired.run_id, expired.token, expired.owner, expired.endpoint_id, expired.model, 0, 1)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bridge.app), base_url="http://bridge") as client:
         response = await client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {expired.token}"}, json={})
     assert response.status_code == 401

@@ -111,8 +111,9 @@ class QwenSupervisor:
         process = await asyncio.create_subprocess_exec(
             *command, env={}, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         )
-        raw_client = httpx.AsyncClient(timeout=None)
-        client = QwenServeClient(f"http://127.0.0.1:{port}", config.server_token, client=raw_client)
+        client = QwenServeClient(
+            f"http://127.0.0.1:{port}", config.server_token, timeout=None,
+        )
         runtime = QwenRuntime(process, client, root)
         runtime.log_task = asyncio.create_task(self._drain_logs(runtime))
         self.runtime = runtime
@@ -138,18 +139,34 @@ class QwenSupervisor:
         prompt_id, cursor = await self.runtime.client.prompt(session_id, prompt)
         answer_parts: list[str] = []
         terminal: Optional[dict] = None
-        async with asyncio.timeout(timeout):
-            async for event in self.runtime.client.events(session_id, last_event_id=cursor):
-                event_type = str(event.get("type") or event.get("event") or "unknown")
-                if event_type == "session_update":
-                    update = ((event.get("data") or {}).get("update") or {})
-                    if update.get("sessionUpdate") == "agent_message_chunk":
-                        content = update.get("content") or {}
-                        if isinstance(content, dict) and content.get("text"):
-                            answer_parts.append(str(content["text"]))
-                if event_type in {"turn_complete", "turn_error", "session_died", "client_evicted"}:
-                    terminal = event
-                    break
+        seen_event_ids: set[str] = set()
+        try:
+            async with asyncio.timeout(timeout):
+                # A cleanly dropped SSE connection is retried from its last
+                # replay cursor. Duplicate replay frames never duplicate text.
+                for _attempt in range(3):
+                    async for event in self.runtime.client.events(session_id, last_event_id=cursor):
+                        event_id = str(event.get("_sse_id") or event.get("id") or "")
+                        if event_id:
+                            cursor = event_id
+                            if event_id in seen_event_ids:
+                                continue
+                            seen_event_ids.add(event_id)
+                        event_type = str(event.get("type") or event.get("event") or "unknown")
+                        if event_type == "session_update":
+                            update = ((event.get("data") or {}).get("update") or {})
+                            if update.get("sessionUpdate") == "agent_message_chunk":
+                                content = update.get("content") or {}
+                                if isinstance(content, dict) and content.get("text"):
+                                    answer_parts.append(str(content["text"]))
+                        if event_type in {"turn_complete", "turn_error", "session_died", "client_evicted"}:
+                            terminal = event
+                            break
+                    if terminal:
+                        break
+        except (asyncio.CancelledError, TimeoutError):
+            await self.runtime.client.cancel(session_id)
+            raise
         if not terminal or terminal.get("type") != "turn_complete":
             raise QwenHarnessError(f"Qwen turn failed: {(terminal or {}).get('type', 'missing terminal event')}")
         if ((terminal.get("data") or {}).get("stopReason")) != "end_turn":
@@ -168,7 +185,7 @@ class QwenSupervisor:
             await runtime.process.wait()
         if runtime.log_task:
             await runtime.log_task
-        await runtime.client._client.aclose()
+        await runtime.client.close()
         shutil.rmtree(runtime.root, ignore_errors=True)
 
     @staticmethod

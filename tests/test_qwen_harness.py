@@ -79,6 +79,22 @@ async def test_qwen_client_authenticates_capabilities_and_creates_session():
         await client.cancel("qwen-session")
 
 
+@pytest.mark.asyncio
+async def test_qwen_event_stream_sends_and_advances_replay_cursor():
+    def daemon(request):
+        assert request.headers["last-event-id"] == "7"
+        return httpx.Response(200, text=(
+            'id: 8\n'
+            'data: {"type":"session_update","data":{}}\n\n'
+            'id: 9\n'
+            'data: {"type":"turn_complete","data":{"stopReason":"end_turn"}}\n\n'
+        ), headers={"content-type": "text/event-stream"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as raw:
+        client = QwenServeClient("http://127.0.0.1:4170", "token", client=raw)
+        events = [event async for event in client.events("session", last_event_id="7")]
+    assert [event["_sse_id"] for event in events] == ["8", "9"]
+
+
 def test_unknown_qwen_events_are_safe_and_terminal_events_are_normalized():
     assert normalize_event({"type": "turn_complete", "data": {"stopReason": "end_turn"}})["kind"] == "completion"
     assert normalize_event({"type": "new_future_event", "data": {"x": 1}}) == {

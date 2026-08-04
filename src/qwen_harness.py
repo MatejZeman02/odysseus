@@ -108,12 +108,16 @@ def build_read_only_launch(*, binary: str, config: DisposableQwenConfig, workspa
 
 
 class QwenServeClient:
-    def __init__(self, base_url: str, token: str, *, client: httpx.AsyncClient | None = None):
+    def __init__(
+        self, base_url: str, token: str, *,
+        client: httpx.AsyncClient | None = None,
+        timeout: float | None = 30.0,
+    ):
         if not base_url.startswith("http://127.0.0.1") and not base_url.startswith("http://localhost"):
             raise ValueError("Qwen Serve must be loopback-only")
         self.base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}"}
-        self._client = client or httpx.AsyncClient(timeout=30.0)
+        self._client = client or httpx.AsyncClient(timeout=timeout)
         self._owned_client = client is None
 
     async def close(self) -> None:
@@ -163,13 +167,18 @@ class QwenServeClient:
     async def events(self, session_id: str, *, last_event_id: str = "0") -> AsyncIterator[dict[str, Any]]:
         async with self._client.stream("GET", f"{self.base_url}/session/{session_id}/events", headers={**self._headers, "Last-Event-ID": last_event_id}) as response:
             response.raise_for_status()
+            sse_id: str | None = None
             async for line in response.aiter_lines():
+                if line.startswith("id:"):
+                    sse_id = line[3:].strip()
                 if line.startswith("data:"):
                     try:
                         event = json.loads(line[5:].strip())
                     except json.JSONDecodeError:
                         continue
                     if isinstance(event, dict):
+                        if sse_id is not None and "_sse_id" not in event:
+                            event["_sse_id"] = sse_id
                         yield event
 
 

@@ -42,7 +42,15 @@ class ModelBridge:
     def issue_route(self, *, owner: str, endpoint_id: str, model: str, run_id: str | None = None, ttl_seconds: int = 600, request_budget: int = 1) -> BridgeRoute:
         if not owner or not endpoint_id or not model or ttl_seconds < 1 or request_budget < 1:
             raise ValueError("owner, endpoint_id, model, and positive ttl are required")
-        route = BridgeRoute(secrets.token_urlsafe(32), run_id or secrets.token_urlsafe(12), owner, endpoint_id, model, time.monotonic() + ttl_seconds, request_budget)
+        route = BridgeRoute(
+            run_id or secrets.token_urlsafe(12),
+            secrets.token_urlsafe(32),
+            owner,
+            endpoint_id,
+            model,
+            time.monotonic() + ttl_seconds,
+            request_budget,
+        )
         self._routes[route.token] = route
         return route
 
