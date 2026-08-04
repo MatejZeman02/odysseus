@@ -52,11 +52,24 @@ def test_checkpoint_preserves_raw_transcript_and_keeps_tool_trace_atomic(monkeyp
     assert transcript == before
     assert checkpoint.source_message_ids == ["m1", "m2"]
 
+    repeated = CheckpointCompactor(store, tail_count=2).checkpoint(
+        owner="alice", session_id="session", messages=transcript,
+    )
+    assert repeated.source_hash == checkpoint.source_hash
+
+    extended = transcript + [_message("user", "new work", 6), _message("assistant", "new result", 7)]
+    next_checkpoint = CheckpointCompactor(store, tail_count=2).checkpoint(
+        owner="alice", session_id="session", messages=extended,
+        derive=lambda _: {"objective": "only newly eligible messages"},
+    )
+    assert next_checkpoint.source_message_ids == ["m3", "m4", "m5"]
+    assert next_checkpoint.objective == "only newly eligible messages"
+
     bundle = ContextCompiler(store, tail_count=2).compile(
         owner="alice", session_id="session", request="continue", transcript=transcript
     )
     assert [message["metadata"]["_db_id"] for message in bundle.transcript_tail] == ["m3", "m4", "m5"]
-    assert bundle.thread_checkpoint.objective == "keep the previous answer"
+    assert bundle.thread_checkpoint.objective == "only newly eligible messages"
 
 
 def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):

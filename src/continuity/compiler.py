@@ -63,9 +63,17 @@ class CheckpointCompactor:
     ) -> Optional[ThreadCheckpointV1]:
         transcript = [_message_dict(message) for message in messages]
         start = _tail_start(transcript, self.tail_count)
-        source = transcript[:start]
+        previous = self.store.latest_thread_checkpoint(owner=owner, session_id=session_id)
+        source_start = 0
+        if previous and previous.source_through_message_id:
+            ids = [str(item["metadata"].get("_db_id") or "") for item in transcript]
+            try:
+                source_start = ids.index(previous.source_through_message_id) + 1
+            except ValueError as exc:
+                raise ValueError("prior checkpoint cursor is absent from the raw transcript") from exc
+        source = transcript[source_start:start]
         if not source:
-            return None
+            return previous
         source_ids = [str(item["metadata"].get("_db_id") or "") for item in source]
         if not all(source_ids):
             raise ValueError("checkpoint source messages require durable _db_id metadata")
