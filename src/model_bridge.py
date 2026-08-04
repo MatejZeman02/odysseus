@@ -5,6 +5,8 @@ from __future__ import annotations
 import secrets
 import time
 import json
+import asyncio
+import socket
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -96,3 +98,41 @@ class ModelBridge:
         finally:
             await upstream.aclose()
             await client.aclose()
+
+
+class ModelBridgeRuntime:
+    """Owns the dedicated loopback listener; never joins the public app router."""
+
+    def __init__(self, bridge: ModelBridge):
+        self.bridge = bridge
+        self._server = None
+        self._task = None
+        self._socket = None
+        self.base_url: Optional[str] = None
+
+    async def start(self) -> str:
+        if self._task:
+            raise RuntimeError("ModelBridge runtime is already active")
+        import uvicorn
+
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(128)
+        port = sock.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(
+            self.bridge.app, log_level="warning", lifespan="off",
+        ))
+        self._socket = sock
+        self._server = server
+        self._task = asyncio.create_task(server.serve(sockets=[sock]))
+        self.base_url = f"http://127.0.0.1:{port}/v1"
+        await asyncio.sleep(0)
+        return self.base_url
+
+    async def stop(self) -> None:
+        if self._server:
+            self._server.should_exit = True
+        if self._task:
+            await self._task
+        self._server = self._task = self._socket = None
+        self.base_url = None

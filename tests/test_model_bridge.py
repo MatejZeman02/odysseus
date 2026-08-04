@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from src.model_bridge import ModelBridge
+from src.model_bridge import ModelBridge, ModelBridgeRuntime
 
 
 @pytest.mark.asyncio
@@ -58,3 +58,16 @@ async def test_bridge_rejects_non_loopback_and_oversized_requests():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bridge.app), base_url="http://bridge") as client:
         response = await client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {route.token}"}, content=b'{"long":true}')
     assert response.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_bridge_runtime_owns_a_dedicated_loopback_listener():
+    runtime = ModelBridgeRuntime(ModelBridge())
+    base_url = await runtime.start()
+    try:
+        assert base_url.startswith("http://127.0.0.1:")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{base_url}/chat/completions", json={})
+        assert response.status_code == 401
+    finally:
+        await runtime.stop()
