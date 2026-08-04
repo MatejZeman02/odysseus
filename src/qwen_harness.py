@@ -130,10 +130,14 @@ class QwenServeClient:
             raise QwenHarnessError(f"Qwen Serve lacks required read-only capabilities: {sorted(missing)}")
         return payload
 
-    async def create_session(self, *, cwd: str, model_service_id: str) -> str:
-        response = await self._client.post(f"{self.base_url}/session", headers=self._headers, json={"cwd": cwd, "modelServiceId": model_service_id})
+    async def create_session(self, *, cwd: str, model_service_id: str | None = None) -> str:
+        body: dict[str, str] = {"cwd": cwd, "sessionScope": "thread"}
+        if model_service_id:
+            body["modelServiceId"] = model_service_id
+        response = await self._client.post(f"{self.base_url}/session", headers=self._headers, json=body)
         response.raise_for_status()
-        session_id = response.json().get("id")
+        payload = response.json()
+        session_id = payload.get("sessionId") or payload.get("id")
         if not session_id:
             raise QwenHarnessError("Qwen Serve returned no session id")
         return str(session_id)
