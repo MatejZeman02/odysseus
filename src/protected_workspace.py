@@ -23,6 +23,14 @@ class WorkspaceSnapshot:
     files: dict[str, str]
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
     root = root.resolve(strict=True)
     if not (root / ".git").exists():
@@ -33,7 +41,7 @@ def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
     for path in root.rglob("*"):
         if ".git" in path.parts or not path.is_file():
             continue
-        files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        files[str(path.relative_to(root))] = _file_sha256(path)
     return WorkspaceSnapshot(str(root), head, status, files)
 
 

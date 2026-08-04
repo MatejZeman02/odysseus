@@ -24,6 +24,14 @@ def test_read_only_runner_returns_stable_snapshot(workspace):
     assert snapshot == snapshot_workspace(workspace)
 
 
+def test_snapshot_streams_large_files_without_read_bytes(workspace, monkeypatch):
+    large = workspace / "large.bin"
+    large.write_bytes(b"x" * (2 * 1024 * 1024 + 17))
+    monkeypatch.setattr(type(large), "read_bytes", lambda self: (_ for _ in ()).throw(AssertionError("unbounded read")))
+    snapshot = snapshot_workspace(workspace)
+    assert len(snapshot.files["large.bin"]) == 64
+
+
 def test_read_only_runner_detects_a_file_mutation(workspace):
     with pytest.raises(WorkspaceMutationError):
         run_read_only(workspace, lambda: (workspace / "note.md").write_text("changed\n"))
