@@ -181,6 +181,7 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
     "/api/memory/audit",    # retains own 120s LLM inactivity timeout
+    "/api/g1/project-turn", # supervised Qwen turn has its own bounded deadlines
 )
 
 
@@ -861,6 +862,11 @@ app.include_router(setup_contacts_routes())
 
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
+
+# Experimental project continuity worker. The route itself remains invisible
+# unless ODYSSEUS_QWEN_HARNESS is explicitly enabled by the local operator.
+from routes.g1_continuity_routes import setup_g1_continuity_routes
+app.include_router(setup_g1_continuity_routes(session_manager))
 
 # ========= ROUTES (kept in app.py) =========
 
