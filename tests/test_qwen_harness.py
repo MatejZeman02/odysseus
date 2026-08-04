@@ -37,8 +37,8 @@ def test_launch_spec_is_loopback_private_and_only_exposes_ephemeral_bridge_token
     assert spec.command[:6] == ("/opt/qwen/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170")
     assert "--no-web" in spec.command and "--require-auth" in spec.command
     assert "--safe-mode" in spec.command
-    assert spec.command[spec.command.index("--approval-mode") + 1] == "plan"
-    assert spec.command[spec.command.index("--auth-type") + 1] == "openai"
+    assert spec.command[spec.command.index("--max-sessions") + 1] == "1"
+    assert spec.command[spec.command.index("--max-pending-prompts-per-session") + 1] == "1"
     assert spec.environment["HOME"] == str(config.home)
     assert spec.environment[config.token_env_key] == "ephemeral"
     assert spec.environment["OPENAI_API_KEY"] == "ephemeral"

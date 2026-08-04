@@ -101,8 +101,8 @@ def build_read_only_launch(*, binary: str, config: DisposableQwenConfig, workspa
     command = (
         binary, "serve", "--hostname", "127.0.0.1", "--port", str(port),
         "--workspace", str(workspace), "--no-web", "--require-auth",
-        "--safe-mode", "--approval-mode", "plan",
-        "--auth-type", "openai", "--model", config.bridge_model,
+        "--safe-mode", "--max-sessions", "1", "--max-pending-prompts-per-session", "1",
+        "--prompt-deadline-ms", "120000", "--rate-limit",
     )
     return QwenLaunchSpec(command, environment)
 
