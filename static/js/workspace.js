@@ -14,6 +14,10 @@ const API_BASE = window.location.origin;
 const _FOLDER_SVG = '<svg class="workspace-row-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
 let _modal = null;
 let _curPath = '';
+let _projectReadOnly = false;
+let _selectionHandler = null;
+let _cancelHandler = null;
+let _browserMode = 'workspace';
 
 export function getWorkspace() {
   return Storage.get(KEYS.WORKSPACE, '') || '';
@@ -41,7 +45,9 @@ export function syncWorkspaceIndicator(path) {
   if (pill) {
     pill.style.display = (path && !chat) ? '' : 'none';
     pill.classList.toggle('active', !!path);
-    if (path) pill.title = `Workspace: ${path}\nFile tools are confined here; shell commands start here but are not sandboxed and can reach outside it.\nClick to clear.`;
+    if (path) pill.title = _projectReadOnly
+      ? `Project workspace: ${path}\nQwen receives this checkout as a read-only mount.\nClick to clear.`
+      : `Workspace: ${path}\nFile tools are confined here; shell commands start here but are not sandboxed and can reach outside it.\nClick to clear.`;
   }
   if (name) name.textContent = path ? _basename(path) : '';
   if (overflow) {
@@ -57,7 +63,8 @@ export function applyMode(_mode) {
   syncWorkspaceIndicator(getWorkspace());
 }
 
-export function setWorkspace(path) {
+export function setWorkspace(path, options = {}) {
+  _projectReadOnly = !!options.projectReadOnly;
   if (path) Storage.set(KEYS.WORKSPACE, path);
   else Storage.remove(KEYS.WORKSPACE);
   syncWorkspaceIndicator(path || '');
@@ -161,8 +168,8 @@ function _getModal() {
       </div>
     </div>`;
   document.body.appendChild(_modal);
-  _modal.querySelector('#workspace-close').addEventListener('click', closeWorkspaceBrowser);
-  _modal.querySelector('#workspace-cancel').addEventListener('click', closeWorkspaceBrowser);
+  _modal.querySelector('#workspace-close').addEventListener('click', () => closeWorkspaceBrowser());
+  _modal.querySelector('#workspace-cancel').addEventListener('click', () => closeWorkspaceBrowser());
   // Editable path bar: Enter navigates to a typed/pasted folder.
   _modal.querySelector('#workspace-cur-path').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -171,10 +178,18 @@ function _getModal() {
       if (v) _navigate(v);
     }
   });
-  _modal.querySelector('#workspace-use').addEventListener('click', () => {
-    setWorkspace(_curPath);
-    if (uiModule && uiModule.showToast) uiModule.showToast(`Workspace set: ${_basename(_curPath)}`);
-    closeWorkspaceBrowser();
+  _modal.querySelector('#workspace-use').addEventListener('click', async () => {
+    const selected = _curPath;
+    const handler = _selectionHandler;
+    _selectionHandler = null;
+    _cancelHandler = null;
+    _modal.style.display = 'none';
+    if (handler) {
+      await handler(selected);
+      return;
+    }
+    setWorkspace(selected);
+    if (uiModule && uiModule.showToast) uiModule.showToast(`Workspace set: ${_basename(selected)}`);
   });
   const content = _modal.querySelector('.modal-content');
   const header = _modal.querySelector('.modal-header');
@@ -182,11 +197,22 @@ function _getModal() {
   return _modal;
 }
 
-export async function openWorkspaceBrowser() {
+export async function openWorkspaceBrowser(options = {}) {
   const modal = _getModal();
+  _selectionHandler = typeof options.onSelect === 'function' ? options.onSelect : null;
+  _cancelHandler = typeof options.onCancel === 'function' ? options.onCancel : null;
+  _browserMode = options.mode === 'project' ? 'project' : 'workspace';
+  const title = modal.querySelector('.modal-header h4');
+  const note = modal.querySelector('.workspace-note');
+  const use = modal.querySelector('#workspace-use');
+  if (title) title.lastChild.textContent = _browserMode === 'project' ? 'Select project Git checkout' : 'Select workspace';
+  if (note) note.textContent = _browserMode === 'project'
+    ? 'Choose the Git checkout this project may read. The saved project binding is server-owned; Qwen mounts it read-only.'
+    : 'File tools are confined to this folder. Shell commands start here but are not sandboxed and can reach outside it. A workspace scopes the tools; it is not a security boundary.';
+  if (use) use.textContent = _browserMode === 'project' ? 'Use for project' : 'Use this folder';
   modal.style.display = 'flex';
   try {
-    _render(await _load(getWorkspace() || ''));
+    _render(await _load(options.initialPath || (_browserMode === 'workspace' ? getWorkspace() : '') || ''));
   } catch (e) {
     if (uiModule && uiModule.showError) uiModule.showError('Could not browse folders');
   }
@@ -194,6 +220,10 @@ export async function openWorkspaceBrowser() {
 
 export function closeWorkspaceBrowser() {
   if (_modal) _modal.style.display = 'none';
+  const onCancel = _cancelHandler;
+  _selectionHandler = null;
+  _cancelHandler = null;
+  if (onCancel) onCancel();
 }
 
 export function initWorkspace() {
@@ -205,4 +235,4 @@ export function initWorkspace() {
   if (pill) pill.addEventListener('click', clearWorkspace);
 }
 
-export default { initWorkspace, openWorkspaceBrowser, getWorkspace, setWorkspace, vetAndSetWorkspace, clearWorkspace, syncWorkspaceIndicator, applyMode };
+export default { initWorkspace, openWorkspaceBrowser, closeWorkspaceBrowser, getWorkspace, setWorkspace, vetAndSetWorkspace, clearWorkspace, syncWorkspaceIndicator, applyMode };

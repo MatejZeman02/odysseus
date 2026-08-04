@@ -8,7 +8,14 @@
  */
 export function initSectionCollapse(Storage) {
   const _chevronHtml = '<button type="button" class="section-collapse-btn" title="Collapse section"><svg class="section-collapse-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>';
-  const savedState = Storage.getJSON('section-collapsed') || {};
+  const collapseKey = Storage.KEYS.SIDEBAR_COLLAPSED;
+  const savedState = Storage.getJSON(collapseKey) || {};
+  // Chats are the primary navigation surface and should always be ready on
+  // launch. Other sections continue to remember the user's collapse choice.
+  if (savedState['sessions-section']) {
+    delete savedState['sessions-section'];
+    Storage.setJSON(collapseKey, savedState);
+  }
 
   document.querySelectorAll('.section .section-header-flex').forEach(header => {
     const section = header.closest('.section');
@@ -21,16 +28,18 @@ export function initSectionCollapse(Storage) {
     header.insertAdjacentHTML('beforeend', _chevronHtml);
 
     // Restore saved state
-    if (savedState[section.id]) {
+    if (section.id !== 'sessions-section' && savedState[section.id]) {
       section.classList.add('collapsed');
+    } else if (section.id === 'sessions-section') {
+      section.classList.remove('collapsed');
     }
 
     function toggleCollapse() {
       const wasCollapsed = section.classList.contains('collapsed');
       const willCollapse = !wasCollapsed;
-      const state = Storage.getJSON('section-collapsed') || {};
+      const state = Storage.getJSON(collapseKey) || {};
       state[section.id] = willCollapse;
-      Storage.setJSON('section-collapsed', state);
+      Storage.setJSON(collapseKey, state);
 
       // Always clear any in-flight animation classes from a previous toggle
       // so back-to-back clicks restart cleanly. Bump a generation token so

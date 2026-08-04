@@ -29,7 +29,7 @@ from routes.session_routes import _verify_session_owner
 from routes.document_helpers import _owner_session_filter
 from core.database import SessionLocal, get_session_mode, set_session_mode
 from core.database import Session as DBSession, ChatMessage as DBChatMessage
-from core.database import Document as DBDocument, ModelEndpoint
+from core.database import Document as DBDocument, ModelEndpoint, Project
 from core.log_safety import redact_url
 from routes.research_routes import _resolve_research_endpoint
 from routes.model_routes import _visible_models
@@ -54,6 +54,21 @@ logger = logging.getLogger(__name__)
 
 # Track active streams for partial-save safety net
 _active_streams: Dict[str, dict] = {}
+
+
+def _qwen_project_harness_enabled(owner: str | None, session_id: str) -> bool:
+    """Return the durable harness choice without trusting browser toggle state."""
+    if not owner or not session_id:
+        return False
+    db = SessionLocal()
+    try:
+        row = db.query(DBSession.scope_kind, DBSession.harness_kind).filter(
+            DBSession.id == session_id,
+            DBSession.owner == owner,
+        ).first()
+        return bool(row and row.scope_kind == "project" and row.harness_kind == "qwen")
+    finally:
+        db.close()
 
 
 def _stream_set(session_id: str, **fields) -> None:
@@ -194,6 +209,47 @@ def _resolve_request_workspace(request, raw_value) -> tuple:
     from src.tool_execution import vet_workspace
     workspace = vet_workspace(requested) or ""
     return workspace, (requested if not workspace else "")
+
+
+def _resolve_stored_project_workspace(request, session_id: str, owner: str | None) -> tuple[str, str]:
+    """Resolve a project chat's server-owned workspace binding.
+
+    Project scope is durable database state.  The browser workspace pill is a
+    useful reflection of that state, but it must not be the authority: it can
+    be empty after a reload, stale after switching chats, or changed by local
+    storage.  For project sessions, resolve the owner-matched Project row and
+    vet its stored checkout on every native turn.
+
+    Returns ``(workspace, rejected)`` using the same contract as
+    :func:`_resolve_request_workspace`.  Ordinary chats return two empty
+    strings and retain the browser-selected workspace behavior.
+    """
+    db = SessionLocal()
+    try:
+        query = (
+            db.query(Project.workspace_root)
+            .join(DBSession, DBSession.project_id == Project.id)
+            .filter(DBSession.id == session_id, DBSession.scope_kind == "project")
+        )
+        if owner:
+            query = query.filter(DBSession.owner == owner, Project.owner == owner)
+        row = query.first()
+    finally:
+        db.close()
+    if not row or not row.workspace_root:
+        return "", ""
+
+    # Match the existing native-workspace privilege boundary.  Qwen has its
+    # own rootless read-only containment path; this helper only binds native
+    # Odysseus tools.
+    from src.tool_security import owner_is_admin_or_single_user
+    if not owner_is_admin_or_single_user(owner):
+        return "", ""
+
+    from src.tool_execution import vet_workspace
+    stored = str(row.workspace_root).strip()
+    workspace = vet_workspace(stored) or ""
+    return workspace, (stored if not workspace else "")
 
 
 _ABS_PATH_RE = re.compile(r"(?<!\S)(~?/[^\"'\s`<>]+)")
@@ -726,8 +782,14 @@ def setup_chat_routes(
         # Issue #3229: API callers send JSON, not FormData.  Read from the
         # JSON body as fallback so callers who send {"allow_bash": true}
         # actually get bash enabled.
-        allow_bash = form_data.get("allow_bash") or (body or {}).get("allow_bash")
-        allow_web_search = form_data.get("allow_web_search") or (body or {}).get("allow_web_search")
+        allow_bash = form_data.get("allow_bash")
+        if allow_bash is None and body is not None and "allow_bash" in body:
+            # Preserve explicit JSON false. Using ``a or b`` turns False into
+            # None, allowing later intent routing to silently re-enable shell.
+            allow_bash = body["allow_bash"]
+        allow_web_search = form_data.get("allow_web_search")
+        if allow_web_search is None and body is not None and "allow_web_search" in body:
+            allow_web_search = body["allow_web_search"]
         use_rag = form_data.get("use_rag")
         search_context = form_data.get("search_context")  # pre-fetched web search results (compare mode)
         compare_mode = str(form_data.get("compare_mode", "")).lower() == "true"
@@ -787,7 +849,7 @@ def setup_chat_routes(
             chat_mode = "agent"
             auto_escalated = True
             _workspace_agent_intent = _tool_intent.category in {"shell", "workspace"}
-            if _workspace_agent_intent:
+            if _workspace_agent_intent and allow_bash is None:
                 allow_bash = "true"
             logger.info(
                 "chat→agent auto-escalation: category=%s reason=%s",
@@ -880,6 +942,27 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = effective_user(request)
+            # The Qwen toggle is a persisted harness choice. A stale or
+            # duplicate browser submission must not silently turn an enabled
+            # read-only Qwen project turn into a native Agent turn. Native
+            # *Chat* remains available when the user deliberately chooses it.
+            if chat_mode == "agent" and _qwen_project_harness_enabled(owner, session):
+                raise HTTPException(
+                    409,
+                    "Qwen Companion is enabled for this project. The duplicate native Agent request was blocked.",
+                )
+            # A project owns its checkout on the server.  Override any missing,
+            # stale, or manually changed browser workspace with that durable
+            # binding before context/tool selection runs.
+            _project_workspace, _project_workspace_rejected = _resolve_stored_project_workspace(
+                request, session, owner,
+            )
+            if _project_workspace:
+                workspace = _project_workspace
+                workspace_rejected = ""
+            elif _project_workspace_rejected:
+                workspace = ""
+                workspace_rejected = _project_workspace_rejected
             _reconcile_selected_route_from_request(request, sess, session, form_data, owner=owner)
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
@@ -924,7 +1007,8 @@ def setup_chat_routes(
                     chat_mode = "agent"
                     auto_escalated = True
                     _workspace_agent_intent = True
-                    allow_bash = "true"
+                    if allow_bash is None:
+                        allow_bash = "true"
                     logger.info("chat→agent auto-escalation: explicit path workspace=%s", workspace)
         except SessionNotFoundError as e:
             raise HTTPException(404, str(e))
@@ -1093,7 +1177,7 @@ def setup_chat_routes(
         # (`use_web=true`) or agent web toggle (`allow_web_search=true`) must
         # explicitly enable it.
         if allow_bash is not None and str(allow_bash).lower() != "true":
-            disabled_tools.add("bash")
+            disabled_tools.update({"bash", "python", "read_file", "write_file", "edit_file"})
         _explicit_web_intent = _explicit_web_intent or bool(_tool_intent and _tool_intent.category == "web")
         if is_web_search_explicitly_denied(allow_web_search) or not _search_enabled:
             disabled_tools.update(WEB_TOOL_NAMES)
@@ -1905,7 +1989,7 @@ def setup_chat_routes(
         if rec is None:
             if agent_runs.is_active(session_id):
                 return {"status": "streaming", "detached": True}
-            raise HTTPException(404, "No active stream for this session")
+            return {"status": "idle"}
         return rec
 
     # ------------------------------------------------------------------ #

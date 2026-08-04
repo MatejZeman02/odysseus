@@ -10,14 +10,17 @@ import modelsModule from './js/models.js?v=20260715startupcalm2';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-import chatModule from './js/chat.js?v=20260722ctxheader4';
+// Keep stateful modules on one exact URL throughout the import graph. Query
+// variants are distinct ES modules, so mixing `sessions.js?v=...` here with
+// `sessions.js` inside chat.js creates two currentSessionId singletons.
+import chatModule from './js/chat.js';
 import compareModule from './js/compare/index.js?v=20260723compareicon2';
 import documentModule from './js/document.js?v=20260722emailfastindex1';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
 import chatRenderer from './js/chatRenderer.js?v=20260722emailfastindex1';
-import sessionModule from './js/sessions.js?v=20260722ctxheader4';
+import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';
 import censorModule from './js/censor.js';
@@ -44,9 +47,11 @@ import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js?v=20260715startupclean';
-import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+import { initSectionCollapse, initSectionDrag } from './js/section-management.js?v=20260804g15ui29';
 
 const API_BASE = window.location.origin;
+const UI_BUILD_ID = window.__ODYSSEUS_BUILD_ID || 'unknown';
+console.info(`[Odysseus] UI build ${UI_BUILD_ID}`);
 window.themeModule = themeModule;
 window.sessionModule = sessionModule;
 window.uiModule = uiModule;
@@ -869,16 +874,6 @@ function initializeEventListeners() {
     }
     if (toolBtn) toolBtn.classList.toggle('active', active);
     if (chk) chk.checked = active;
-    // Research disables shell access
-    const bashChk = el('bash-toggle');
-    const bashBtn = el('bash-toggle-btn');
-    if (active) {
-      if (bashChk && bashChk.checked) {
-        bashChk.checked = false;
-        if (bashBtn) bashBtn.classList.remove('active');
-        saveToolPref('bash', (loadToggleState().mode || 'chat'), false);
-      }
-    }
     const s = loadToggleState(); s.research = active; saveToggleState(s);
     updatePlusDot();
     document.dispatchEvent(new CustomEvent('overflow-state-change'));
@@ -1327,13 +1322,6 @@ function initializeEventListeners() {
           const modeToggle = document.getElementById('mode-toggle');
           if (modeToggle) modeToggle.closest('.chat-input-toggle')?.style.setProperty('display', 'none');
         }
-        // Hide bash toggle
-        if (!p.can_use_bash) {
-          const bashToggle = document.getElementById('bash-toggle');
-          if (bashToggle) bashToggle.closest('.chat-input-toggle')?.style.setProperty('display', 'none');
-          const bashBtn = document.getElementById('bash-toggle-btn');
-          if (bashBtn) bashBtn.style.display = 'none';
-        }
         // Hide document button
         if (!p.can_use_documents) {
           const docBtn = document.getElementById('overflow-doc-btn');
@@ -1710,7 +1698,6 @@ function initializeEventListeners() {
   // but the user's explicit per-mode override is persisted and honored.
   const MODE_TOOLS = [
     { btnId: 'web-toggle-btn',  checkboxId: 'web-toggle',  stateKey: 'web' },
-    { btnId: 'bash-toggle-btn', checkboxId: 'bash-toggle', stateKey: 'bash' },
   ];
 
   function _modeKey(stateKey, mode) { return `${stateKey}_${mode}`; }
@@ -1730,7 +1717,6 @@ function initializeEventListeners() {
 
   const TOOL_TOGGLE_TOAST_LABELS = {
     web: 'Web search',
-    bash: 'Shell',
   };
 
   function showToolToggleToast(stateKey, active) {
@@ -1779,11 +1765,6 @@ function initializeEventListeners() {
     MODE_TOOLS.forEach(({ btnId, checkboxId, stateKey }) => {
       const btn = el(btnId);
       if (!btn) return;
-      // Hide bash button in chat mode
-      if (mode === 'chat' && stateKey === 'bash') {
-        btn.style.display = 'none';
-        return;
-      }
       // Show buttons in agent mode (or for web toggle in any mode)
       btn.style.display = '';
       if (btn.style.display === 'none') return;
@@ -1800,12 +1781,7 @@ function initializeEventListeners() {
     if (!agentBtn || !chatBtn) return;
     const state = loadToggleState();
     let currentMode = state.mode || 'chat';
-
-    // Immediately hide bash button in chat mode on page load
-    if (currentMode === 'chat') {
-      const bashBtn = el('bash-toggle-btn');
-      if (bashBtn) bashBtn.style.display = 'none';
-    }
+    delete state.bash; delete state.bash_agent; delete state.bash_chat; saveToggleState(state);
 
     function setMode(mode) {
       currentMode = mode;
@@ -1819,12 +1795,22 @@ function initializeEventListeners() {
       // Slide the pill to the active button
       const toggle = agentBtn.closest('.mode-toggle');
       if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
+      const companionBtn = el('qwen-toggle-btn');
+      if (companionBtn) companionBtn.style.display = mode === 'agent' ? '' : 'none';
       // Workspace pill + overflow entry are agent-only - hide immediately (no flash).
       try { workspaceModule.applyMode(mode); } catch (_) {}
       // Delay tool glow-up for a staggered effect
       setTimeout(() => applyModeToToggles(mode), 500);
     }
     window.__odysseusSetChatMode = setMode;
+    window.__odysseusSetToolEnabled = (stateKey, enabled, mode = currentMode) => {
+      saveToolPref(stateKey, mode, !!enabled);
+      const tool = MODE_TOOLS.find(item => item.stateKey === stateKey);
+      if (!tool) return;
+      const btn = el(tool.btnId), checkbox = el(tool.checkboxId);
+      if (btn) { btn.classList.toggle('active', !!enabled); btn.setAttribute('aria-pressed', String(!!enabled)); }
+      if (checkbox) checkbox.checked = !!enabled;
+    };
     agentBtn.addEventListener('click', () => {
       // Agent mode turns off research if active
       const resChk = el('research-toggle');
@@ -1950,7 +1936,92 @@ function initializeEventListeners() {
     });
   }
   setupToggle('web-toggle-btn', 'web-toggle', 'web');
-  setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
+  // G1.5 removes native shell from the normal composer. The terminal-shaped
+  // control is now a server-owned Qwen harness switch, never a permission bit.
+  try { localStorage.removeItem('odysseus-tool-bash'); } catch (_) {}
+  const qwenBtn = el('qwen-toggle-btn');
+  if (qwenBtn) qwenBtn.addEventListener('click', async () => {
+    if (qwenBtn.disabled) return;
+    const sid = window.sessionModule?.getCurrentSessionId?.();
+    if (!sid) return uiModule.showToast?.('Open a project chat first', 1800);
+    qwenBtn.disabled = true;
+    try {
+      const rows = await fetch('/api/sessions', { credentials: 'same-origin' }).then(r => r.json());
+      const current = rows.find(s => s.id === sid);
+      if (!current || current.scope_kind !== 'project') throw new Error('Qwen is available in project homes only');
+      const next = current.harness_kind === 'qwen' ? 'native' : 'qwen';
+      if (next === 'qwen') {
+        const readinessResponse = await fetch('/api/g1/status', { credentials: 'same-origin', cache: 'no-store' });
+        const readiness = await readinessResponse.json().catch(() => ({}));
+        if (!readinessResponse.ok || !readiness.qwen_ready) {
+          const missing = [];
+          if (!readiness.enabled) missing.push('harness');
+          if (!readiness.components?.qwen_binary) missing.push('Qwen binary');
+          if (!readiness.components?.bubblewrap) missing.push('Bubblewrap');
+          throw new Error(`Qwen setup needed${missing.length ? `: ${missing.join(' + ')}` : ''}`);
+        }
+      }
+      const response = await fetch(`/api/g1/sessions/${encodeURIComponent(sid)}/harness`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ harness_kind: next }), credentials: 'same-origin'
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Could not change Companion mode');
+      const cached = window.sessionModule?.getSessions?.().find(session => session.id === sid);
+      if (cached) cached.harness_kind = result.harness_kind;
+      qwenBtn.classList.toggle('active', result.harness_kind === 'qwen');
+      qwenBtn.setAttribute('aria-pressed', String(result.harness_kind === 'qwen'));
+      uiModule.showToast?.(result.harness_kind === 'qwen' ? 'Qwen Companion: read-only' : 'Native Chat: shell disabled', 1800);
+      if (result.harness_kind === 'qwen' && typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode('agent');
+      await window.sessionModule?.loadSessions?.();
+    } catch (error) { uiModule.showToast?.(error.message || 'Qwen Companion unavailable', 2500); }
+    finally { qwenBtn.disabled = false; }
+  });
+  const createCompanionProject = async () => {
+    let current = window.sessionModule?.getSessions?.().find(s => s.id === window.sessionModule?.getCurrentSessionId?.());
+    if (!current?.endpoint_id || !current?.model) current = window.__odysseusDefaultChat || await fetch('/api/default-chat', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+    if (!current?.endpoint_id || !current?.model) return uiModule.showToast?.('Choose a registered default model first', 2600);
+    document.getElementById('companion-project-modal')?.remove();
+    const modal = document.createElement('div'); modal.id = 'companion-project-modal'; modal.className = 'modal';
+    modal.innerHTML = `<form class="modal-content companion-project-form" role="dialog" aria-modal="true" aria-labelledby="companion-project-title">
+      <div class="modal-header"><h4 id="companion-project-title">New Companion project</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
+      <div class="modal-body">
+        <label for="companion-project-name">Project name</label>
+        <input id="companion-project-name" name="project_name" class="styled-prompt-input" maxlength="120" autocomplete="off" required>
+        <label for="companion-project-workspace">Git workspace folder</label>
+        <div class="companion-project-workspace-row"><input id="companion-project-workspace" name="workspace_root" class="styled-prompt-input" readonly required placeholder="Choose an existing Git checkout"><button type="button" class="confirm-btn confirm-btn-secondary companion-project-browse">Browse…</button></div>
+        <p class="muted">Qwen will receive this checkout as one read-only mount. The project binding is saved by Odysseus, not browser storage.</p>
+        <div class="companion-project-route"><span>Model</span><strong>${uiModule.esc(current.model)}</strong></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="confirm-btn confirm-btn-secondary companion-project-cancel">Cancel</button><button type="submit" class="confirm-btn confirm-btn-primary">Create project</button></div>
+    </form>`;
+    document.body.appendChild(modal);
+    const form = modal.querySelector('form'); const nameInput = modal.querySelector('#companion-project-name');
+    const pathInput = modal.querySelector('#companion-project-workspace'); const submit = form.querySelector('[type="submit"]');
+    const close = () => modal.remove();
+    modal.querySelector('.close-btn').addEventListener('click', close); modal.querySelector('.companion-project-cancel').addEventListener('click', close);
+    modal.querySelector('.companion-project-browse').addEventListener('click', () => {
+      modal.style.display = 'none';
+      workspaceModule.openWorkspaceBrowser({ mode: 'project', initialPath: pathInput.value,
+        onSelect(path) { pathInput.value = path; modal.style.display = 'flex'; nameInput.focus(); },
+        onCancel() { modal.style.display = 'flex'; nameInput.focus(); } });
+    });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); const name = nameInput.value.trim(); const workspace_root = pathInput.value.trim();
+      if (!name || !workspace_root) return uiModule.showToast?.('Enter a name and choose a Git workspace', 2400);
+      submit.disabled = true; submit.textContent = 'Creating…';
+      try {
+        const response = await fetch('/api/g1/projects', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, workspace_root, endpoint_id: current.endpoint_id, model: current.model }) });
+        const result = await response.json(); if (!response.ok) throw new Error(result.detail || 'Could not create project');
+        workspaceModule.setWorkspace(result.session?.workspace_root || workspace_root, { projectReadOnly: true }); close();
+        await window.sessionModule?.loadSessions?.(); await window.sessionModule?.selectSession?.(result.session.id);
+      } catch (error) { uiModule.showToast?.(error.message || 'Could not create project', 3000); submit.disabled = false; submit.textContent = 'Create project'; }
+    });
+    nameInput.focus();
+  };
+  window.__odysseusCreateCompanionProject = createCompanionProject;
+  const newProjectBtn = el('companion-new-project-btn');
+  if (newProjectBtn) newProjectBtn.addEventListener('click', createCompanionProject);
   try { workspaceModule.initWorkspace(); } catch (_) {}
 
   // Document editor toggle (special: uses module panel, not a checkbox)
@@ -2250,7 +2321,7 @@ function initializeEventListeners() {
     if (!inputLeft || !overflowMenu || !overflowWrapper) return;
 
     // Buttons that can be collapsed (in reverse priority — last collapsed first)
-    const collapsibleIds = ['bash-toggle-btn', 'web-toggle-btn'];
+    const collapsibleIds = ['web-toggle-btn'];
     const collapsibleBtns = collapsibleIds.map(id => el(id)).filter(Boolean);
     // Map of toolbar btn id → overflow mirror element (created dynamically)
     const overflowMirrors = new Map();
@@ -2616,9 +2687,9 @@ function initializeEventListeners() {
         const beforeNobody = Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {};
         if (!beforeNobody.nobody_prev_mode) beforeNobody.nobody_prev_mode = beforeNobody.mode || 'agent';
         Storage.setJSON(Storage.KEYS.TOGGLES, beforeNobody);
-        const _offIds = ['web-toggle', 'bash-toggle', 'research-toggle'];
+        const _offIds = ['web-toggle', 'research-toggle'];
         _offIds.forEach(id => { const c = el(id); if (c) c.checked = false; });
-        ['web-toggle-btn', 'bash-toggle-btn'].forEach(id => { const b = el(id); if (b) b.classList.remove('active'); });
+        ['web-toggle-btn'].forEach(id => { const b = el(id); if (b) b.classList.remove('active'); });
         if (typeof window.__odysseusSetChatMode === 'function') {
           window.__odysseusSetChatMode('chat');
         } else {
@@ -2738,7 +2809,6 @@ function initializeEventListeners() {
     'web-toggle-btn':      '#web-toggle-btn',
     'doc-toggle-btn':      '#overflow-doc-btn',
     'rag-toggle-btn':      '#overflow-rag-btn',
-    'bash-toggle-btn':     '#bash-toggle-btn',
     'overflow-plus-btn':   '.overflow-wrapper',
     'mode-toggle':         '.mode-toggle',
     'preset-mini-btn':     '#overflow-preset-btn',
@@ -4667,7 +4737,6 @@ function startOdysseusApp() {
 
 
   if (window.hljs) {
-    console.log('Highlighting all code blocks on page load');
     document.querySelectorAll('pre code:not(.hljs)').forEach(block => {
       window.hljs.highlightElement(block);
     });

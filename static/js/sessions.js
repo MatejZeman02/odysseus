@@ -8,10 +8,12 @@ import { providerLogo } from './providers.js';
 import { initModelPicker, updateModelPicker } from './modelPicker.js?v=20260722ctxheader1';
 import themeModule from './theme.js';
 import spinnerModule from './spinner.js';
+import workspaceModule from './workspace.js';
 
 const API_BASE = window.location.origin;
 
 let sessions = [];
+let companionProjects = [];
 let currentSessionId = null;
 let _sessionNavToken = 0;
 let _skipAutoSelect = false;
@@ -33,6 +35,35 @@ const _INCOGNITO_SESSIONS_KEY = 'ody-incognito-sessions'; // sessionStorage key 
 const _isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const _mod = _isMac ? '⌘' : 'Ctrl';
 let _historyPager = null;
+
+function _syncCompanionScopeBanner(meta) {
+  const banner = document.getElementById('companion-scope-banner');
+  const title = document.getElementById('companion-scope-title');
+  const detail = document.getElementById('companion-scope-detail');
+  if (!banner || !title || !detail) return;
+  const scope = meta?.scope_kind;
+  if (!['project', 'personal', 'computer'].includes(scope)) {
+    banner.hidden = true;
+    title.textContent = '';
+    detail.textContent = '';
+    return;
+  }
+  if (scope === 'project') {
+    const projectName = meta.project_name || meta.name || 'Project';
+    const workspaceName = String(meta.workspace_root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+    title.textContent = `Project · ${projectName}`;
+    detail.textContent = meta.harness_kind === 'qwen'
+      ? `Qwen · read-only${workspaceName ? ` · ${workspaceName}` : ''}`
+      : 'Native · continuity context · workspace tools off';
+  } else if (scope === 'personal') {
+    title.textContent = 'Personal Advisor';
+    detail.textContent = 'Native · personal scope';
+  } else {
+    title.textContent = 'Computer Help';
+    detail.textContent = 'Native · Qwen coming next';
+  }
+  banner.hidden = false;
+}
 
 function _shouldPreserveStartupComposer(msgInput) {
   if (!msgInput || !msgInput.value) return false;
@@ -125,6 +156,15 @@ function _historyUrl(id, { limit = null, offset = null } = {}) {
   if (limit != null) url.searchParams.set('limit', String(limit));
   if (offset != null) url.searchParams.set('offset', String(offset));
   return url.toString();
+}
+
+async function _responseError(response, fallback) {
+  let detail = '';
+  try {
+    const data = await response.json();
+    detail = data.detail || data.error || data.message || '';
+  } catch (_) { /* A non-JSON proxy/server response still has a status. */ }
+  return new Error(detail || `${fallback} (HTTP ${response.status})`);
 }
 
 function _addHistoryMessageWithFullRenderer(role, content, modelName, meta) {
@@ -285,6 +325,7 @@ let _sessionListFocused = false;
 function _deselectCurrentSession(sid) {
   if (currentSessionId !== sid) return;
   currentSessionId = null;
+  _syncCompanionScopeBanner(null);
   uiModule.el('chat-history').innerHTML = '';
   uiModule.el('current-meta').textContent = 'Odysseus Chat';
   Storage.remove('lastSessionId');
@@ -1067,6 +1108,33 @@ function _appendFavoriteSessionItems(frag, items) {
 }
 
 let _renderRAF = null;
+let _g15Readiness = null;
+let _g15ReadinessPromise = null;
+
+function _loadG15Readiness() {
+  if (_g15ReadinessPromise) return _g15ReadinessPromise;
+  _g15ReadinessPromise = fetch(`${API_BASE}/api/g1/status`, {
+    credentials: 'same-origin', cache: 'no-store',
+  }).then(async response => {
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+    _g15Readiness = result;
+    return result;
+  }).catch(error => {
+    _g15Readiness = { error: error?.message || 'unavailable', qwen_ready: false, components: {} };
+    return _g15Readiness;
+  }).finally(() => {
+    _g15ReadinessPromise = null;
+    renderSessionList();
+  });
+  return _g15ReadinessPromise;
+}
+
+export function refreshG15Readiness() {
+  _g15Readiness = null;
+  return _loadG15Readiness();
+}
+
 export function renderSessionList() {
   // Debounce rapid re-renders within the same frame
   if (_renderRAF) cancelAnimationFrame(_renderRAF);
@@ -1105,6 +1173,146 @@ function _renderSessionListImpl() {
   document.querySelectorAll('.session-dropdown, .folder-submenu').forEach(d => d.remove());
 
   const _frag = document.createDocumentFragment();
+
+  // G1.5 companion homes are server-bound sessions, not a browser workspace
+  // preference. Keep them visibly separate from the ordinary recent-chat list.
+  const companion = orderedSessions.filter(s => ['personal', 'computer', 'project'].includes(s.scope_kind));
+  {
+    const heading = document.createElement('div');
+    heading.className = 'date-section-header'; heading.textContent = 'Companion'; _frag.appendChild(heading);
+    const appendHome = (session, label, suffix = '') => {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'list-item companion-home';
+      button.textContent = `${label}${suffix}`; button.dataset.sessionId = session.id;
+      button.addEventListener('click', () => selectSession(session.id)); _frag.appendChild(button);
+    };
+    const companionRoute = async () => {
+      const active = sessions.find(s => s.id === currentSessionId);
+      if (active?.endpoint_id && active?.model) return active;
+      // Companion homes should be reachable from a clean sidebar, just like
+      // Manage Chats. Fall back to the user's configured default route.
+      const fallback = window.__odysseusDefaultChat || await fetch(`${API_BASE}/api/default-chat`, { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null);
+      return fallback?.endpoint_id && fallback?.model ? fallback : null;
+    };
+    const openBuiltinHome = async (scope) => {
+      const route = await companionRoute();
+      if (!route) { uiModule.showToast?.('Choose a registered default model first', 2600); return; }
+      const params = new URLSearchParams({ endpoint_id: route.endpoint_id, model: route.model });
+      const response = await fetch(`${API_BASE}/api/g1/homes/${scope}/open?${params}`, { method: 'POST', credentials: 'same-origin' });
+      const result = await response.json();
+      if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not open Companion home', 2500); return; }
+      await loadSessions(); await selectSession(result.id);
+    };
+    const openProjectHome = async (project) => {
+      // Reflect the durable project binding immediately. selectSession repeats
+      // this from session metadata, while the backend independently enforces
+      // the same Project row on every native turn.
+      if (project.workspace_root) {
+        workspaceModule.setWorkspace(project.workspace_root, { projectReadOnly: true });
+      }
+      const existing = companion.find(s => s.scope_kind === 'project' && s.project_id === project.id && s.is_scope_primary);
+      if (existing) return selectSession(existing.id);
+      const route = await companionRoute();
+      if (!route) { uiModule.showToast?.('Choose a registered default model first', 2600); return; }
+      const params = new URLSearchParams({ endpoint_id: route.endpoint_id, model: route.model });
+      const response = await fetch(`${API_BASE}/api/g1/projects/${encodeURIComponent(project.id)}/open?${params}`, {
+        method: 'POST', credentials: 'same-origin',
+      });
+      const result = await response.json();
+      if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not open project', 2600); return; }
+      await loadSessions(); await selectSession(result.id);
+    };
+    const deleteProject = async (project) => {
+      if (!await uiModule.styledConfirm(`Delete project “${project.name}” and all of its chats? The workspace files will not be deleted.`, {
+        confirmText: 'Delete project', danger: true,
+      })) return;
+      const response = await fetch(`${API_BASE}/api/g1/projects/${encodeURIComponent(project.id)}`, {
+        method: 'DELETE', credentials: 'same-origin',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not delete project', 2800); return; }
+      if (sessions.some(s => s.project_id === project.id && s.id === currentSessionId)) {
+        currentSessionId = null; workspaceModule.setWorkspace('');
+      }
+      await loadSessions(); uiModule.showToast?.('Project deleted; workspace files were kept', 2200);
+    };
+    const createProjectThread = async (project, home) => {
+      const route = home?.endpoint_id && home?.model ? home : await companionRoute();
+      if (!route) { uiModule.showToast?.('Choose a registered default model first', 2600); return; }
+      const params = new URLSearchParams({ endpoint_id: route.endpoint_id, model: route.model });
+      const response = await fetch(`${API_BASE}/api/g1/projects/${encodeURIComponent(project.id)}/fork?${params}`, {
+        method: 'POST', credentials: 'same-origin',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not create project thread', 2800); return; }
+      if (project.workspace_root) workspaceModule.setWorkspace(project.workspace_root, { projectReadOnly: true });
+      await loadSessions(); await selectSession(result.id);
+      uiModule.showToast?.('New project thread · shared brief, fresh transcript', 2600);
+    };
+    const exportProjectFeedback = async (project) => {
+      const response = await fetch(`${API_BASE}/api/g1/projects/${encodeURIComponent(project.id)}/evaluation`, { credentials: 'same-origin' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not export feedback', 2600); return; }
+      const blob = new Blob([JSON.stringify(result, null, 2) + '\n'], { type: 'application/json' });
+      const url = URL.createObjectURL(blob); const link = document.createElement('a');
+      link.href = url; link.download = `${String(project.name || 'project').replace(/[^a-z0-9._-]+/gi, '-')}-qwen-feedback.json`;
+      link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const counts = result.counts || {};
+      uiModule.showToast?.(`Feedback exported · ${counts.helpful || 0} helpful, ${counts.wrong || 0} wrong, ${counts.unsafe || 0} unsafe`, 3200);
+    };
+    const personal = companion.find(s => s.scope_kind === 'personal' && s.is_scope_primary);
+    const computer = companion.find(s => s.scope_kind === 'computer' && s.is_scope_primary);
+    if (personal) appendHome(personal, 'Personal Advisor');
+    else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Personal Advisor'; button.onclick = () => openBuiltinHome('personal'); _frag.appendChild(button); }
+    if (computer) appendHome(computer, 'Computer Help', ' · Qwen coming next');
+    else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Computer Help · Qwen coming next'; button.onclick = () => openBuiltinHome('computer'); _frag.appendChild(button); }
+    const projectsHeading = document.createElement('div');
+    projectsHeading.className = 'date-section-header'; projectsHeading.textContent = 'Projects'; _frag.appendChild(projectsHeading);
+    const readiness = document.createElement('div');
+    readiness.id = 'companion-qwen-readiness';
+    readiness.className = 'companion-qwen-readiness';
+    readiness.setAttribute('role', 'status');
+    readiness.setAttribute('aria-live', 'polite');
+    if (!_g15Readiness) {
+      readiness.textContent = 'Qwen status · checking…';
+      _loadG15Readiness();
+    } else if (_g15Readiness.qwen_ready) {
+      readiness.classList.add('ready');
+      readiness.textContent = 'Qwen ready · read-only sandbox';
+    } else if (_g15Readiness.error) {
+      readiness.classList.add('unavailable');
+      readiness.textContent = 'Qwen status unavailable';
+      readiness.title = 'Odysseus could not read the local Qwen readiness status';
+    } else {
+      const missing = [];
+      if (!_g15Readiness.enabled) missing.push('harness');
+      if (!_g15Readiness.components?.qwen_binary) missing.push('Qwen binary');
+      if (!_g15Readiness.components?.bubblewrap) missing.push('Bubblewrap');
+      readiness.classList.add('unavailable');
+      readiness.textContent = `Qwen setup needed · ${missing.join(' + ') || 'not ready'}`;
+      readiness.title = 'Project homes remain available; Qwen turns require the listed local components';
+    }
+    _frag.appendChild(readiness);
+    const newProject = document.createElement('button'); newProject.type = 'button'; newProject.className = 'list-item companion-home'; newProject.textContent = '+ New project';
+    newProject.onclick = () => window.__odysseusCreateCompanionProject?.(); _frag.appendChild(newProject);
+    companionProjects.forEach(project => {
+      const home = companion.find(s => s.scope_kind === 'project' && s.project_id === project.id && s.is_scope_primary);
+      const row = document.createElement('div'); row.className = 'list-item companion-home'; row.dataset.projectId = project.id;
+      const open = document.createElement('button'); open.type = 'button'; open.className = 'grow';
+      open.textContent = `${project.name}${home?.harness_kind === 'qwen' ? ' · Qwen' : home ? '' : ' · no chat'}`;
+      open.addEventListener('click', () => openProjectHome(project));
+      const thread = document.createElement('button'); thread.type = 'button'; thread.className = 'msg-action-btn';
+      thread.title = 'New project thread'; thread.setAttribute('aria-label', `New thread in ${project.name}`); thread.textContent = '+';
+      thread.addEventListener('click', (event) => { event.stopPropagation(); createProjectThread(project, home); });
+      const evaluation = document.createElement('button'); evaluation.type = 'button'; evaluation.className = 'msg-action-btn';
+      evaluation.title = 'Export Qwen feedback'; evaluation.setAttribute('aria-label', `Export feedback for ${project.name}`); evaluation.textContent = '⇩';
+      evaluation.addEventListener('click', (event) => { event.stopPropagation(); exportProjectFeedback(project); });
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'msg-action-btn';
+      remove.title = 'Delete project'; remove.setAttribute('aria-label', `Delete project ${project.name}`); remove.textContent = '×';
+      remove.addEventListener('click', (event) => { event.stopPropagation(); deleteProject(project); });
+      row.append(open, thread, evaluation, remove); _frag.appendChild(row);
+    });
+    orderedSessions = orderedSessions.filter(s => !['personal', 'computer'].includes(s.scope_kind) && !(s.scope_kind === 'project' && s.is_scope_primary));
+  }
 
   // ── Flat sort modes: ignore folders, show one ordered list. ──
   // Folders are only shown when _sortMode === 'group' (or null/empty
@@ -1686,14 +1894,22 @@ export async function loadSessions() {
       fetched = await res.json();
     }
     sessions = _normalizeSessionsList(fetched);
+    try {
+      const projectResponse = await fetch(`${API_BASE}/api/g1/projects`, { credentials: 'same-origin' });
+      companionProjects = projectResponse.ok ? await projectResponse.json() : [];
+    } catch (_) { companionProjects = []; }
+    for (const session of sessions) {
+      const project = companionProjects.find(item => item.id === session.project_id);
+      if (project) {
+        session.project_name = project.name;
+        session.workspace_root = project.workspace_root;
+      }
+    }
     renderSessionList();
 
     const sessionsSection = uiModule.el('sessions-section');
-    if (sessions.length === 0) {
-      sessionsSection.classList.add('hidden');
-    } else {
-      sessionsSection.classList.remove('hidden');
-    }
+    // Companion homes/projects exist even when there are no ordinary chats.
+    sessionsSection.classList.remove('hidden');
 
     const activeSessions = sessions.filter(s => !s.archived);
     // "Transient" sessions = the singleton Assistant chat + any task-output
@@ -1730,13 +1946,16 @@ export async function loadSessions() {
       // completions call loadSessions() later; without this guard that reload
       // sees no current session and auto-selects the previous chat.
       targetId = null;
-    } else if (hashId && activeSessions.some(s => s.id === hashId)) {
-      targetId = hashId;
     } else if (currentSessionId && activeSessions.some(s => s.id === currentSessionId)) {
       targetId = currentSessionId;
     } else if (currentSessionId) {
       // Session was just created but may not be in the list yet — keep it
       targetId = currentSessionId;
+    } else if (hashId && activeSessions.some(s => s.id === hashId)) {
+      // The hash is a startup/deep-link target. Once a live session has been
+      // selected, currentSessionId must win so a background loadSessions()
+      // refresh cannot jump back to an older URL target.
+      targetId = hashId;
     } else if (!_freshRootLoad && savedId && activeSessions.some(s => s.id === savedId)) {
       targetId = savedId;
     } else if (!_freshRootLoad && !_skipAutoSelect && _realSessions.length > 0) {
@@ -1813,7 +2032,7 @@ export async function loadSessions() {
   }
 }
 
-export async function selectSession(id, { keepSidebar = false, showLoading = true, immediateLoading = false } = {}) {
+export async function selectSession(id, { keepSidebar = false, showLoading = true, immediateLoading = false, retryOnFetchFailure = true } = {}) {
   // Exit compare mode cleanly if active
   if (window.compareModule && window.compareModule.isActive()) {
     window.compareModule.deactivate(true);
@@ -1843,17 +2062,59 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     // URL hash — the user complained that coming back to Odysseus kept
     // landing them on the auto-firing task-log chat instead of their last
     // real conversation.
-    const _meta = sessions.find(s => s.id === id);
-    const _isTransientChat = !!_meta && (_meta.folder === 'Assistant' || _meta.folder === 'Tasks');
+    const meta = sessions.find(s => s.id === id);
+    _syncCompanionScopeBanner(meta);
+    const _isTransientChat = !!meta && (meta.folder === 'Assistant' || meta.folder === 'Tasks');
     if (!_isTransientChat) {
       Storage.set('lastSessionId', id);
+      // Keep reload/deep-link state aligned with the chat the user is actually
+      // viewing. Without this, project fork/toggle refreshes could prefer the
+      // stale startup hash and mutate a different session.
+      const nextHash = `#${encodeURIComponent(id)}`;
+      if (window.location.hash !== nextHash) {
+        history.replaceState(null, '', `${window.location.pathname}${window.location.search}${nextHash}`);
+      }
     }
-    // Restore character preset for persistent chats
+    // Scope owns the initial tool posture. Project homes open in Agent with
+    // native web search selected and, when configured, read-only Qwen.
+    // Personal and Computer homes remain native Chat in G1.5.
+    // Apply it before the first await so a fast send cannot use the previous
+    // chat's mode. Harness selection itself is durable server state and is
+    // never changed merely by reopening a project.
+    const qwenBtn = document.getElementById('qwen-toggle-btn');
+    const qwenActive = !!meta && meta.scope_kind === 'project' && meta.harness_kind === 'qwen';
+    if (qwenBtn) {
+      qwenBtn.classList.toggle('active', qwenActive);
+      qwenBtn.setAttribute('aria-pressed', String(qwenActive));
+      qwenBtn.title = qwenActive ? 'Qwen Companion · read-only project access' :
+        (meta?.scope_kind === 'computer' ? 'Computer Help · Qwen coming next' : 'Qwen Companion (project read-only)');
+    }
+    const setModeReliably = (mode) => {
+      const toggleState = Storage.loadToggleState(); toggleState.mode = mode; Storage.saveToggleState(toggleState);
+      const agent = document.getElementById('mode-agent-btn'), chat = document.getElementById('mode-chat-btn');
+      agent?.classList.toggle('active', mode === 'agent'); chat?.classList.toggle('active', mode === 'chat');
+      agent?.setAttribute('aria-pressed', String(mode === 'agent')); chat?.setAttribute('aria-pressed', String(mode === 'chat'));
+      if (typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode(mode);
+    };
+    if (meta?.scope_kind === 'project') {
+      setModeReliably('agent');
+      const toggleState = Storage.loadToggleState(); toggleState.web_agent = true; Storage.saveToggleState(toggleState);
+      const web = document.getElementById('web-toggle'), webButton = document.getElementById('web-toggle-btn');
+      if (web) web.checked = true; webButton?.classList.add('active'); webButton?.setAttribute('aria-pressed', 'true');
+      if (typeof window.__odysseusSetToolEnabled === 'function') window.__odysseusSetToolEnabled('web', true, 'agent');
+      if (meta.workspace_root) workspaceModule.setWorkspace(meta.workspace_root, { projectReadOnly: true });
+    } else if (meta && ['personal', 'computer'].includes(meta.scope_kind)) {
+      setModeReliably('chat');
+      if (typeof window.__odysseusSetToolEnabled === 'function') window.__odysseusSetToolEnabled('web', false, 'chat');
+      workspaceModule.setWorkspace('');
+    }
+
+    // Restore character preset for persistent chats only after routing state
+    // is coherent; the dynamic import yields control to the browser.
     try {
       const presetsModule = window.presetsModule || (await import('./presets.js')).default;
       if (presetsModule && presetsModule.onSessionSwitch) presetsModule.onSessionSwitch(id);
     } catch (e) {}
-    const meta = sessions.find(s => s.id === id);
 
     // Detach any in-flight stream to background instead of aborting
     try {
@@ -1945,6 +2206,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
         }, loadingDelayMs);
       }
       const res = await fetch(_historyUrl(id, { limit: _historyPageLimit() }));
+      if (!res.ok) throw await _responseError(res, 'Could not load this chat');
       const data = await res.json();
       if (loadingTimer) {
         clearTimeout(loadingTimer);
@@ -2110,6 +2372,21 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
   } catch (error) {
     console.error('Error in selectSession:', error);
     const chatHistory = uiModule.el('chat-history');
+    // A local development restart can close the history request halfway
+    // through. One short retry makes the session recover by itself without
+    // hiding a persistent authentication or server-side error.
+    const transientFetchFailure = error?.name === 'TypeError' && /failed to fetch|network/i.test(error.message || '');
+    if (retryOnFetchFailure && transientFetchFailure) {
+      if (chatHistory?.querySelector('.session-loading-state')) {
+        _updateSessionLoading(chatHistory, 'Reconnecting to Odysseus');
+      }
+      setTimeout(() => {
+        if (currentSessionId === id) {
+          selectSession(id, { keepSidebar, showLoading, immediateLoading, retryOnFetchFailure: false });
+        }
+      }, 700);
+      return;
+    }
     if (chatHistory?.querySelector('.session-loading-state')) {
       chatHistory.innerHTML = '';
       chatHistory.style.opacity = '1';
@@ -2202,6 +2479,7 @@ export function createDirectChat(url, modelId, endpointId, opts = {}) {
   _skipAutoSelect = true;
   _suppressNextSessionLoading = true;
   currentSessionId = null;
+  _syncCompanionScopeBanner(null);
   try { window.__odysseusLastSelectedSessionId = ''; } catch (_) {}
   Storage.remove('lastSessionId');
   history.replaceState(null, '', window.location.pathname);
@@ -2552,7 +2830,10 @@ function _startResearchPolling() {
     }
     for (var sid of _researchingSessions) {
       try {
-        var res = await fetch(`${API_BASE}/api/research/status/${sid}`);
+        // A remembered "researching" marker can outlive its server job after
+        // a reload. Quiet status maps that normal idle case to HTTP 200 so the
+        // browser console does not report a failed resource.
+        var res = await fetch(`${API_BASE}/api/research/status/${sid}?quiet=1`);
         if (!res.ok) { _researchingSessions.delete(sid); continue; }
         var data = await res.json();
         if (data.status !== 'running') {

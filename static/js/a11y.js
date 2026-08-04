@@ -100,6 +100,89 @@
     });
   }
 
+  // ---- Form identity and labels -----------------------------------------
+  // Older settings markup uses <label> as a visual two-column heading even
+  // when there is no form control to label, and several generated switches
+  // have neither id nor name. Chromium reports both patterns in DevTools and
+  // may make poor autofill choices. Normalize them without changing layout.
+  var formFieldSeq = 0;
+  var FORM_FIELD = 'input,select,textarea';
+
+  function fieldLabelText(field) {
+    var text = field.getAttribute('aria-label') || field.getAttribute('title') ||
+      field.getAttribute('placeholder') || field.dataset.uiKey || field.dataset.privacyKey ||
+      field.id || field.name || field.type || 'Form field';
+    return String(text).replace(/^set[-_]/, '').replace(/[-_]+/g, ' ').trim() || 'Form field';
+  }
+
+  function ensureFieldIdentity(field) {
+    if (!field || field.nodeType !== 1) return;
+    if (!field.id && !field.name) {
+      var base = field.dataset.uiKey || field.dataset.privacyKey || 'field';
+      var candidate = 'a11y-' + String(base).replace(/[^a-zA-Z0-9_-]+/g, '-');
+      while (document.getElementById(candidate)) candidate = 'a11y-field-' + (++formFieldSeq);
+      field.id = candidate;
+      field.name = candidate;
+    } else if (!field.id) {
+      var fromName = String(field.name).replace(/[^a-zA-Z0-9_-]+/g, '-');
+      var id = fromName || 'a11y-field-' + (++formFieldSeq);
+      while (document.getElementById(id)) id = 'a11y-field-' + (++formFieldSeq);
+      field.id = id;
+    } else if (!field.name) {
+      field.name = field.id;
+    }
+  }
+
+  function directLabelControl(label) {
+    var parent = label.parentElement;
+    if (!parent) return null;
+    var fields = Array.prototype.filter.call(parent.querySelectorAll(FORM_FIELD), function (field) {
+      return !field.closest('label') && !field.disabled && field.type !== 'hidden';
+    });
+    return fields.length ? fields[0] : null;
+  }
+
+  function replaceDecorativeLabel(label) {
+    var span = document.createElement('span');
+    Array.prototype.forEach.call(label.attributes, function (attr) {
+      if (attr.name !== 'for') span.setAttribute(attr.name, attr.value);
+    });
+    span.innerHTML = label.innerHTML;
+    label.replaceWith(span);
+  }
+
+  function enhanceFormSemantics(root) {
+    var scope = root || document;
+    var fields = [];
+    if (scope.matches && scope.matches(FORM_FIELD)) fields.push(scope);
+    if (scope.querySelectorAll) fields = fields.concat(Array.from(scope.querySelectorAll(FORM_FIELD)));
+    fields.forEach(ensureFieldIdentity);
+
+    var labels = [];
+    if (scope.matches && scope.matches('label')) labels.push(scope);
+    if (scope.querySelectorAll) labels = labels.concat(Array.from(scope.querySelectorAll('label')));
+    labels.forEach(function (label) {
+      if (label.querySelector(FORM_FIELD)) return;
+      var targetId = label.getAttribute('for');
+      if (targetId && document.querySelectorAll('#' + CSS.escape(targetId)).length === 1) return;
+      var control = directLabelControl(label);
+      if (!control) {
+        replaceDecorativeLabel(label);
+        return;
+      }
+      ensureFieldIdentity(control);
+      label.htmlFor = control.id;
+    });
+
+    fields.forEach(function (field) {
+      if (field.disabled || field.getAttribute('aria-hidden') === 'true') return;
+      var labelled = !!field.closest('label') || !!field.getAttribute('aria-label') ||
+        !!field.getAttribute('aria-labelledby') ||
+        !!(field.id && document.querySelector('label[for="' + CSS.escape(field.id) + '"]'));
+      if (!labelled) field.setAttribute('aria-label', fieldLabelText(field));
+    });
+  }
+
   function headingSelFor(el) {
     for (var i = 0; i < MODAL_KINDS.length; i++) {
       if (el.matches(MODAL_KINDS[i].sel)) return MODAL_KINDS[i].heading;
@@ -121,6 +204,7 @@
   function init() {
     enhanceAll(document);
     enhanceModals(document);
+    enhanceFormSemantics(document);
 
     // Sidebar content is re-rendered as the user navigates (session lists,
     // tool sub-rows, etc.). Watch for new rows and enhance them too.
@@ -151,9 +235,10 @@
             if (n.nodeType !== 1) continue;
             if (n.matches && n.matches(MODAL_SEL)) enhanceModal(n, headingSelFor(n));
             if (n.querySelector && n.querySelector(MODAL_SEL)) enhanceModals(n);
+            enhanceFormSemantics(n);
           }
         }
-      }).observe(document.body, { childList: true });
+      }).observe(document.body, { childList: true, subtree: true });
     }
   }
 

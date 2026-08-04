@@ -4,7 +4,14 @@ import stat
 import httpx
 import pytest
 
-from src.qwen_harness import QwenHarnessError, QwenServeClient, build_read_only_launch, create_disposable_config, normalize_event
+from src.qwen_harness import (
+    QwenHarnessError,
+    QwenServeClient,
+    QwenServeHTTPError,
+    build_read_only_launch,
+    create_disposable_config,
+    normalize_event,
+)
 
 
 def test_disposable_qwen_config_is_private_and_contains_only_bridge_contract(tmp_path):
@@ -77,6 +84,51 @@ async def test_qwen_client_authenticates_capabilities_and_creates_session():
         assert await client.create_session(cwd="/read-only") == "qwen-session"
         assert await client.prompt("qwen-session", "hello") == ("p1", "7")
         await client.cancel("qwen-session")
+
+
+@pytest.mark.asyncio
+async def test_qwen_client_exposes_typed_transient_bootstrap_503():
+    transport = httpx.MockTransport(lambda request: httpx.Response(
+        503,
+        headers={"Retry-After": "1"},
+        json={"error": "Daemon runtime is still starting", "code": "daemon_runtime_starting"},
+    ))
+    async with httpx.AsyncClient(transport=transport) as raw:
+        client = QwenServeClient("http://127.0.0.1:4170", "token", client=raw)
+        with pytest.raises(QwenServeHTTPError) as raised:
+            await client.create_session(cwd="/workspace")
+
+    error = raised.value
+    assert error.operation == "POST /session"
+    assert error.status_code == 503
+    assert error.error_code == "daemon_runtime_starting"
+    assert error.retry_after_seconds == 1.0
+    assert error.retryable is True
+    assert "Daemon runtime" not in str(error)
+
+
+@pytest.mark.asyncio
+async def test_qwen_deep_health_distinguishes_bootstrap_from_ready_runtime():
+    calls = 0
+
+    def daemon(request):
+        nonlocal calls
+        assert request.url.path == "/health"
+        assert request.url.query == b"deep=1"
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, headers={"Retry-After": "1"}, json={
+                "status": "degraded", "reason": "bootstrap",
+            })
+        return httpx.Response(200, json={"status": "ok", "workspaceCount": 1})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(daemon)) as raw:
+        client = QwenServeClient("http://127.0.0.1:4170", "token", client=raw)
+        with pytest.raises(QwenServeHTTPError) as raised:
+            await client.verify_runtime_ready()
+        assert raised.value.error_code == "bootstrap"
+        assert raised.value.retryable is True
+        assert (await client.verify_runtime_ready())["workspaceCount"] == 1
 
 
 @pytest.mark.asyncio

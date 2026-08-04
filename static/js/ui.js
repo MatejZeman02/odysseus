@@ -534,6 +534,21 @@ export function autoResize(textarea) {
   let clone = textarea._resizeClone;
   if (!clone) {
     clone = textarea.cloneNode(false);
+    // A cloned form control keeps the source id/name by default. Even though
+    // this probe is invisible, Chromium still reports duplicate-field and
+    // autofill issues. Give it a unique disabled identity and remove semantic
+    // attributes that belong only to the real composer.
+    const probeBase = textarea.id || textarea.name || 'textarea';
+    const probeId = `${probeBase}-resize-probe-${++autoResize._probeSequence}`;
+    clone.id = probeId;
+    clone.name = probeId;
+    clone.disabled = true;
+    clone.tabIndex = -1;
+    clone.setAttribute('aria-hidden', 'true');
+    clone.removeAttribute('required');
+    clone.removeAttribute('autofocus');
+    clone.removeAttribute('aria-label');
+    clone.removeAttribute('aria-labelledby');
     clone.style.cssText = getComputedStyle(textarea).cssText;
     clone.style.position = 'absolute';
     clone.style.visibility = 'hidden';
@@ -552,6 +567,7 @@ export function autoResize(textarea) {
   textarea.style.height = newHeight + 'px';
   textarea.style.overflow = newHeight >= maxHeight ? 'auto' : 'hidden';
 }
+autoResize._probeSequence = 0;
 
 /**
  * Debounce function for performance

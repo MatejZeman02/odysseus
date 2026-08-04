@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4L16 22L6 22Z' fill='%23e06c75'/%3E%3Cpath d='M16 8L16 22L24 22Z' fill='%23e06c75' opacity='0.6'/%3E%3Cpath d='M4 24Q10 20 16 24Q22 28 28 24' stroke='%23e06c75' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="manifest" href="/static/manifest.json">
   <meta name="theme-color" content="#282c34">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <!-- Disable iOS / Android auto-linkifying of numbers (phone/date/address)
@@ -248,11 +249,12 @@
       }, { once: true });
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css?v=20260723tasksbulkfeedback1">
-  <link rel="modulepreload" href="/static/app.js?v=20260723tasksbulkfeedback1">
-  <link rel="modulepreload" href="/static/js/chat.js?v=20260722ctxheader4">
+  <meta name="odysseus-build" content="20260804g15ui29">
+  <link rel="stylesheet" href="/static/style.css?v=20260804g15ui29">
+  <link rel="modulepreload" href="/static/app.js?v=20260804g15ui29">
+  <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
-  <link rel="modulepreload" href="/static/js/sessions.js?v=20260722ctxheader4">
+  <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
 </head>
 <body>
@@ -770,6 +772,7 @@
         <div class="section-header-flex">
           <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
           <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
+            <button type="button" class="section-header-btn" id="companion-new-project-btn" title="New Companion project">+</button>
             <button type="button" class="section-header-btn list-item-plus-btn chats-manage-btn" id="chats-library-btn" title="Manage Chats (Library)">
               <span aria-hidden="true" style="display:inline-block;width:13px;height:13px;"></span>
               <span class="list-item-plus-label">manage</span>
@@ -1023,6 +1026,11 @@
     <input type="checkbox" id="incognito-toggle" style="display:none;">
     <input type="file" id="file-input" class="hidden" multiple />
 
+    <div id="companion-scope-banner" class="companion-scope-banner" role="status" aria-live="polite" hidden>
+      <strong id="companion-scope-title"></strong>
+      <span id="companion-scope-detail"></span>
+    </div>
+
     <!-- Unified chat input bar -->
     <div class="chat-input-bar">
       <div class="chat-input-top">
@@ -1138,8 +1146,8 @@
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
           </button>
-          <!-- Shell commands (terminal) -->
-          <button type="button" class="input-icon-btn" title="Shell Access" id="bash-toggle-btn" data-mode-tool="true" aria-label="Shell access" aria-pressed="false">
+          <!-- G1.5 read-only companion. This deliberately replaces chat shell access. -->
+          <button type="button" class="input-icon-btn" title="Qwen Companion (project read-only)" id="qwen-toggle-btn" data-mode-tool="true" aria-label="Qwen Companion" aria-pressed="false">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
@@ -1185,7 +1193,7 @@
           </button>
         </div>
         <div class="chat-input-right">
-          <!-- Agent / Chat mode toggle -->
+          <!-- Agent selects tools; the terminal control selects the read-only Qwen project harness. -->
           <div class="mode-toggle">
             <button type="button" class="mode-toggle-btn active" id="mode-agent-btn" aria-pressed="true">Agent</button>
             <button type="button" class="mode-toggle-btn" id="mode-chat-btn" aria-pressed="false">Chat</button>
@@ -1197,7 +1205,6 @@
       </div>
       <!-- Hidden checkboxes for state -->
       <input type="checkbox" id="web-toggle" style="display:none;">
-      <input type="checkbox" id="bash-toggle" style="display:none;">
       <input type="checkbox" id="plan-toggle" style="display:none;">
     </div>
     <form id="chat-form" autocomplete="off" action="javascript:void(0);" style="display:none;"></form>
@@ -1914,11 +1921,6 @@
                 <input type="checkbox" checked data-ui-key="doc-toggle-btn"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>
-                <span class="vis-label">Shell</span>
-                <input type="checkbox" checked data-ui-key="bash-toggle-btn"><span class="vis-switch"></span>
-              </label>
-              <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></span>
                 <span class="vis-label">More Tools <span class="vis-hint">Overflow menu</span></span>
                 <input type="checkbox" checked data-ui-key="overflow-plus-btn"><span class="vis-switch"></span>
@@ -2505,7 +2507,8 @@
 <script type="module" src="/static/js/ui.js"></script>
 <script type="module" src="/static/js/markdown.js"></script>
 <script type="module" src="/static/js/dragSort.js"></script>
-<script type="module" src="/static/js/sessions.js?v=20260722ctxheader4"></script>
+<!-- sessions.js is imported by app.js and dependent modules. Do not load it
+     again under a second URL: that creates a second current-session state. -->
 <script type="module" src="/static/js/memory.js?v=20260722memoryloading1"></script>
 <script type="module" src="/static/js/skills.js"></script>
 <script type="module" src="/static/js/tourHints.js"></script>
@@ -2523,7 +2526,7 @@
 <script type="module" src="/static/js/chatRenderer.js?v=20260722emailfastindex1"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js?v=20260722emailfastindex1"></script>
-  <script type="module" src="/static/js/chat.js?v=20260722ctxheader4"></script>
+  <!-- chat.js is imported once by app.js; a second module instance has its own send state. -->
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
@@ -2531,9 +2534,31 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260723compareicon1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260723tasksbulkfeedback1"></script>  <!-- app.js must be LAST -->
-  <script type="module" src="/static/js/init.js?v=20260715freshroot3"></script>
+  <script type="module" src="/static/app.js?v=20260804g15ui29"></script>  <!-- app.js must be LAST -->
+  <script type="module" src="/static/js/init.js?v=20260804g15ui29"></script>
 <script type="module" src="/static/js/a11y.js"></script>
-<script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>
+<script nonce="{{CSP_NONCE}}">
+window.__ODYSSEUS_BUILD_ID='20260804g15ui29';
+document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',event=>{
+    const next=event.data&&event.data.type==='ODYSSEUS_UPDATE_READY'&&event.data.build;
+    if(!next||next===window.__ODYSSEUS_BUILD_ID||document.getElementById('odysseus-update-banner'))return;
+    const banner=document.createElement('div');
+    banner.id='odysseus-update-banner';
+    banner.setAttribute('role','status');
+    banner.style.cssText='position:fixed;z-index:100000;top:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:10px 14px;background:#2b211a;color:#fff;border:1px solid #d36b20;border-radius:8px;box-shadow:0 4px 18px #0008;font:inherit';
+    const text=document.createElement('span');
+    text.textContent=`Odysseus update ${next} is ready.`;
+    const button=document.createElement('button');
+    button.type='button';button.textContent='Reload now';
+    button.style.cssText='font:inherit;padding:5px 9px;cursor:pointer';
+    button.addEventListener('click',()=>location.reload());
+    banner.append(text,button);document.body.appendChild(banner);
+  });
+  navigator.serviceWorker.register('/static/sw.js?v=20260804g15ui29',{updateViaCache:'none'})
+    .then(reg=>reg.update()).catch(()=>{});
+}
+</script>
 </body>
 </html>

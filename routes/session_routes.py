@@ -10,7 +10,7 @@ import logging
 from core.session_manager import SessionManager
 from core.models import ChatMessage
 from src.request_models import SessionResponse
-from core.database import Session as DbSession, SessionLocal, Document, GalleryImage, utcnow_naive
+from core.database import Session as DbSession, SessionLocal, Document, GalleryImage, Project, utcnow_naive
 from src.auth_helpers import effective_user, _auth_disabled, owner_filter
 from src.session_image_cleanup import _generated_image_path_for_cleanup, session_image_refs
 from src.session_actions import is_session_recently_active
@@ -269,9 +269,17 @@ def setup_session_routes(
             last_msg_map = {}
             mode_map = {}
             msg_count_map = {}
-            q = db.query(DbSession.id, DbSession.folder, DbSession.total_input_tokens, DbSession.total_output_tokens, DbSession.is_important, DbSession.created_at, DbSession.updated_at, DbSession.last_message_at, DbSession.mode, DbSession.message_count).filter(DbSession.archived == False)
+            q = db.query(DbSession).filter(DbSession.archived == False)
             q = owner_filter(q, DbSession, user)
             rows = q.all()
+            project_ids = {row.project_id for row in rows if row.project_id}
+            project_map = {}
+            if project_ids:
+                pq = db.query(Project).filter(Project.id.in_(project_ids))
+                if user:
+                    pq = pq.filter(Project.owner == user)
+                project_map = {project.id: project for project in pq.all()}
+            scope_map = {}
             for row in rows:
                 folder_map[row.id] = row.folder
                 token_map[row.id] = (row.total_input_tokens or 0) + (row.total_output_tokens or 0)
@@ -287,6 +295,13 @@ def setup_session_routes(
                 )
                 mode_map[row.id] = row.mode
                 msg_count_map[row.id] = row.message_count or 0
+                project = project_map.get(row.project_id)
+                scope_map[row.id] = {"scope_kind": row.scope_kind or "general", "project_id": row.project_id,
+                                     "project_name": project.name if project else None,
+                                     "workspace_root": project.workspace_root if project else None,
+                                     "endpoint_id": getattr(row, "endpoint_id", None),
+                                     "harness_kind": getattr(row, "harness_kind", None) or "native",
+                                     "is_scope_primary": bool(getattr(row, "is_scope_primary", False))}
             # Sessions with active documents that have content
             from sqlalchemy import func
             doc_session_ids = set(
@@ -308,22 +323,21 @@ def setup_session_routes(
         finally:
             db.close()
 
-        sessions = [{"id": s.id, "name": s.name, "model": _public_model(s.name, s.model),
-                     "endpoint_url": s.endpoint_url, "rag": s.rag,
-                     "archived": s.archived, "folder": folder_map.get(s.id),
-                     "total_tokens": token_map.get(s.id, 0),
-                     "is_important": important_map.get(s.id, False),
-                     "created_at": created_map.get(s.id),
-                     "updated_at": updated_map.get(s.id),
-                     "last_message_at": last_msg_map.get(s.id),
-                     "has_documents": s.id in doc_session_ids,
-                     "has_images": s.id in img_session_ids,
-                     "mode": mode_map.get(s.id),
-                     "message_count": msg_count_map.get(s.id, 0)}
-                    for s in user_sessions.values()
-                    if not s.archived
-                    and (s.name or "").strip() not in ("Nobody", "Incognito")
-                    and (s.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES]
+        # DB rows are the durable source for Companion homes: unlike ordinary
+        # chats, a newly created home may have zero messages and therefore is
+        # intentionally not hydrated into SessionManager during startup.
+        sessions = [{"id": row.id, "name": row.name, "model": _public_model(row.name, row.model),
+                     "endpoint_url": row.endpoint_url, "rag": row.rag,
+                     "archived": row.archived, "folder": folder_map.get(row.id),
+                     "total_tokens": token_map.get(row.id, 0),
+                     "is_important": important_map.get(row.id, False),
+                     "created_at": created_map.get(row.id), "updated_at": updated_map.get(row.id),
+                     "last_message_at": last_msg_map.get(row.id), "has_documents": row.id in doc_session_ids,
+                     "has_images": row.id in img_session_ids, "mode": mode_map.get(row.id),
+                     "message_count": msg_count_map.get(row.id, 0), **scope_map.get(row.id, {})}
+                    for row in rows if not row.archived
+                    and (row.name or "").strip() not in ("Nobody", "Incognito")
+                    and (row.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES]
 
         return sessions
     
@@ -433,6 +447,16 @@ def setup_session_routes(
             rag=str(rag).lower() == "true" if rag else False,
             owner=user,
         )
+        if endpoint_id and endpoint_id.strip():
+            db = SessionLocal()
+            try:
+                row = db.query(DbSession).filter(DbSession.id == sid).first()
+                if row:
+                    row.endpoint_id = endpoint_id.strip()
+                    db.commit()
+                session.endpoint_id = endpoint_id.strip()
+            finally:
+                db.close()
         # Set auth headers for custom API-key endpoints
         resolved_key = request_api_key
         resolved_base = endpoint_url
@@ -514,6 +538,7 @@ def setup_session_routes(
                     _db.close()
             session.model = model
             session.endpoint_url = endpoint_url
+            session.endpoint_id = endpoint_id.strip() if endpoint_id else None
             # Update auth headers from the endpoint's stored API key
             if endpoint_api_key:
                 from src.endpoint_resolver import build_headers
@@ -528,12 +553,14 @@ def setup_session_routes(
                     db_session.model = model
                     db_session.endpoint_url = endpoint_url
                     db_session.headers = session.headers or {}
+                    db_session.endpoint_id = endpoint_id.strip() if endpoint_id else None
                     db_session.updated_at = utcnow_naive()
                     db.commit()
             finally:
                 db.close()
             result["model"] = model
             result["endpoint_url"] = endpoint_url
+            result["endpoint_id"] = endpoint_id.strip() if endpoint_id else None
         return result
     
     @router.post("/session/{sid}/inject_messages")

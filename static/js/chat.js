@@ -19,7 +19,7 @@ import searchModule from './search.js';
 import documentModule from './document.js?v=20260722emailfastindex1';
 import * as emailInbox from './emailInbox.js?v=20260722emailfastindex1';
 import codeRunnerModule from './codeRunner.js';
-import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js?v=20260722emailfastindex1';
+import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArrowUpRecall.js?v=20260714promptrecall';
@@ -30,6 +30,11 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
 
   let API_BASE = '';
   let currentAbort = null;
+  // Qwen project turns use their own SSE endpoint rather than the ordinary
+  // chat-stream registry. Keep an explicit handle so Stop (and an attempted
+  // edit while a turn is running) cannot accidentally target /api/chat/stop.
+  let _qwenAbortController = null;
+  let _qwenActiveSessionId = null;
   let isStreaming = false;
   // Continuous stall watchdog: while streaming, if the SSE stream produces
   // NOTHING for STALL_THRESHOLD_MS (no deltas, no tool heartbeat — tools beat
@@ -43,6 +48,7 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
   let _sendInFlight = false;   // covers the window from click → streaming start
   let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
   let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
+  let _editFieldSequence = 0;
   let _contextHeaderSeq = 0;
   let _contextHeaderData = null;
   let _contextHeaderBound = false;
@@ -1624,6 +1630,149 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
       if (_inject.prefix) _finalMsgWithInject = _inject.prefix + ' ' + _finalMsgWithInject;
       if (_inject.suffix) _finalMsgWithInject = _finalMsgWithInject + ' ' + _inject.suffix;
 
+      // Project Agent uses the isolated Qwen harness. Chat deliberately skips
+      // this block and continues through ordinary chat_stream with all local
+      // file/shell tools disabled.
+      let _g15Session = sessionModule.getSessions().find(s => s.id === streamSessionId);
+      // The Companion switch belongs to the authenticated session, not a
+      // browser cache. A background session reload or a duplicate DOM event
+      // must not route a Qwen-enabled project into native Agent.
+      try {
+        const harnessResponse = await fetch(`/api/g1/sessions/${encodeURIComponent(streamSessionId)}/harness`, {
+          credentials: 'same-origin',
+        });
+        if (harnessResponse.ok) {
+          const harness = await harnessResponse.json();
+          const cached = sessionModule.getSessions().find(s => s.id === streamSessionId);
+          if (cached) Object.assign(cached, harness);
+          _g15Session = { ...(_g15Session || {}), ...harness };
+          const qwenButton = document.getElementById('qwen-toggle-btn');
+          const qwenActive = harness.scope_kind === 'project' && harness.harness_kind === 'qwen';
+          qwenButton?.classList.toggle('active', qwenActive);
+          qwenButton?.setAttribute('aria-pressed', String(qwenActive));
+        }
+      } catch (_) { /* The server fence still rejects an unsafe stale route. */ }
+      const _g15AgentMode = document.getElementById('mode-agent-btn')?.classList.contains('active') ||
+        (Storage.loadToggleState().mode || 'chat') === 'agent';
+      if (_g15AgentMode && _g15Session?.scope_kind === 'project' && _g15Session?.harness_kind === 'qwen') {
+        const _qwenProcessStarted = Date.now();
+        const _qwenProcess = (() => {
+          const card = document.createElement('details');
+          card.className = 'qwen-process-card';
+          card.open = true;
+          const summary = document.createElement('summary');
+          const title = document.createElement('span');
+          title.className = 'qwen-process-title';
+          const detail = document.createElement('div');
+          detail.className = 'qwen-process-detail';
+          const status = document.createElement('p');
+          status.className = 'qwen-process-status';
+          status.hidden = true;
+          const tools = document.createElement('ul');
+          tools.className = 'qwen-process-tools';
+          detail.append(status, tools); summary.appendChild(title); card.append(summary, detail);
+          document.getElementById('chat-history')?.appendChild(card);
+          const formatElapsed = () => {
+            const seconds = Math.max(0, Math.floor((Date.now() - _qwenProcessStarted) / 1000));
+            return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+          };
+          let currentStatus = 'Preparing isolated read-only workspace';
+          const toolRows = new Map();
+          const refresh = () => { title.textContent = `Qwen is working · ${currentStatus} · ${formatElapsed()}`; };
+          const ticker = setInterval(refresh, 1000); refresh();
+          return {
+            status(message) { currentStatus = String(message || currentStatus).slice(0, 160); refresh(); },
+            tool(update) {
+              const operation = String(update.operation || 'Inspect project').slice(0, 80);
+              const tool = String(update.tool || 'inspect_workspace').slice(0, 80);
+              const path = update.path ? String(update.path).slice(0, 180) : '';
+              const label = String(update.label || `${operation}: ${path || 'workspace'}`).slice(0, 2100);
+              const commandText = String(update.command || `${tool} ${path || '.'}`).slice(0, 2100);
+              const key = `${operation}\n${path}\n${commandText}`;
+              let row = toolRows.get(key);
+              if (!row) {
+                row = document.createElement('li');
+                const step = document.createElement('details'); step.className = 'qwen-process-tool';
+                const stepSummary = document.createElement('summary'); stepSummary.className = 'qwen-process-tool-label';
+                const stepDetail = document.createElement('div'); stepDetail.className = 'qwen-process-tool-detail';
+                const command = document.createElement('code'); command.className = 'qwen-process-command';
+                // The normal one-line view is the command itself. File and
+                // search targets are most useful at the end; shell commands
+                // are read left-to-right, so they clip at the end.
+                const preview = commandText.length <= 112 ? commandText : (tool === 'shell'
+                  ? `${commandText.slice(0, 111)}✂`
+                  : `${commandText.slice(0, 36)}✂${commandText.slice(-(112 - 37))}`);
+                stepSummary.textContent = preview;
+                command.textContent = commandText;
+                stepDetail.appendChild(command);
+                step.append(stepSummary, stepDetail); row.appendChild(step); tools.appendChild(row); toolRows.set(key, row);
+              }
+              row.dataset.status = String(update.status || 'working');
+              currentStatus = operation; refresh();
+            },
+            finish(outcome = 'worked') {
+              clearInterval(ticker); card.open = false; card.classList.add('complete');
+              title.textContent = `Process · ${outcome} for ${formatElapsed()}`;
+            },
+            remove() { card.remove(); },
+          };
+        })();
+        try {
+          _qwenActiveSessionId = streamSessionId;
+          let companionProfile = '';
+          // Qwen G1.5 is intentionally workspace-only and has no network.
+          // The visible web-search setting continues to apply to native Agent
+          // turns, but must not make a hidden browser-side network request for
+          // a read-only Qwen turn.
+          const response = await fetch('/api/g1/project-turn/stream', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: streamSessionId, message: _finalMsgWithInject, companion_profile: companionProfile }),
+            signal: (_qwenAbortController = new AbortController()).signal
+          });
+          if (!response.ok || !response.body) throw new Error((await response.json().catch(() => ({}))).detail || 'Qwen Companion could not start');
+          const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let event = ''; let answer = ''; let doneData = null;
+          while (true) {
+            const { value, done } = await reader.read(); if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split('\n\n'); buffer = frames.pop();
+            for (const frame of frames) {
+              const eventLine = frame.split('\n').find(line => line.startsWith('event:'));
+              const dataLine = frame.split('\n').find(line => line.startsWith('data:'));
+              event = eventLine ? eventLine.slice(6).trim() : ''; const data = dataLine ? JSON.parse(dataLine.slice(5)) : {};
+              if (event === 'status') _qwenProcess.status(data.message);
+              if (event === 'tool') _qwenProcess.tool(data);
+              if (event === 'delta') answer += data.text || '';
+              if (event === 'done') doneData = data;
+              if (event === 'error') throw new Error(data.detail || 'Qwen Companion failed');
+            }
+          }
+          if (!doneData) {
+            throw new Error('Qwen Companion ended before completing the turn');
+          }
+          _qwenProcess.finish('worked');
+          if (doneData?.user_message_id && _userMsgEl) _userMsgEl.dataset.dbId = doneData.user_message_id;
+          // The server saved this safe trace in the assistant metadata.  Swap
+          // the live card for the normal history renderer so refresh/replay
+          // gets the identical Process block rather than losing it.
+          if (doneData?.qwen_process) _qwenProcess.remove();
+          if (answer) addMessage('assistant', `${answer}\n\n*Qwen · Read-only · Workspace unchanged*`, doneData?.model || 'Qwen Companion', {
+            _db_id: doneData?.message_id || '', harness: 'qwen', qwen_read_only: true,
+            workspace_unchanged: !!doneData?.workspace_unchanged,
+            qwen_process: doneData?.qwen_process || null,
+          });
+        } catch (error) {
+          const stopped = error?.name === 'AbortError';
+          _qwenProcess.finish('stopped');
+          if (!stopped) addMessage('assistant', `Qwen Companion error: ${error.message || 'read-only turn failed'}`);
+        } finally {
+          _qwenAbortController = null;
+          _qwenActiveSessionId = null;
+          isStreaming = false; _streamSessionId = null; updateSubmitButton('idle', submitBtn); _releaseSendFlag();
+        }
+        return;
+      }
+
       const fd = new FormData();
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
@@ -1666,7 +1815,7 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
 	      const isPlanMode = !!toggleState.plan_mode && !(el('research-toggle') && el('research-toggle').checked);
 	      let isAgentMode = (toggleState.mode || 'chat') === 'agent';
       const isIncognito = isIncognitoForSend;
-	      const workspaceAgentIntent = !isIncognito && /\b(fix|debug|implement|change|update|refactor|patch|review|test|run|execute|start|launch|build|lint|typecheck|benchmark|eval|terminal[- ]bench|tbench|repo|repository|codebase|project|app|server|api|frontend|backend|bug|issue|pr|file|folder|directory|source|logs?|trace|stacktrace|traceback|docker|container|tmux|terminal|shell|git|branch|commit|diff|pytest|process|port|endpoint|computer|machine|laptop|device|system)\b/i.test(String(msg || ''));
+	      const workspaceAgentIntent = false; // G1.5: browser chat never promotes itself to native shell/workspace access.
 	      if (isPlanMode || _pendingApprovedPlan) {
 	        isAgentMode = true;
 	      }
@@ -1698,8 +1847,7 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
 	        fd.set('mode', 'chat');
 	        fd.set('plan_mode', 'false');
 	      }
-      fd.append('allow_bash', el('bash-toggle').checked ? 'true' : 'false');
-      if (workspaceAgentIntent) fd.set('allow_bash', 'true');
+      fd.append('allow_bash', 'false');
       const ragChk = el('rag-toggle');
       if (ragChk && !ragChk.checked) {
         fd.append('use_rag', 'false');
@@ -1861,6 +2009,10 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
           if (m) errText = m[1].replace(/\\"/g, '"');
           else if (errBody.length < 200) errText = errBody;
         } catch {}
+        if (res.status === 409 && errText.includes('Qwen Companion is enabled')) {
+          errText = 'Qwen Companion stayed enabled; a duplicate native Agent request was blocked. Please send once more.';
+          try { await sessionModule.loadSessions(); } catch (_) {}
+        }
         // Auto-switch to chat mode for tool-related errors
         if (errText.includes('tool') || errText.includes('auto')) {
           errText = 'This model doesn\'t support agent tools — switched to Chat mode. Try again.';
@@ -4035,6 +4187,17 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
   // the server run — otherwise closing the tab would kill the background task,
   // defeating the whole point. Only the Stop button cancels the server run.
   export function abortCurrentRequest(stopServer = false) {
+    const qwenAbort = _qwenAbortController;
+    const qwenSessionId = _qwenActiveSessionId;
+    if (qwenAbort) {
+      qwenAbort.abort();
+      if (stopServer && qwenSessionId) {
+        fetch(`/api/g1/project-turn/${encodeURIComponent(qwenSessionId)}/stop`, {
+          method: 'POST', credentials: 'same-origin'
+        }).catch(() => {});
+      }
+      return;
+    }
     const active = _getForegroundStreamState();
     const abortCtrl = active ? active.abortCtrl : currentAbort;
     if (abortCtrl) {
@@ -4158,7 +4321,12 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
         cache: 'no-store',
       });
       if (!_getForegroundStreamState() || _backgroundStreams.has(sid)) return;
-      if (res.status !== 404) return;
+      let streamInactive = res.status === 404;
+      if (res.ok) {
+        const status = await res.json().catch(() => ({}));
+        streamInactive = status.status !== 'streaming';
+      }
+      if (!streamInactive) return;
 
       console.warn('[stream-watchdog] Local stream was stale and server has no active stream. Unlocking composer.');
       if (active.abortCtrl && !active.abortCtrl.signal.aborted) {
@@ -4781,6 +4949,7 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
    * Edit a user message: show an input, truncate to before it, resubmit the edited text.
    */
   export async function editUserMessage(userMsgElement) {
+    if (userMsgElement.querySelector('.edit-textarea')) return;
     const box = document.getElementById('chat-history');
     const allMsgs = Array.from(box.querySelectorAll('.msg'));
     const msgIndex = allMsgs.indexOf(userMsgElement);
@@ -4791,6 +4960,11 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
 
     // Replace body with an editable textarea
     const editor = document.createElement('textarea');
+    const editorId = `edit-user-message-${++_editFieldSequence}`;
+    editor.id = editorId;
+    editor.name = editorId;
+    editor.autocomplete = 'off';
+    editor.setAttribute('aria-label', 'Edit user message');
     editor.className = 'edit-textarea';
     editor.value = currentText;
     editor.rows = Math.max(2, currentText.split('\n').length);
@@ -4799,18 +4973,37 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
     btnRow.style.cssText = 'display:flex; gap:6px; margin-top:4px;';
 
     const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
     saveBtn.className = 'edit-save-btn';
     saveBtn.textContent = 'Send';
     const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
     cancelBtn.className = 'edit-cancel-btn';
     cancelBtn.textContent = 'Cancel';
     btnRow.appendChild(saveBtn);
     btnRow.appendChild(cancelBtn);
 
+    const editStatus = document.createElement('div');
+    editStatus.className = 'edit-message-status';
+    editStatus.setAttribute('role', 'status');
+    editStatus.setAttribute('aria-live', 'polite');
+    editStatus.hidden = true;
+    const setEditStatus = (message, kind = '') => {
+      editStatus.textContent = message || '';
+      editStatus.className = `edit-message-status${kind ? ` ${kind}` : ''}`;
+      editStatus.hidden = !message;
+    };
+
     const originalHTML = bodyEl.innerHTML;
     bodyEl.innerHTML = '';
+    const editorLabel = document.createElement('label');
+    editorLabel.className = 'a11y-visually-hidden';
+    editorLabel.htmlFor = editorId;
+    editorLabel.textContent = 'Edit user message';
+    bodyEl.appendChild(editorLabel);
     bodyEl.appendChild(editor);
     bodyEl.appendChild(btnRow);
+    bodyEl.appendChild(editStatus);
     editor.focus();
 
     cancelBtn.addEventListener('click', (e) => {
@@ -4819,19 +5012,66 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
     });
 
     saveBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
       e.stopPropagation();
+      saveBtn.dataset.editSendState = 'clicked';
       const newText = editor.value.trim();
-      if (!newText) return;
+      if (!newText) {
+        saveBtn.dataset.editSendState = 'empty-message';
+        setEditStatus('The edited message cannot be empty.', 'error');
+        uiModule?.showError?.('The edited message cannot be empty.');
+        return;
+      }
 
-      const sessionId = sessionModule.getCurrentSessionId();
-      if (!sessionId) return;
+      const liveSessions = _liveSessionModule();
+      const sessionId = liveSessions?.getCurrentSessionId?.();
+      if (!sessionId) {
+        saveBtn.dataset.editSendState = 'missing-session';
+        setEditStatus('This chat is no longer open. Reopen it and try again.', 'error');
+        uiModule?.showError?.('The chat is no longer open. Reopen it and try again.');
+        return;
+      }
+
+      // A rewrite is a new turn. Do not let it masquerade as a composer Stop
+      // while an actual answer is still running. `isStreaming` can remain
+      // stale after a completed Qwen turn, so derive this from the live run
+      // registries/controller instead of blocking the edit on that flag.
+      const hasRealActiveRun = !!_qwenAbortController || hasActiveStream(sessionId);
+      if (hasRealActiveRun) {
+        saveBtn.dataset.editSendState = 'active-response';
+        saveBtn.dataset.editSendDetail = JSON.stringify({
+          qwen: !!_qwenAbortController,
+          active: _activeStreams.has(sessionId),
+          reader: _streamSessionId === sessionId,
+          background: _backgroundStreams.has(sessionId),
+          resuming: _resumingStreams.has(sessionId),
+        });
+        setEditStatus('A response is still active. Stop it before editing this message.', 'error');
+        uiModule?.showError?.('Stop the active response before editing a message.');
+        return;
+      }
+      // No worker exists, so an admission latch left behind by a completed or
+      // failed turn is stale. Clear it or handleChatSubmit() silently returns
+      // before the replacement prompt is dispatched.
+      _sendInFlight = false;
+      _syncForegroundStreamGlobals();
 
       const keepCount = msgIndex;
       try {
+        saveBtn.dataset.editSendState = 'truncating';
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Sending…';
+        setEditStatus('Updating the conversation…');
         await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ keep_count: keepCount })
+        }).then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.status === 'ok' && data.truncated !== false) return;
+          let detail = '';
+          try { detail = data.detail || ''; } catch (_) {}
+          throw new Error(detail || `Could not update the chat (HTTP ${res.status})`);
         });
 
         // Remove DOM elements from msgIndex onward
@@ -4839,15 +5079,24 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
           allMsgs[i].remove();
         }
 
-        // Submit the edited text
+        // Submit from this inline action itself.  Do not synthesize a click on
+        // any other UI control: an older-prompt edit must always create its
+        // replacement turn, regardless of how the composer currently looks.
         const messageInput = uiModule.el('message');
+        if (!messageInput) throw new Error('The message composer is unavailable');
         messageInput.value = newText;
-        const submitBtn = document.querySelector('.send-btn');
-        if (submitBtn) submitBtn.click();
+        messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+        saveBtn.dataset.editSendState = 'submitting';
+        setEditStatus('Sending the edited message…');
+        await handleChatSubmit({ preventDefault() {} });
       } catch (err) {
+        saveBtn.dataset.editSendState = 'error';
         console.error('Edit failed:', err);
+        setEditStatus(`Edit failed: ${err.message || err}`, 'error');
         if (uiModule) uiModule.showError('Edit failed: ' + err.message);
-        bodyEl.innerHTML = originalHTML;
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Send';
       }
     });
 
@@ -5210,17 +5459,24 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
     const keepCount = aiIndex + 1;
 
     try {
-      const res = await fetch(`${API_BASE}/api/session/${sessionId}/fork`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_count: keepCount }),
-      });
+      const session = sessionModule.getSessions().find(item => item.id === sessionId);
+      const isProject = session?.scope_kind === 'project' && session?.project_id;
+      const res = isProject
+        ? await fetch(`${API_BASE}/api/g1/projects/${encodeURIComponent(session.project_id)}/fork?${new URLSearchParams({ endpoint_id: session.endpoint_id || '', model: session.model || '' })}`, {
+            method: 'POST', credentials: 'same-origin',
+          })
+        : await fetch(`${API_BASE}/api/session/${sessionId}/fork`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keep_count: keepCount }),
+          });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
       await sessionModule.loadSessions();
       await sessionModule.selectSession(data.id);
-      if (uiModule) uiModule.showToast(`Forked → ${data.name}`);
+      if (uiModule) uiModule.showToast(isProject
+        ? `New project thread → ${data.name} · shared brief, fresh transcript`
+        : `Forked → ${data.name}`);
     } catch (err) {
       console.error('Fork failed:', err);
       if (uiModule) uiModule.showError('Fork failed: ' + err.message);
@@ -5235,7 +5491,7 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
   export async function checkPendingResearch(sessionId) {
     if (!sessionId) return;
     try {
-      const res = await fetch(`${API_BASE}/api/research/status/${sessionId}`);
+      const res = await fetch(`${API_BASE}/api/research/status/${sessionId}?quiet=1`);
       if (!res.ok) {
         if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
         return; // 404 = no research for this session
@@ -5603,21 +5859,33 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
 
     // Create editable textarea overlay
     const textarea = document.createElement('textarea');
+    const textareaId = `edit-assistant-message-${++_editFieldSequence}`;
+    textarea.id = textareaId;
+    textarea.name = textareaId;
+    textarea.autocomplete = 'off';
+    textarea.setAttribute('aria-label', 'Edit assistant message');
     textarea.className = 'msg-edit-textarea';
     textarea.value = originalRaw;
     textarea.style.width = '100%';
     textarea.style.minHeight = Math.max(100, body.offsetHeight) + 'px';
     body.style.display = 'none';
-    body.parentNode.insertBefore(textarea, body.nextSibling);
+    const textareaLabel = document.createElement('label');
+    textareaLabel.className = 'a11y-visually-hidden';
+    textareaLabel.htmlFor = textareaId;
+    textareaLabel.textContent = 'Edit assistant message';
+    body.parentNode.insertBefore(textareaLabel, body.nextSibling);
+    body.parentNode.insertBefore(textarea, textareaLabel.nextSibling);
     textarea.focus();
 
     // Add save/cancel bar
     const bar = document.createElement('div');
     bar.className = 'msg-edit-bar';
     const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
     saveBtn.className = 'msg-edit-save';
     saveBtn.textContent = 'Save';
     const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
     cancelBtn.className = 'msg-edit-cancel';
     cancelBtn.textContent = 'Cancel';
     bar.appendChild(saveBtn);
@@ -5625,6 +5893,7 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
     textarea.parentNode.insertBefore(bar, textarea.nextSibling);
 
     function cleanup() {
+      textareaLabel.remove();
       textarea.remove();
       bar.remove();
       body.style.display = '';
@@ -5652,7 +5921,11 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ msg_id: msgId, content: newContent }),
         });
-        if (!res.ok) throw new Error('Server error ' + res.status);
+        if (!res.ok) {
+          let detail = '';
+          try { detail = (await res.json()).detail || ''; } catch (_) {}
+          throw new Error(detail || `Could not save the edit (HTTP ${res.status})`);
+        }
 
         // Re-render body with markdown
         body.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(newContent));

@@ -7,12 +7,13 @@
 </p>
 
 > **Fork notice — experimental continuity companion:** This fork follows
-> `upstream/dev` while developing an opt-in G1 project-continuity companion.
+> `upstream/dev` while developing the opt-in G1.5 continuity companion UI.
 > It adds non-destructive scoped checkpoints, a read-only workspace harness,
 > and an optional pinned Qwen worker behind disabled-by-default flags. It does
 > not enable file writes, shell access, or upstream-provider credentials for
-> that worker. See [the G1 evidence report](ODYSSEUS_G1_LOCAL_READINESS.md) and
-> [the upstream-sync guide](docs/upstream-sync.md).
+> that worker. See [the G1 evidence report](ODYSSEUS_G1_LOCAL_READINESS.md),
+> [the G1.5 acceptance report](docs/G1_5_ACCEPTANCE_REPORT.md), and the
+> [upstream-sync guide](docs/upstream-sync.md).
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·

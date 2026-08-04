@@ -67,6 +67,11 @@ def _continuity_context_enabled() -> bool:
     return os.getenv("ODYSSEUS_CONTINUITY_CONTEXT", "").strip().lower() in {"1", "true", "yes"}
 
 
+def _continuity_enabled_for_session(sess) -> bool:
+    """Project scope opts in durably; the flag only gates legacy chats."""
+    return _continuity_context_enabled() or getattr(sess, "scope_kind", "general") == "project"
+
+
 def _continuity_prompt_message(bundle) -> dict:
     """Render derived artifacts only; raw transcript stays in the tail below."""
     sections = []
@@ -855,7 +860,12 @@ async def build_chat_context(
     # Default behavior retains legacy compaction exactly.  The guarded path
     # writes a derived checkpoint and compiles an artifact + raw-tail context,
     # never calling replace_messages() or changing session history.
-    if _continuity_context_enabled() and not incognito:
+    # Project homes always use the scoped continuity compiler.  The rollout
+    # flag continues to govern legacy/general chats, but a project must not
+    # silently lose its stored scope merely because the global experiment flag
+    # is off.
+    continuity_enabled = _continuity_enabled_for_session(sess)
+    if continuity_enabled and not incognito:
         try:
             from src.continuity.compiler import CheckpointCompactor, ContextCompiler
             from src.continuity.store import ContinuityStore

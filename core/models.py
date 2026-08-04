@@ -76,6 +76,9 @@ class Session:
     message_count: int = 0
     scope_kind: str = "general"
     project_id: Optional[str] = None
+    endpoint_id: Optional[str] = None
+    harness_kind: str = "native"
+    is_scope_primary: bool = False
 
     def __post_init__(self):
         if self.headers is None:

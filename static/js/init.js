@@ -97,11 +97,11 @@ document.addEventListener('DOMContentLoaded', markComposerUserEdited, { once: tr
 {
   const KEY = Storage.KEYS.SIDEBAR_COLLAPSED;
   const saved = Storage.getJSON(KEY, {});
-  const _defaultCollapsed = { 'sessions-section': true };
+  const _defaultCollapsed = { 'sessions-section': false };
   document.querySelectorAll('.sidebar .section').forEach((section) => {
     const id = section.id;
     if (!id) return;
-    const shouldCollapse = (id in saved) ? saved[id] : !!_defaultCollapsed[id];
+    const shouldCollapse = id === 'sessions-section' ? false : ((id in saved) ? saved[id] : !!_defaultCollapsed[id]);
     if (shouldCollapse) section.classList.add('collapsed');
   });
   // Sessions-section notification dot: clear when the section becomes

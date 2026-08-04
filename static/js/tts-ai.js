@@ -56,8 +56,6 @@ class AITTSManager {
                 }
             } else if (this.available) {
                 this.useBrowserTTS = false;
-            } else {
-                console.warn('TTS: not available');
             }
         } catch (error) {
             console.error('Failed to check TTS availability:', error);

@@ -136,6 +136,9 @@ class SessionManager:
             is_important=getattr(db_session, "is_important", False) or False,
             scope_kind=getattr(db_session, "scope_kind", None) or "general",
             project_id=getattr(db_session, "project_id", None),
+            endpoint_id=getattr(db_session, "endpoint_id", None),
+            harness_kind=getattr(db_session, "harness_kind", None) or "native",
+            is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
         return session
@@ -196,6 +199,9 @@ class SessionManager:
             is_important=getattr(db_session, 'is_important', False) or False,
             scope_kind=getattr(db_session, "scope_kind", None) or "general",
             project_id=getattr(db_session, "project_id", None),
+            endpoint_id=getattr(db_session, "endpoint_id", None),
+            harness_kind=getattr(db_session, "harness_kind", None) or "native",
+            is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
 
         session.message_count = getattr(db_session, 'message_count', len(history))
@@ -451,6 +457,9 @@ class SessionManager:
             session.message_count = getattr(db_session, "message_count", session.message_count) or 0
             session.scope_kind = getattr(db_session, "scope_kind", None) or "general"
             session.project_id = getattr(db_session, "project_id", None)
+            session.endpoint_id = getattr(db_session, "endpoint_id", None)
+            session.harness_kind = getattr(db_session, "harness_kind", None) or "native"
+            session.is_scope_primary = bool(getattr(db_session, "is_scope_primary", False))
             return True
         except Exception as e:
             logger.error(f"Error syncing session metadata {session_id}: {e}")

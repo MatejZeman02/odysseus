@@ -276,13 +276,17 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         return {"active": active}
 
     @router.get("/api/research/status/{session_id}")
-    async def research_status(session_id: str, request: Request):
+    async def research_status(session_id: str, request: Request, quiet: bool = False):
         user = _require_user(request)
         _validate_session_id(session_id)
         if not _owns_in_memory(session_id, user):
+            if quiet:
+                return {"status": "idle"}
             raise HTTPException(404, "No research found for this session")
         status = research_handler.get_status(session_id)
         if status is None:
+            if quiet:
+                return {"status": "idle"}
             raise HTTPException(404, "No research found for this session")
         return status
 

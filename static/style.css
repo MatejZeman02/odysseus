@@ -8986,6 +8986,31 @@ button.hamburger {
 }
 .attach-strip:empty { display: none; }
 
+.companion-scope-banner {
+  box-sizing: border-box;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto 6px;
+  padding: 0 4px;
+  color: color-mix(in srgb, var(--fg) 72%, transparent);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.companion-scope-banner[hidden] { display: none; }
+.companion-scope-banner strong { color: var(--fg); font-weight: 600; }
+.companion-scope-banner span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 560px) {
+  .companion-scope-banner { font-size: 12px; }
+}
+
 /* Upload-in-progress feedback: the message bubble shows immediately, so while
    the files are still uploading we put a whirlpool ON each attachment chip and
    dim the chip's content — making it obvious that file is being sent, not stuck. */
@@ -9420,6 +9445,64 @@ body.fullwidth-chat .chat-history {
   opacity: 0.9;
   line-height: 1.5;
 }
+
+/* Qwen Companion exposes only its sanitized read-only progress. */
+.qwen-process-card {
+  display: table;
+  margin: 10px 0;
+  max-width: calc(100% - 24px);
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+.qwen-process-card summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: var(--fg);
+  font-size: 1em;
+  list-style: none;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent, var(--red)) 10%, transparent);
+}
+.qwen-process-card summary::-webkit-details-marker { display: none; }
+.qwen-process-card summary::before { content: '◌'; margin-right: 8px; color: var(--accent, var(--red)); }
+.qwen-process-card.complete summary::before { content: '✓'; }
+.qwen-process-detail { padding: 7px 0 0; border: 0; }
+.qwen-process-status { margin: 0; }
+.qwen-process-tools { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.qwen-process-tools li { margin: 0; border: 0; background: transparent; }
+.qwen-process-tools li[data-status="completed"] .qwen-process-tool-label::before { color: #4caf50; }
+.qwen-process-tools li[data-status="failed"] .qwen-process-tool-label::before { color: #ef5350; }
+.qwen-process-tool { display: block; }
+.qwen-process-tool > summary.qwen-process-tool-label { display: block; padding: 4px 8px; color: var(--fg); font-family: var(--font-mono, inherit); font-size: 1em; font-weight: 400; overflow: hidden; text-overflow: clip; white-space: nowrap; border-radius: 4px; background: transparent; }
+.qwen-process-tool > summary.qwen-process-tool-label:hover { background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent); }
+.qwen-process-tool > summary.qwen-process-tool-label::before { content: '›'; display: inline-block; width: 16px; margin: 0 2px 0 0; color: var(--accent, var(--red)); transition: transform .15s ease; }
+.qwen-process-tool[open] > summary.qwen-process-tool-label::before { transform: rotate(90deg); }
+.qwen-process-tool-detail { display: block; padding: 3px 8px 8px 28px; color: var(--muted, var(--fg)); font-size: 1em; }
+.qwen-process-command { display: block; max-width: min(900px, calc(100vw - 90px)); overflow-wrap: anywhere; white-space: pre-wrap; padding: 5px 7px; background: color-mix(in srgb, #000 20%, transparent); border-radius: 4px; color: var(--fg); }
+.qwen-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; color: var(--muted, var(--fg)); font-size: .86em; }
+.qwen-feedback-prompt { margin-right: 2px; }
+.qwen-feedback-choices { display: inline-flex; gap: 3px; }
+.qwen-feedback-choice, .qwen-feedback-save { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: inherit; padding: 3px 8px; cursor: pointer; font: inherit; }
+.qwen-feedback-choice:hover, .qwen-feedback-save:hover, .qwen-feedback-choice.active { color: var(--fg); border-color: var(--accent, var(--red)); background: color-mix(in srgb, var(--accent, var(--red)) 10%, transparent); }
+.qwen-feedback-note { min-width: 150px; flex: 1 1 220px; max-width: 420px; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, #000 8%, transparent); color: var(--fg); padding: 4px 9px; font: inherit; }
+.qwen-feedback-status { min-width: 38px; opacity: .72; }
+.companion-project-form { width: min(560px, calc(100vw - 24px)); }
+.companion-project-form .modal-body { display: grid; gap: 8px; }
+.companion-project-form label { font-weight: 600; }
+.companion-project-workspace-row { display: flex; gap: 7px; align-items: center; }
+.companion-project-workspace-row input { flex: 1; min-width: 0; }
+.companion-project-route { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.companion-project-route strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.companion-qwen-readiness {
+  margin: 1px 8px 6px;
+  padding: 4px 6px;
+  color: var(--muted, var(--fg));
+  font-size: .84em;
+  line-height: 1.25;
+}
+.companion-qwen-readiness.ready { color: #63b56b; }
+.companion-qwen-readiness.unavailable { color: #d79a5b; }
 .live-reply-content {
   animation: fadeSlideIn 0.3s ease-out;
 }
@@ -41129,4 +41212,13 @@ body.theme-frosted .modal {
 @media (max-width: 768px) {
   .compare-grid[data-cols] { grid-template-columns: 1fr !important; overflow-y: auto; }
   .compare-pane { min-height: 60dvh; }
+}
+.edit-message-status {
+  margin-top: 0.45rem;
+  color: var(--text-muted, #9a9a9a);
+  font: inherit;
+}
+
+.edit-message-status.error {
+  color: var(--error, #e06c75);
 }

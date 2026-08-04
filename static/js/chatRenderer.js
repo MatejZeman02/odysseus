@@ -310,11 +310,19 @@ function _openVisionEditor(att, userMsgEl) {
   desc.textContent = 'Edit text and save, new chats will have the new context. Regenerate or continue from there.';
   panel.appendChild(desc);
   const ta = document.createElement('textarea');
+  const taId = `vision-editor-${String(att.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)}`;
+  ta.id = taId;
+  ta.name = taId;
+  ta.setAttribute('aria-label', 'Vision text');
   ta.className = 'vision-editor-text';
   ta.rows = 10;
   ta.placeholder = 'Loading…';
   ta.disabled = true;
-  panel.appendChild(ta);
+  const taLabel = document.createElement('label');
+  taLabel.className = 'a11y-visually-hidden';
+  taLabel.htmlFor = taId;
+  taLabel.textContent = 'Vision text';
+  panel.append(taLabel, ta);
   const actions = document.createElement('div');
   actions.className = 'vision-editor-actions';
   const closeBtn = document.createElement('button');
@@ -907,6 +915,64 @@ export function roleTimestamp(when) {
   ts.textContent = d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   ts.title = d.toLocaleString();
   return ts;
+}
+
+function _qwenElapsed(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${total % 60}s`;
+}
+
+function _qwenCommandPreview(command, tool) {
+  const text = String(command || '').slice(0, 2100);
+  if (text.length <= 112) return text;
+  // Read/search targets are useful at the end. Shell commands are useful
+  // from the start, so their preview only clips the right edge.
+  return tool === 'shell'
+    ? `${text.slice(0, 111)}✂`
+    : `${text.slice(0, 36)}✂${text.slice(-(112 - 37))}`;
+}
+
+/** Rebuild the compact, sanitized Qwen tool trace saved with its reply. */
+export function buildQwenProcessCard(process) {
+  if (!process || typeof process !== 'object') return null;
+  const events = Array.isArray(process.events) ? process.events : [];
+  const card = document.createElement('details');
+  card.className = 'qwen-process-card complete';
+  const summary = document.createElement('summary');
+  const title = document.createElement('span');
+  title.className = 'qwen-process-title';
+  title.textContent = `Process · worked for ${_qwenElapsed(process.elapsed_seconds)}`;
+  summary.appendChild(title);
+  const detail = document.createElement('div');
+  detail.className = 'qwen-process-detail';
+  const tools = document.createElement('ul');
+  tools.className = 'qwen-process-tools';
+
+  for (const rawEvent of events.slice(0, 100)) {
+    if (!rawEvent || typeof rawEvent !== 'object') continue;
+    const tool = String(rawEvent.tool || 'inspect_workspace').slice(0, 80);
+    const path = String(rawEvent.path || '').slice(0, 180);
+    const command = String(rawEvent.command || `${tool} ${path || '.'}`).slice(0, 2100);
+    const row = document.createElement('li');
+    row.dataset.status = String(rawEvent.status || 'completed').slice(0, 20);
+    const step = document.createElement('details');
+    step.className = 'qwen-process-tool';
+    const stepSummary = document.createElement('summary');
+    stepSummary.className = 'qwen-process-tool-label';
+    stepSummary.textContent = _qwenCommandPreview(command, tool);
+    const stepDetail = document.createElement('div');
+    stepDetail.className = 'qwen-process-tool-detail';
+    const fullCommand = document.createElement('code');
+    fullCommand.className = 'qwen-process-command';
+    fullCommand.textContent = command;
+    stepDetail.appendChild(fullCommand);
+    step.append(stepSummary, stepDetail);
+    row.appendChild(step);
+    tools.appendChild(row);
+  }
+  detail.appendChild(tools);
+  card.append(summary, detail);
+  return card;
 }
 
 /**
@@ -1537,6 +1603,45 @@ function _trackAction(id) {
   recent.unshift(id);
   if (recent.length > 10) recent.length = 10;
   localStorage.setItem(_ACTION_RECENTS_KEY, JSON.stringify(recent));
+}
+
+function appendQwenFeedback(msgElement, metadata) {
+  if (!metadata || (metadata.harness !== 'qwen' && !metadata.qwen_read_only)) return;
+  const panel = document.createElement('div'); panel.className = 'qwen-feedback';
+  panel.setAttribute('aria-label', 'Rate this Qwen answer');
+  const prompt = document.createElement('span'); prompt.className = 'qwen-feedback-prompt'; prompt.textContent = 'Was this answer';
+  const choices = document.createElement('span'); choices.className = 'qwen-feedback-choices';
+  const note = document.createElement('input');
+  note.type = 'text'; note.className = 'qwen-feedback-note'; note.maxLength = 2000;
+  note.name = `qwen_feedback_note_${msgElement.dataset.dbId || 'pending'}`;
+  note.setAttribute('aria-label', 'Optional feedback note'); note.placeholder = 'Optional note';
+  note.value = metadata.g1_feedback?.note || '';
+  const status = document.createElement('span'); status.className = 'qwen-feedback-status'; status.setAttribute('aria-live', 'polite');
+  let selected = metadata.g1_feedback?.rating || '';
+  const buttons = new Map();
+  const paint = () => buttons.forEach((button, rating) => {
+    button.classList.toggle('active', rating === selected);
+    button.setAttribute('aria-pressed', String(rating === selected));
+  });
+  const save = async (rating) => {
+    const messageId = msgElement.dataset.dbId;
+    if (!messageId) { status.textContent = 'Reload once before rating'; return; }
+    selected = rating || selected; paint(); status.textContent = 'Saving…';
+    try {
+      const response = await fetch('/api/g1/feedback', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: messageId, rating: selected, note: note.value.trim() }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Feedback could not be saved');
+      status.textContent = 'Saved';
+    } catch (error) { status.textContent = error.message || 'Save failed'; }
+  };
+  for (const [rating, label] of [['helpful', 'Helpful'], ['wrong', 'Wrong'], ['unsafe', 'Unsafe']]) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'qwen-feedback-choice';
+    button.textContent = label; button.addEventListener('click', () => save(rating)); buttons.set(rating, button); choices.appendChild(button);
+  }
+  const noteSave = document.createElement('button'); noteSave.type = 'button'; noteSave.className = 'qwen-feedback-save'; noteSave.textContent = 'Save note';
+  noteSave.addEventListener('click', () => selected ? save(selected) : (status.textContent = 'Choose a rating first'));
+  paint(); panel.append(prompt, choices, note, noteSave, status); msgElement.appendChild(panel);
 }
 
 /**
@@ -2222,6 +2327,7 @@ export function renderAskUserCard(payload, options) {
     row.className = 'ask-user-option';
     if (multi) {
       const checkbox = document.createElement('input');
+      checkbox.name = question.id;
       checkbox.type = 'checkbox';
       checkbox.value = label;
       row.appendChild(checkbox);
@@ -2246,6 +2352,8 @@ export function renderAskUserCard(payload, options) {
   const other = document.createElement('div');
   other.className = 'ask-user-other';
   const otherInput = document.createElement('input');
+  otherInput.id = `${question.id}-other`;
+  otherInput.name = otherInput.id;
   otherInput.type = 'text';
   otherInput.className = 'styled-prompt-input ask-user-other-input';
   otherInput.placeholder = multi ? 'Other (added to selection)…' : 'Other… (type your own answer)';
@@ -2750,6 +2858,7 @@ export function addMessage(role, content, modelName, metadata) {
       // history reloads need this assignment).
       if (metadata?.memories_used?.length) wrap._memoriesUsed = metadata.memories_used;
       wrap.appendChild(createMsgFooter(wrap));
+      appendQwenFeedback(wrap, metadata);
       if (metadata) displayMetrics(wrap, metadata);
     } else {
       // Add timestamp to user header (like AI messages)
@@ -2758,6 +2867,12 @@ export function addMessage(role, content, modelName, metadata) {
       wrap.appendChild(createUserMsgFooter(wrap));
     }
 
+    // Qwen progress is transcript data, not a live-only UI decoration.  Put
+    // its compact process block directly before the corresponding reply.
+    if (role === 'assistant' && metadata?.qwen_process) {
+      const processCard = buildQwenProcessCard(metadata.qwen_process);
+      if (processCard) box.appendChild(processCard);
+    }
     box.appendChild(wrap);
 
     // TTS is now part of the msg-actions system
@@ -2786,6 +2901,7 @@ const chatRenderer = {
   resetSessionCost,
   updateSessionCostUI,
   roleTimestamp,
+  buildQwenProcessCard,
   stripToolBlocks,
   copyMessageText,
   safeToolScreenshotSrc,

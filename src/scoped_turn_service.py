@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import inspect
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -26,6 +28,15 @@ def render_context_bundle(bundle: ContextBundle) -> str:
             "workspace_root": "/workspace" if bundle.scope.workspace_root else None,
         }, sort_keys=True),
     ]
+    if bundle.scope.scope_kind == "project" and bundle.scope.workspace_root:
+        parts.append(
+            "# Project workspace access\n"
+            "The checkout for this conversation is already mounted at /workspace. "
+            "Treat references such as 'this project', 'the repo', or the project name as /workspace. "
+            "For questions about what the project contains or does, inspect README files and relevant "
+            "source/docs with the available read/search tools before answering. Never ask the user to "
+            "set a workspace or provide the project path."
+        )
     if bundle.thread_checkpoint:
         parts.append("# This thread checkpoint\n" + json.dumps(bundle.thread_checkpoint.to_payload(), sort_keys=True))
     if bundle.primary_project_brief:
@@ -45,6 +56,9 @@ class ScopedTurnResult:
     answer: str
     manifest: dict
     dust_unchanged: bool
+    message_id: str = ""
+    user_message_id: str = ""
+    qwen_process: dict | None = None
 
 
 class ReadOnlyScopedTurnService:
@@ -63,6 +77,7 @@ class ReadOnlyScopedTurnService:
     async def run(
         self, *, owner: str, session_id: str, request: str,
         endpoint_id: str, model: str, companion_profile: str = "",
+        progress_callback: Optional[Callable[[dict], object]] = None,
     ) -> ScopedTurnResult:
         session = self.session_manager.get_session(session_id)
         if getattr(session, "owner", None) != owner:
@@ -73,7 +88,8 @@ class ReadOnlyScopedTurnService:
 
         # Persist the admitted user turn first. The context tail intentionally
         # excludes it because ContextBundle carries the current request last.
-        self.session_manager.add_message(session_id, ChatMessage("user", request))
+        user_message = ChatMessage("user", request)
+        self.session_manager.add_message(session_id, user_message)
         transcript_before_request = list(session.history[:-1])
         bundle = ContextCompiler(self.store).compile(
             owner=owner, session_id=session_id, request=request,
@@ -90,22 +106,68 @@ class ReadOnlyScopedTurnService:
         )
         bridge_runtime = ModelBridgeRuntime(bridge)
         supervisor = self.supervisor_factory(binary=self.qwen_binary)
+        answer = ""
+        worker_error = None
+        turn_started = time.monotonic()
+        process_events: list[dict] = []
+
+        async def record_progress(event: dict) -> None:
+            """Persist only the already-sanitized, display-safe tool trace."""
+            if not isinstance(event, dict):
+                return
+            safe_event = {
+                key: str(event.get(key, ""))[:2100]
+                for key in ("operation", "tool", "path", "label", "command", "status")
+            }
+            # Qwen commonly emits a call and a later call-update.  They are
+            # one visible operation, not two separate transcript rows.
+            identity = tuple(safe_event[key] for key in ("operation", "tool", "path", "command"))
+            for prior in reversed(process_events):
+                prior_identity = tuple(prior[key] for key in ("operation", "tool", "path", "command"))
+                if prior_identity == identity:
+                    prior["status"] = safe_event["status"]
+                    break
+            else:
+                process_events.append(safe_event)
+            if progress_callback:
+                result = progress_callback(safe_event)
+                if inspect.isawaitable(result):
+                    await result
         try:
             bridge_url = await bridge_runtime.start()
             await supervisor.start(
                 workspace_root=workspace, bridge_url=bridge_url,
                 bridge_model=model, bridge_token=route.token,
             )
-            answer, _metadata = await supervisor.run_prompt(prompt)
+            answer, _metadata = await supervisor.run_prompt(prompt, progress_callback=record_progress)
+        except BaseException as exc:
+            worker_error = exc
+            raise
         finally:
             await supervisor.stop()
             await bridge_runtime.stop()
-
-        after = snapshot_workspace(workspace)
-        if after != before:
-            raise RuntimeError("protected project changed during Qwen turn")
-        self.session_manager.add_message(session_id, ChatMessage("assistant", answer))
+            # Check even on cancellation/failure: a failure must never hide a
+            # workspace mutation behind the original worker exception.
+            after = snapshot_workspace(workspace)
+            if after != before:
+                raise RuntimeError("protected project changed during Qwen turn") from worker_error
+        qwen_process = {
+            "elapsed_seconds": max(0, round(time.monotonic() - turn_started)),
+            "events": process_events,
+        }
+        assistant_message = ChatMessage("assistant", answer, metadata={
+            "harness": "qwen", "qwen_read_only": True,
+            "workspace_unchanged": True, "context_manifest": bundle.manifest,
+            "model": model,
+            "qwen_process": qwen_process,
+        })
+        self.session_manager.add_message(session_id, assistant_message)
         CheckpointCompactor(self.store).checkpoint(
             owner=owner, session_id=session_id, messages=session.history,
         )
-        return ScopedTurnResult(answer, bundle.manifest, True)
+        return ScopedTurnResult(
+            answer, bundle.manifest, True,
+            assistant_message.metadata.get("_db_id", ""),
+            user_message.metadata.get("_db_id", ""),
+            qwen_process,
+        )

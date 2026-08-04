@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,65 @@ REQUIRED_CAPABILITIES = frozenset({"health", "capabilities", "session_create", "
 
 class QwenHarnessError(RuntimeError):
     pass
+
+
+_SAFE_ERROR_CODE = re.compile(r"^[a-z0-9_]{1,80}$")
+_RETRYABLE_REJECTION_CODES = frozenset({
+    # Qwen's bootstrap server may expose capabilities before the full runtime
+    # has replaced it. These responses reject the request before admission.
+    "bootstrap",
+    "daemon_runtime_starting",
+    "workspace_runtime_unavailable",
+})
+
+
+class QwenServeHTTPError(QwenHarnessError):
+    """Sanitized Qwen Serve rejection with enough structure for safe retries."""
+
+    def __init__(
+        self, operation: str, *, status_code: int,
+        error_code: str | None = None,
+        retry_after_seconds: float | None = None,
+    ):
+        self.operation = operation
+        self.status_code = status_code
+        self.error_code = error_code
+        self.retry_after_seconds = retry_after_seconds
+        self.retryable = status_code == 503 and error_code in _RETRYABLE_REJECTION_CODES
+        suffix = f" ({error_code})" if error_code else ""
+        # Deliberately exclude the response body: Qwen errors can contain
+        # workspace paths and other daemon details that must not reach SSE/UI.
+        super().__init__(f"Qwen Serve {operation} failed with HTTP {status_code}{suffix}")
+
+
+def _http_error(response: httpx.Response, operation: str) -> QwenServeHTTPError:
+    payload: dict[str, Any] = {}
+    try:
+        candidate = response.json()
+        if isinstance(candidate, dict):
+            payload = candidate
+    except (json.JSONDecodeError, ValueError):
+        pass
+    raw_code = payload.get("code") or payload.get("errorKind") or payload.get("reason")
+    error_code = raw_code if isinstance(raw_code, str) and _SAFE_ERROR_CODE.fullmatch(raw_code) else None
+    retry_after_seconds = None
+    try:
+        raw_retry_after = response.headers.get("retry-after")
+        if raw_retry_after is not None:
+            parsed = float(raw_retry_after)
+            if 0 <= parsed <= 60:
+                retry_after_seconds = parsed
+    except (TypeError, ValueError):
+        pass
+    return QwenServeHTTPError(
+        operation, status_code=response.status_code,
+        error_code=error_code, retry_after_seconds=retry_after_seconds,
+    )
+
+
+def _require_success(response: httpx.Response, operation: str) -> None:
+    if not response.is_success:
+        raise _http_error(response, operation)
 
 
 @dataclass(frozen=True)
@@ -126,7 +186,7 @@ class QwenServeClient:
 
     async def verify_capabilities(self) -> dict[str, Any]:
         response = await self._client.get(f"{self.base_url}/capabilities", headers=self._headers)
-        response.raise_for_status()
+        _require_success(response, "GET /capabilities")
         payload = response.json()
         features = set(payload.get("features") or [])
         missing = REQUIRED_CAPABILITIES - features
@@ -134,12 +194,21 @@ class QwenServeClient:
             raise QwenHarnessError(f"Qwen Serve lacks required read-only capabilities: {sorted(missing)}")
         return payload
 
+    async def verify_runtime_ready(self) -> dict[str, Any]:
+        """Use Qwen's deep probe; bootstrap capabilities alone are premature."""
+        response = await self._client.get(f"{self.base_url}/health?deep=1", headers=self._headers)
+        _require_success(response, "GET /health?deep=1")
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            raise QwenHarnessError("Qwen Serve deep health probe did not report ready")
+        return payload
+
     async def create_session(self, *, cwd: str, model_service_id: str | None = None) -> str:
         body: dict[str, str] = {"cwd": cwd, "sessionScope": "thread"}
         if model_service_id:
             body["modelServiceId"] = model_service_id
         response = await self._client.post(f"{self.base_url}/session", headers=self._headers, json=body)
-        response.raise_for_status()
+        _require_success(response, "POST /session")
         payload = response.json()
         session_id = payload.get("sessionId") or payload.get("id")
         if not session_id:
@@ -152,7 +221,7 @@ class QwenServeClient:
             f"{self.base_url}/session/{session_id}/prompt", headers=self._headers,
             json={"prompt": [{"type": "text", "text": text}]},
         )
-        response.raise_for_status()
+        _require_success(response, "POST /session/:id/prompt")
         payload = response.json()
         prompt_id = payload.get("promptId")
         if not prompt_id:
@@ -162,11 +231,11 @@ class QwenServeClient:
     async def cancel(self, session_id: str) -> None:
         response = await self._client.post(f"{self.base_url}/session/{session_id}/cancel", headers=self._headers)
         if response.status_code not in {204, 404}:
-            response.raise_for_status()
+            _require_success(response, "POST /session/:id/cancel")
 
     async def events(self, session_id: str, *, last_event_id: str = "0") -> AsyncIterator[dict[str, Any]]:
         async with self._client.stream("GET", f"{self.base_url}/session/{session_id}/events", headers={**self._headers, "Last-Event-ID": last_event_id}) as response:
-            response.raise_for_status()
+            _require_success(response, "GET /session/:id/events")
             sse_id: str | None = None
             async for line in response.aiter_lines():
                 if line.startswith("id:"):

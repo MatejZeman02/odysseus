@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
+import signal
 import shutil
 import socket
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 
-from .qwen_harness import QwenHarnessError, QwenServeClient, create_disposable_config
+from .qwen_harness import (
+    QwenHarnessError,
+    QwenServeClient,
+    QwenServeHTTPError,
+    create_disposable_config,
+)
 
 
 PINNED_QWEN_VERSION = "0.21.3"
@@ -39,7 +46,7 @@ def _free_port() -> int:
 
 def bubblewrap_command(
     *, qwen_root: Path, private_home: Path, workspace_root: Path,
-    port: int, environment: dict[str, str], bubblewrap: str = "bwrap",
+    port: int, bubblewrap: str = "bwrap",
 ) -> tuple[str, ...]:
     workspace = workspace_root.resolve(strict=True)
     qwen_root = qwen_root.resolve(strict=True)
@@ -54,8 +61,6 @@ def bubblewrap_command(
         "--dir", "/workspace", "--ro-bind", str(workspace), "/workspace",
         "--chdir", "/workspace",
     ]
-    for key, value in environment.items():
-        command.extend(["--setenv", key, value])
     command.extend([
         "/opt/qwen/node_modules/.bin/qwen", "serve", "--hostname", "127.0.0.1",
         "--port", str(port), "--workspace", "/workspace", "--no-web", "--require-auth",
@@ -70,14 +75,21 @@ class QwenRuntime:
     process: asyncio.subprocess.Process
     client: QwenServeClient
     root: Path
+    # Bubblewrap creates a new session for the contained worker.  Qwen Serve
+    # can spawn an ACP child which outlives the Serve launcher, so retaining
+    # this group id is essential for disposable-worker teardown.
+    process_group_id: Optional[int] = None
     log_lines: list[str] = field(default_factory=list)
     log_task: Optional[asyncio.Task] = None
 
 
 class QwenSupervisor:
     def __init__(self, *, binary: Path, bubblewrap: str = "bwrap"):
-        self.binary = binary.resolve()
-        self.qwen_root = self.binary.parent.parent.parent
+        # Keep the user-facing node_modules/.bin symlink shape when deriving
+        # the install root. Resolving first points at @qwen-code/.../cli.js and
+        # makes qwen_root one level too deep for /opt/qwen/node_modules/.bin/qwen.
+        self.binary = binary.expanduser().absolute()
+        self.qwen_root = self.binary.parent.parent.parent.resolve()
         self.bubblewrap = bubblewrap
         self.runtime: Optional[QwenRuntime] = None
 
@@ -98,6 +110,9 @@ class QwenSupervisor:
         port = _free_port()
         environment = {
             "HOME": "/home/qwen", "PATH": "/usr/local/bin:/usr/bin:/bin",
+            # settings.json deliberately names this ephemeral key. OPENAI_API_KEY
+            # alone is insufficient because Qwen resolves the provider envKey.
+            config.token_env_key: bridge_token,
             "OPENAI_API_KEY": bridge_token, "OPENAI_BASE_URL": bridge_url,
             "OPENAI_MODEL": bridge_model, "QWEN_MODEL": bridge_model,
             "QWEN_SERVER_TOKEN": config.server_token,
@@ -105,11 +120,14 @@ class QwenSupervisor:
         }
         command = bubblewrap_command(
             qwen_root=self.qwen_root, private_home=config.home,
-            workspace_root=workspace_root, port=port,
-            environment=environment, bubblewrap=self.bubblewrap,
+            workspace_root=workspace_root, port=port, bubblewrap=self.bubblewrap,
         )
+        # Bubblewrap passes its environment to the contained process. Supplying
+        # credentials through execve's environment keeps them out of argv and
+        # therefore out of process listings.
         process = await asyncio.create_subprocess_exec(
-            *command, env={}, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            *command, env=environment,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         )
         client = QwenServeClient(
             f"http://127.0.0.1:{port}", config.server_token, timeout=None,
@@ -118,24 +136,60 @@ class QwenSupervisor:
         runtime.log_task = asyncio.create_task(self._drain_logs(runtime))
         self.runtime = runtime
         try:
-            async with asyncio.timeout(startup_timeout):
-                while True:
-                    if process.returncode is not None:
-                        raise QwenHarnessError("Qwen Serve exited during startup")
-                    try:
-                        await client.verify_capabilities()
-                        break
-                    except (httpx.HTTPError, QwenHarnessError):
-                        await asyncio.sleep(0.2)
+            await self._wait_until_ready(runtime, startup_timeout=startup_timeout)
+            # bwrap remains the host-side launcher.  Its --new-session child
+            # (Qwen Serve) is the group leader which can itself spawn ACP.
+            # Record that inner group while the process tree still exists.
+            runtime.process_group_id = self._sandbox_process_group_id(process.pid)
         except Exception:
             await self.stop()
             raise
         return runtime
 
-    async def run_prompt(self, prompt: str, *, timeout: float = 240) -> tuple[str, dict]:
+    async def _wait_until_ready(self, runtime: QwenRuntime, *, startup_timeout: float) -> None:
+        """Wait for the full runtime, not Qwen's early bootstrap capability page."""
+        try:
+            async with asyncio.timeout(startup_timeout):
+                while True:
+                    if runtime.process.returncode is not None:
+                        raise QwenHarnessError("Qwen Serve exited during startup")
+                    try:
+                        await runtime.client.verify_runtime_ready()
+                        await runtime.client.verify_capabilities()
+                        return
+                    except QwenServeHTTPError as exc:
+                        if not exc.retryable:
+                            raise
+                        delay = exc.retry_after_seconds if exc.retry_after_seconds is not None else 0.2
+                    except httpx.TransportError:
+                        # The listener is not up yet. Once it is reachable,
+                        # only explicit, pre-admission bootstrap codes retry.
+                        delay = 0.2
+                    await asyncio.sleep(min(max(delay, 0.05), 1.0))
+        except TimeoutError as exc:
+            raise QwenHarnessError("Qwen Serve did not become ready before its startup deadline") from exc
+
+    async def _create_session(self) -> str:
+        """Retry only explicit pre-admission rejections, never prompt admission."""
         if not self.runtime:
             raise QwenHarnessError("Qwen runtime is not active")
-        session_id = await self.runtime.client.create_session(cwd="/workspace")
+        for attempt in range(3):
+            try:
+                return await self.runtime.client.create_session(cwd="/workspace")
+            except QwenServeHTTPError as exc:
+                if not exc.retryable or attempt == 2:
+                    raise
+                delay = exc.retry_after_seconds if exc.retry_after_seconds is not None else 0.25
+                await asyncio.sleep(min(max(delay, 0.05), 1.0))
+        raise AssertionError("unreachable")
+
+    async def run_prompt(
+        self, prompt: str, *, timeout: float = 240,
+        progress_callback: Optional[Callable[[dict], object]] = None,
+    ) -> tuple[str, dict]:
+        if not self.runtime:
+            raise QwenHarnessError("Qwen runtime is not active")
+        session_id = await self._create_session()
         prompt_id, cursor = await self.runtime.client.prompt(session_id, prompt)
         answer_parts: list[str] = []
         terminal: Optional[dict] = None
@@ -155,6 +209,9 @@ class QwenSupervisor:
                         event_type = str(event.get("type") or event.get("event") or "unknown")
                         if event_type == "session_update":
                             update = ((event.get("data") or {}).get("update") or {})
+                            progress = self._sanitize_progress_update(update)
+                            if progress:
+                                await self._emit_progress(progress_callback, progress)
                             if update.get("sessionUpdate") == "agent_message_chunk":
                                 content = update.get("content") or {}
                                 if isinstance(content, dict) and content.get("text"):
@@ -173,20 +230,184 @@ class QwenSupervisor:
             raise QwenHarnessError("Qwen turn did not finish normally")
         return "".join(answer_parts), {"prompt_id": prompt_id, "terminal": terminal}
 
+    @staticmethod
+    async def _emit_progress(callback: Optional[Callable[[dict], object]], payload: dict) -> None:
+        if not callback:
+            return
+        result = callback(payload)
+        if inspect.isawaitable(result):
+            await result
+
+    @staticmethod
+    def _sanitize_progress_update(update: dict) -> Optional[dict]:
+        """Convert Qwen's rich tool envelope into a safe companion event."""
+        if not isinstance(update, dict) or update.get("sessionUpdate") not in {"tool_call", "tool_call_update"}:
+            return None
+        meta = update.get("_meta") if isinstance(update.get("_meta"), dict) else {}
+        raw_input = update.get("rawInput") if isinstance(update.get("rawInput"), dict) else {}
+        tool_name = str(update.get("name") or meta.get("toolName") or "").lower()
+        descriptor = " ".join((tool_name, str(update.get("title") or "").lower()))
+        if any(token in descriptor for token in ("shell", "bash", "command", "exec")):
+            operation = "Shell"
+            safe_tool = "shell"
+        elif any(token in descriptor for token in ("grep", "search", "find", "glob")):
+            operation = "Search project files"
+            safe_tool = "search"
+        elif any(token in descriptor for token in ("list", "directory", "ls")):
+            operation = "List project files"
+            safe_tool = "list_files"
+        elif any(token in descriptor for token in ("read", "view", "open", "cat")):
+            operation = "Read project file"
+            safe_tool = "read_file"
+        else:
+            operation = "Inspect project"
+            safe_tool = "inspect_workspace"
+        path = None
+        for key in ("path", "file", "filename", "file_path", "filePath", "target", "cwd", "directory"):
+            value = raw_input.get(key)
+            if isinstance(value, str):
+                candidate = value.replace("\\\\", "/")
+                if candidate.startswith("/workspace/"):
+                    candidate = candidate[len("/workspace/"):]
+                elif candidate == "/workspace":
+                    candidate = "."
+                if candidate and not candidate.startswith("/") and ".." not in candidate.split("/"):
+                    path = candidate.lstrip("./") or "."
+                    break
+        if not path and isinstance(update.get("title"), str):
+            # Titles are untrusted model data. Only retain an explicitly
+            # sandbox-relative fragment, never the rest of the title.
+            marker = "/workspace/"
+            title_path = update["title"].replace("\\", "/")
+            if marker in title_path:
+                candidate = title_path.split(marker, 1)[1].split()[0].rstrip(".,:;)")
+                if candidate and ".." not in candidate.split("/"):
+                    path = candidate
+        query = next((raw_input[key] for key in ("query", "pattern", "search", "text")
+                      if isinstance(raw_input.get(key), str) and raw_input[key].strip()), "")
+        query = " ".join(str(query).split())[:400]
+        if safe_tool == "read_file":
+            label = command = f"Read: {path or 'workspace'}"
+        elif safe_tool == "search":
+            target = path or query or "workspace"
+            label = f"Search: {target}"
+            command = f"Search: {query!r}" + (f" {path}" if path else "")
+        elif safe_tool == "list_files":
+            label = command = f"List: {path or 'workspace'}"
+        elif safe_tool == "shell":
+            shell_command = QwenSupervisor._sanitize_shell_command(raw_input.get("command"))
+            label = command = f"Shell: {shell_command}" if shell_command else "Shell: read-only workspace operation"
+        else:
+            label = command = f"Inspect: {path or 'workspace'}"
+        status = str(update.get("status") or "working").lower()
+        return {
+            "operation": operation, "tool": safe_tool, "path": path,
+            "label": label, "command": command,
+            "status": status if status in {"running", "in_progress", "completed", "failed"} else "working",
+        }
+
+    @staticmethod
+    def _sanitize_shell_command(value: object) -> str:
+        """Permit a display-only command only when it is local and non-secret."""
+        if not isinstance(value, str):
+            return ""
+        command = " ".join(value.replace("/workspace/", "").replace("/workspace", ".").split())
+        lowered = command.lower()
+        if (not command or len(command) > 2000 or "http://" in lowered or "https://" in lowered
+                or any(secret in lowered for secret in ("api_key", "apikey", "authorization", "bearer ", "token="))):
+            return ""
+        # Absolute host paths must not cross the UI boundary.
+        if any(part.startswith("/") for part in command.split()):
+            return ""
+        return command
+
     async def stop(self) -> None:
         runtime, self.runtime = self.runtime, None
         if not runtime:
             return
-        runtime.process.terminate()
+        # Qwen Serve internally starts an ACP child.  In a normal turn the
+        # Serve launcher can exit first, leaving that child re-parented; a
+        # signal to only runtime.process would then leak a hot Node worker.
+        # Bubblewrap's --new-session gives each invocation its own process
+        # group, so terminate that complete group instead.
+        process_group_id = runtime.process_group_id
+        if process_group_id:
+            self._signal_process_group(process_group_id, signal.SIGTERM)
+        if runtime.process.returncode is None:
+            try:
+                runtime.process.terminate()
+            except ProcessLookupError:
+                pass
         try:
             await asyncio.wait_for(runtime.process.wait(), timeout=10)
         except asyncio.TimeoutError:
-            runtime.process.kill()
+            if process_group_id:
+                self._signal_process_group(process_group_id, signal.SIGKILL)
+            try:
+                runtime.process.kill()
+            except ProcessLookupError:
+                pass
             await runtime.process.wait()
+        # The launcher may already have exited before the ACP child does.
+        # Give its SIGTERM a brief chance, then make teardown deterministic.
+        if process_group_id and await self._process_group_is_alive(process_group_id, timeout=1.0):
+            self._signal_process_group(process_group_id, signal.SIGKILL)
         if runtime.log_task:
             await runtime.log_task
         await runtime.client.close()
         shutil.rmtree(runtime.root, ignore_errors=True)
+
+    @staticmethod
+    def _signal_process_group(process_group_id: int, signal_number: int) -> None:
+        try:
+            os.killpg(process_group_id, signal_number)
+        except ProcessLookupError:
+            # The worker already stopped; teardown remains idempotent.
+            pass
+
+    @staticmethod
+    def _sandbox_process_group_id(launcher_pid: int) -> Optional[int]:
+        """Return the nested Qwen Serve process group created by bwrap.
+
+        ``bwrap --new-session`` leaves the host launcher in the application's
+        process group and starts the contained program as a nested session
+        leader.  Qwen Serve's ACP worker inherits that inner group, so killing
+        the launcher group would either miss it or risk the web server.
+        """
+        pending = [launcher_pid]
+        seen = {launcher_pid}
+        while pending:
+            parent = pending.pop()
+            try:
+                children = [int(value) for value in Path(
+                    f"/proc/{parent}/task/{parent}/children"
+                ).read_text().split()]
+            except (FileNotFoundError, ProcessLookupError, ValueError):
+                continue
+            for child in children:
+                if child in seen:
+                    continue
+                seen.add(child)
+                try:
+                    process_group_id = os.getpgid(child)
+                except ProcessLookupError:
+                    continue
+                if process_group_id == child:
+                    return process_group_id
+                pending.append(child)
+        return None
+
+    @staticmethod
+    async def _process_group_is_alive(process_group_id: int, *, timeout: float) -> bool:
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            try:
+                os.killpg(process_group_id, 0)
+            except ProcessLookupError:
+                return False
+            if asyncio.get_running_loop().time() >= deadline:
+                return True
+            await asyncio.sleep(0.05)
 
     @staticmethod
     async def _drain_logs(runtime: QwenRuntime) -> None:

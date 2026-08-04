@@ -46,7 +46,18 @@ def serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         raise HTTPException(500, "Internal server error")
     nonce = getattr(request.state, "csp_nonce", "")
     html = html.replace("{{CSP_NONCE}}", nonce)
-    return HTMLResponse(html)
+    # The app shell names the current ES-module build.  Caching this response
+    # can strand a tab on an old module graph even though /static/*.js itself
+    # is configured to revalidate.  That is particularly confusing for UI
+    # actions: the server has the fix, but the browser keeps running an older
+    # click handler.  HTML is tiny and local, so always fetch the current shell.
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 def inside_base_dir(base_dir: str, path: str) -> bool:

@@ -244,6 +244,11 @@ class Session(TimestampMixin, Base):
     # ``general`` and are never inferred from a browser workspace selection.
     scope_kind = Column(String, nullable=False, default="general")
     project_id = Column(String, nullable=True, index=True)
+    # G1.5 companion state.  These are intentionally additive so old chats
+    # remain ordinary native/general sessions until explicitly adopted.
+    endpoint_id = Column(String, nullable=True, index=True)
+    harness_kind = Column(String, nullable=False, default="native")
+    is_scope_primary = Column(Boolean, nullable=False, default=False)
 
     # Relationship to chat messages
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -1943,6 +1948,7 @@ def init_db():
     _migrate_model_endpoints()
     Base.metadata.create_all(bind=engine)
     _migrate_add_continuity_session_columns()
+    _migrate_add_g15_session_columns()
     # Lock the DB file (and any SQLite sidecars) to 0o600 — it holds bearer-token
     # + bcrypt hashes and encrypted provider keys. POSIX only; safe_chmod no-ops
     # on Windows (ACL-restricted profile dir) and the path helper returns None for
@@ -2159,6 +2165,35 @@ def _migrate_add_continuity_session_columns():
         conn.commit()
     except Exception as e:
         logger.warning("continuity session migration failed: %s", e)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _migrate_add_g15_session_columns():
+    """Add companion routing/home markers without changing legacy sessions."""
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "endpoint_id" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN endpoint_id TEXT")
+        if "harness_kind" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN harness_kind TEXT NOT NULL DEFAULT 'native'")
+        if "is_scope_primary" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN is_scope_primary BOOLEAN NOT NULL DEFAULT 0")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_scope_primary ON sessions(owner, scope_kind, is_scope_primary)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_project_primary ON sessions(owner, project_id, is_scope_primary)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_sessions_personal_computer_primary ON sessions(owner, scope_kind) WHERE is_scope_primary = 1 AND scope_kind IN ('personal', 'computer')")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_sessions_project_primary ON sessions(owner, project_id) WHERE is_scope_primary = 1 AND scope_kind = 'project'")
+        conn.commit()
+    except Exception as e:
+        logger.warning("G1.5 session migration failed: %s", e)
     finally:
         if conn is not None:
             conn.close()

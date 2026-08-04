@@ -50,6 +50,8 @@ services/data/
 
 # Test capture artifacts (browser session dumps may contain personal content)
 .playwright-mcp/
+artifacts/browser-ui-audit/
+Odysseus-G1.5.desktop
 
 # OS
 .DS_Store
