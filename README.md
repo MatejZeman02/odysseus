@@ -6,6 +6,14 @@
   A self-hosted AI workspace for chat, agents, research, documents, email, notes, calendar, and local model workflows.
 </p>
 
+> **Fork notice — experimental continuity companion:** This fork follows
+> `upstream/dev` while developing an opt-in G1 project-continuity companion.
+> It adds non-destructive scoped checkpoints, a read-only workspace harness,
+> and an optional pinned Qwen worker behind disabled-by-default flags. It does
+> not enable file writes, shell access, or upstream-provider credentials for
+> that worker. See [the G1 evidence report](ODYSSEUS_G1_LOCAL_READINESS.md) and
+> [the upstream-sync guide](docs/upstream-sync.md).
+
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
   <a href="docs/setup.md">Setup Guide</a> ·
