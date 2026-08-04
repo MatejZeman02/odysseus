@@ -29,6 +29,8 @@ class DisposableQwenConfig:
     home: Path
     token_env_key: str
     server_token: str
+    bridge_url: str
+    bridge_model: str
 
 
 @dataclass(frozen=True)
@@ -50,10 +52,24 @@ def create_disposable_config(*, root: Path, bridge_url: str, bridge_model: str, 
     config = {
         "modelProviders": {"openai": [{"id": bridge_model, "baseUrl": bridge_url, "envKey": token_env_key}]},
         "model": {"id": bridge_model},
-        "tools": {"allowed": []},
+        "tools": {
+            "approvalMode": "plan",
+            "core": ["read_file", "grep_search", "glob", "list_directory"],
+            "computerUse": {"enabled": False},
+            "toolSearch": {"enabled": False},
+        },
+        "permissions": {
+            "allow": ["Read"],
+            "deny": ["Shell", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent", "Skill", "SaveMemory"],
+        },
         "mcpServers": {},
-        "memory": {"enabled": False},
-        "ui": {"web": False},
+        "memory": {
+            "enableManagedAutoMemory": False,
+            "enableManagedAutoDream": False,
+            "enableAutoSkill": False,
+            "enableTeamMemory": False,
+            "enableTeamMemorySync": False,
+        },
     }
     qwen_home = home / ".qwen"
     qwen_home.mkdir(mode=0o700, exist_ok=True)
@@ -61,7 +77,7 @@ def create_disposable_config(*, root: Path, bridge_url: str, bridge_model: str, 
     path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
     os.chmod(path, 0o600)
     # The server token is distinct from the single-use bridge token.
-    return DisposableQwenConfig(path, home, token_env_key, secrets.token_urlsafe(32))
+    return DisposableQwenConfig(path, home, token_env_key, secrets.token_urlsafe(32), bridge_url, bridge_model)
 
 
 def build_read_only_launch(*, binary: str, config: DisposableQwenConfig, workspace_root: Path, bridge_token: str, port: int) -> QwenLaunchSpec:
@@ -73,14 +89,20 @@ def build_read_only_launch(*, binary: str, config: DisposableQwenConfig, workspa
         "HOME": str(config.home),
         "PATH": os.environ.get("PATH", ""),
         config.token_env_key: bridge_token,
+        "OPENAI_API_KEY": bridge_token,
+        "OPENAI_BASE_URL": config.bridge_url,
+        "OPENAI_MODEL": config.bridge_model,
         "QWEN_SERVER_TOKEN": config.server_token,
-        # Defence in depth against ambient configuration and auto-memory.
+        # Safe mode ignores ambient/project settings, MCP, skills, extensions,
+        # hooks, context files, permission rules, and all memory features.
+        "QWEN_CODE_SAFE_MODE": "true",
         "QWEN_SERVE_NO_MCP_POOL": "1",
     }
     command = (
         binary, "serve", "--hostname", "127.0.0.1", "--port", str(port),
         "--workspace", str(workspace), "--no-web", "--require-auth",
-        "--token", config.server_token,
+        "--token", config.server_token, "--safe-mode", "--approval-mode", "plan",
+        "--auth-type", "openai", "--model", config.bridge_model,
     )
     return QwenLaunchSpec(command, environment)
 

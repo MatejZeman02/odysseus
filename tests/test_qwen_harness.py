@@ -18,7 +18,12 @@ def test_disposable_qwen_config_is_private_and_contains_only_bridge_contract(tmp
         "id": "odysseus-bridge", "baseUrl": "http://127.0.0.1:9191/v1", "envKey": "ODYSSEUS_QWEN_BRIDGE_TOKEN"
     }
     assert "secret" not in config.path.read_text()
-    assert payload["tools"]["allowed"] == []
+    assert payload["tools"]["approvalMode"] == "plan"
+    assert payload["tools"]["core"] == ["read_file", "grep_search", "glob", "list_directory"]
+    assert payload["tools"]["computerUse"]["enabled"] is False
+    assert "Shell" in payload["permissions"]["deny"]
+    assert "Edit" in payload["permissions"]["deny"]
+    assert payload["memory"]["enableManagedAutoMemory"] is False
     assert payload["mcpServers"] == {}
 
 
@@ -31,8 +36,14 @@ def test_launch_spec_is_loopback_private_and_only_exposes_ephemeral_bridge_token
     spec = build_read_only_launch(binary="/opt/qwen/bin/qwen", config=config, workspace_root=workspace, bridge_token="ephemeral", port=4170)
     assert spec.command[:6] == ("/opt/qwen/bin/qwen", "serve", "--hostname", "127.0.0.1", "--port", "4170")
     assert "--no-web" in spec.command and "--require-auth" in spec.command
+    assert "--safe-mode" in spec.command
+    assert spec.command[spec.command.index("--approval-mode") + 1] == "plan"
+    assert spec.command[spec.command.index("--auth-type") + 1] == "openai"
     assert spec.environment["HOME"] == str(config.home)
     assert spec.environment[config.token_env_key] == "ephemeral"
+    assert spec.environment["OPENAI_API_KEY"] == "ephemeral"
+    assert spec.environment["OPENAI_BASE_URL"] == "http://127.0.0.1:9191/v1"
+    assert spec.environment["QWEN_CODE_SAFE_MODE"] == "true"
     assert "provider.example" not in " ".join(spec.command)
 
 
