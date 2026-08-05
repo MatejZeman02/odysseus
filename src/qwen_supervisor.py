@@ -286,6 +286,12 @@ class QwenSupervisor:
         query = next((raw_input[key] for key in ("query", "pattern", "search", "text")
                       if isinstance(raw_input.get(key), str) and raw_input[key].strip()), "")
         query = " ".join(str(query).split())[:400]
+        # Qwen first emits a skeletal search call and later updates it with the
+        # actual pattern.  That skeleton can be empty or just a quote character;
+        # it performs no useful project operation and must not become the
+        # confusing persisted `Search: ""` row in the Companion Process trace.
+        if safe_tool == "search" and not query.strip("'\"`"):
+            return None
         if safe_tool == "read_file":
             label = command = f"Read: {path or 'workspace'}"
         elif safe_tool == "search":

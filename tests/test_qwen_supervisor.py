@@ -255,6 +255,16 @@ async def test_supervisor_collects_only_assistant_chunks_until_end_turn(tmp_path
 
 
 def test_supervisor_sanitizes_qwen_tool_updates_for_the_browser():
+    # Qwen emits an initial skeletal search event before it has populated the
+    # query.  It is not a useful operation and must not become `Search: ""` in
+    # the persisted Companion Process trace.
+    assert QwenSupervisor._sanitize_progress_update({
+        "sessionUpdate": "tool_call", "name": "grep", "rawInput": {"query": ""},
+    }) is None
+    assert QwenSupervisor._sanitize_progress_update({
+        "sessionUpdate": "tool_call_update", "name": "search", "rawInput": {"pattern": "'"},
+    }) is None
+
     assert QwenSupervisor._sanitize_progress_update({
         "sessionUpdate": "tool_call", "name": "grep", "status": "running",
         "rawInput": {"path": "/workspace/docs/README.md", "pattern": "secret"},
