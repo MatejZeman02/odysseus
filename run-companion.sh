@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the G1.5 test server from this checkout, not an older installation.
+# Launch the Companion server from this checkout, not an older installation.
 set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$repo_root"
@@ -24,7 +24,7 @@ else
 fi
 
 if ! command -v fuser >/dev/null 2>&1; then
-  echo "The G1.5 launcher needs fuser to inspect port $APP_PORT." >&2
+  echo "The Companion launcher needs fuser to inspect port $APP_PORT." >&2
   exit 1
 fi
 
@@ -47,22 +47,22 @@ stop_this_checkout() {
       echo "Port $APP_PORT is used by another process (PID $existing_pid); refusing to stop it." >&2
       return 1
     fi
-    echo "Stopping Odysseus G1.5 (PID $existing_pid)..."
+    echo "Stopping Odysseus Companion (PID $existing_pid)..."
     kill -TERM "$existing_pid"
     for _attempt in {1..50}; do
       kill -0 "$existing_pid" 2>/dev/null || break
       sleep 0.1
     done
     if kill -0 "$existing_pid" 2>/dev/null; then
-      echo "Odysseus G1.5 did not stop cleanly (PID $existing_pid)." >&2
+      echo "Odysseus Companion did not stop cleanly (PID $existing_pid)." >&2
       return 1
     fi
     stopped=true
   done
   if [[ "$stopped" == false ]]; then
-    echo "Odysseus G1.5 is not running on port $APP_PORT."
+    echo "Odysseus Companion is not running on port $APP_PORT."
   else
-    echo "Odysseus G1.5 stopped."
+    echo "Odysseus Companion stopped."
   fi
 }
 
@@ -70,12 +70,12 @@ case "$action" in
   status)
     pids=$(port_pids)
     if [[ -z "$pids" ]]; then
-      echo "Odysseus G1.5 is not running on port $APP_PORT."
+      echo "Odysseus Companion is not running on port $APP_PORT."
       exit 0
     fi
     for pid in $pids; do
       if is_this_checkout "$pid"; then
-        echo "Odysseus G1.5 is running on http://127.0.0.1:$APP_PORT (PID $pid)."
+        echo "Odysseus Companion is running on http://127.0.0.1:$APP_PORT (PID $pid)."
       else
         echo "Port $APP_PORT is used by another process (PID $pid), not this checkout." >&2
         exit 1
@@ -99,7 +99,7 @@ esac
 # bind time, leaving the browser connected to stale Python modules. Start
 # therefore restarts an existing server only when it belongs to this checkout.
 if [[ -n "$(port_pids)" ]]; then
-  echo "Restarting the existing G1.5 server before launch..."
+  echo "Restarting the existing Companion server before launch..."
   stop_this_checkout
 fi
 
