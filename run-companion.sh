@@ -40,6 +40,16 @@ is_this_checkout() {
   [[ "$process_cwd" == "$repo_root" && "$process_cmd" == *"app.py"* ]]
 }
 
+process_is_running() {
+  local pid="$1" state
+  kill -0 "$pid" 2>/dev/null || return 1
+  # A process that has exited but has not yet been reaped still answers
+  # `kill -0`. Treat that zombie state as stopped so a normal restart never
+  # reports a false failure or leaves port 7001 without a replacement server.
+  state=$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)
+  [[ "$state" != "Z" ]]
+}
+
 stop_this_checkout() {
   local existing_pid stopped=false
   for existing_pid in $(port_pids); do
@@ -50,10 +60,10 @@ stop_this_checkout() {
     echo "Stopping Odysseus Companion (PID $existing_pid)..."
     kill -TERM "$existing_pid"
     for _attempt in {1..50}; do
-      kill -0 "$existing_pid" 2>/dev/null || break
+      process_is_running "$existing_pid" || break
       sleep 0.1
     done
-    if kill -0 "$existing_pid" 2>/dev/null; then
+    if process_is_running "$existing_pid"; then
       echo "Odysseus Companion did not stop cleanly (PID $existing_pid)." >&2
       return 1
     fi
