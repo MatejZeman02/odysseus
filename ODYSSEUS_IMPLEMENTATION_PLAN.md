@@ -1,20 +1,52 @@
 # Odysseus Lean MVP Implementation Plan
 
-**Status:** Active; G1 direction approved, checkpoint plan ready
+**Status:** G1 runtime/safety foundation and G1.5 UI trial implemented;
+semantic continuity closure and normal-use stabilization active
 
-**Date:** 2026-08-03
+**Last reconciled with the implementation:** 2026-08-05
 
 **Product specification:** [`ODYSSEUS_PRODUCT_SPEC.md`](ODYSSEUS_PRODUCT_SPEC.md)
 
 **G1 execution plan:**
 [`ODYSSEUS_G1_EXECUTION_PLAN.md`](ODYSSEUS_G1_EXECUTION_PLAN.md)
 
+**G1 evidence:**
+[`ODYSSEUS_G1_LOCAL_READINESS.md`](ODYSSEUS_G1_LOCAL_READINESS.md)
+
+**G1.5 acceptance evidence:**
+[`docs/G1_5_ACCEPTANCE_REPORT.md`](docs/G1_5_ACCEPTANCE_REPORT.md)
+
 **Deferred architecture backlog:**
 [`ODYSSEUS_ARCHITECTURE_BACKLOG.md`](ODYSSEUS_ARCHITECTURE_BACKLOG.md)
 
-**Foundation branch:** `feat/brain-extension-foundation`
+**Upstream synchronization branch:** `dev` (kept equal to `upstream/dev`)
 
-**G1 target branch:** `feat/companion-continuity-mvp`
+**Active downstream branch:** `feat/companion-continuity-mvp`
+
+## How to read this plan
+
+This file is the active, smaller implementation plan. The `_HUGE` documents are
+an idea bank only; they are not the current backlog and must not silently expand
+the scope of this plan.
+
+Progress labels are deliberately non-temporal:
+
+- **Complete** — implemented and covered by recorded evidence.
+- **Active** — useful owner testing or stabilization is happening now.
+- **Deferred** — intentionally excluded from the current milestone.
+- **Blocked** — cannot proceed without a named decision or dependency.
+
+## Current state
+
+| Milestone | State | Evidence or boundary |
+|---|---|---|
+| G1 persistence/compiler and read-only Qwen harness | **Complete** | Scoped projects, raw history retained during compaction, artifact contracts/store, ModelBridge, pinned Qwen Serve, Bubblewrap, protected Dust canary |
+| G1.5 Companion homes and Qwen UI trial | **Complete** | Deterministic homes, projects/forks, Qwen streaming/Stop/Process/feedback, native comparison, desktop/mobile audit |
+| Semantic checkpoint and project-brief derivation | **Active** | Production turns currently write cursor-only checkpoints; no production path derives and writes `ProjectBriefV1` |
+| Normal-use stabilization | **Active** | Use real project conversations, record incorrect/unsafe answers and UI failures, fix regressions without broadening authority |
+| AgentMemory provider switch | **Deferred** | No real memory store has been inventoried, migrated, or assigned as the writer |
+| Computer Help read-only diagnostics | **Deferred** | UI destination exists; Qwen diagnostics and host-read tooling do not |
+| Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
 
 ## Goal
 
@@ -26,27 +58,45 @@ Build the smallest useful version of the expanded Odysseus:
 > discussions remain clean. Qwen Code can be delegated project work without
 > becoming the durable memory system.
 
-The first demonstrable flow is intentionally narrow:
+The first demonstrable flow was intentionally narrow. Its runtime, containment,
+scope-isolation, and UI portions are proven; the semantic artifact-writing step
+identified below still needs closure:
 
 ```text
 open a conversation whose home project is Dust
   -> ask whether destroying the final crystal ends immortality
   -> Odysseus compiles a small scoped context packet
-  -> a pinned Qwen Serve worker searches and reads Dust in read-only Plan mode
+  -> a pinned Qwen Serve worker searches and reads Dust in read-only safe mode
   -> the answer cites exact files and shows the unresolved contradiction
-  -> Odysseus retains the raw transcript and updates two derived JSON artifacts:
+  -> Odysseus retains the raw transcript
+  -> Odysseus should derive two meaningful JSON artifacts:
        this thread's checkpoint and Dust's shared project brief
-  -> the primary Dust chat continues from its checkpoint and recent raw tail
-  -> an explicit Dust fork receives the shared brief, not the old transcript
+  -> after semantic derivation is closed, the primary Dust chat continues from
+     its meaningful checkpoint and recent raw tail
+  -> after semantic derivation is closed, an explicit Dust fork receives the
+     shared brief, not the old transcript
   -> the ongoing Personal Advisor chat can answer "why is lemon acidic?" and
      receives no Dust context
   -> restarting Qwen does not destroy the durable project understanding
 ```
 
-This is the active implementation plan. Automatic project classification,
-transitive project graphs, the larger claim graph, custom sandbox, group
-personalities, multiple platforms, and production safety architecture are
-parked in the long-horizon backlog until this flow proves useful.
+Current production turns create the checkpoint cursor but do not supply a
+semantic derivation function, leaving objective/decisions/questions/actions
+empty. `ProjectBriefV1` can be stored and compiled when pre-seeded, but no
+production turn derives or writes it. Therefore fresh-worker raw-tail
+continuation is working, while meaningful compact continuity beyond that tail
+is not yet complete. This reconciliation supersedes stronger artifact-generation
+wording in the earlier G1 evidence report.
+
+G1.5 exposes the working flow through the ordinary Odysseus UI. The
+terminal-shaped control is the project Qwen toggle, while Chat / Agent remains
+available as an independent interaction preference. Project Qwen is read-only;
+native comparison turns explicitly receive `allow_bash=false` and cannot use
+heavy workspace tools.
+
+Automatic project classification, transitive project graphs, the larger claim
+graph, writable tools, a Codex-derived sandbox, group personalities, multiple
+platforms, and production safety architecture remain outside the active scope.
 
 ## Simplifying decisions
 
@@ -81,21 +131,40 @@ parked in the long-horizon backlog until this flow proves useful.
 - [x] Reuse the existing FAL OpenRouter endpoint and begin the live canary with
   `deepseek/deepseek-v4-flash`, but keep endpoint selection and credentials
   behind an Odysseus-owned provider-neutral bridge.
+- [x] Keep ordinary Odysseus home chats alongside the new Companion homes.
+- [x] Keep Chat / Agent visible. Project homes default to Agent with web-search
+  UI enabled, but Qwen authority remains a separate read-only toggle.
+- [x] Make a project's stored workspace, endpoint, model, and harness
+  server-owned. Browser `localStorage` is presentation state, not authority.
+- [x] Permit Qwen only in project homes during G1.5. Personal Advisor uses
+  native Chat, and Computer Help explicitly says that Qwen is coming later.
+- [x] Hide native chat-shell affordances without deleting `/api/shell/*`, which
+  Cookbook and document execution still require.
+- [x] Persist a compact, expandable Process trace and per-answer evaluation
+  feedback without exposing raw tool output, absolute paths, credentials, or
+  provider URLs.
 
 ## What already exists
 
-Odysseus already has more useful infrastructure than the long plan assumed:
+The branch now contains the implemented G1/G1.5 runtime and UI foundation:
 
-- a mature chat route and existing native agent loop;
-- persistent sessions and messages;
-- SSE streaming and detached agent runs;
-- personality/preset injection;
-- workspace selection and tool policy;
-- a provider-neutral memory interface, although normal recall still bypasses it;
-- a tested context compactor, although its persistence behavior must be fixed;
-- extensive chat, memory, compaction, security, and tool regression tests.
+- additive project, scope, artifact, endpoint, harness, and primary-home state;
+- deterministic Personal, Computer, and per-project primary conversations;
+- explicit project forks and owner-scoped project deletion;
+- raw messages retained during compaction plus `ThreadCheckpointV1` and
+  `ProjectBriefV1`;
+- deterministic continuity context compilation for native and Qwen turns;
+- a provider-neutral, per-run ModelBridge with ephemeral credentials;
+- pinned Qwen Code `0.21.3` supervised inside rootless Bubblewrap with one
+  read-only project mount;
+- authenticated JSON and streaming project-turn APIs with cancellation,
+  concurrency admission, teardown, and post-run workspace verification;
+- Companion navigation, project creation, scope disclosure, Qwen/native toggle,
+  readable persisted Process traces, and Helpful/Wrong/Unsafe feedback;
+- retained native chat, Cookbook, document execution, and ordinary home chats;
+- rendered desktop/mobile browser auditing plus broad regression coverage.
 
-Qwen Serve already provides:
+Upstream Qwen Serve provides:
 
 - persistent worker sessions and resume/load;
 - HTTP prompt admission and SSE event streaming;
@@ -104,9 +173,12 @@ Qwen Serve already provides:
 - MCP support, worktrees, context files, and in-session compaction;
 - reconnect/replay behavior and capability negotiation.
 
-The Qwen Python SDK is a subprocess/JSON-lines client, not a client for
-`qwen serve`. The MVP therefore needs a narrow Python HTTP/SSE adapter, not a
-ported agent framework.
+G1.5 deliberately exposes only read/list/search operations. Safe-mode policy and
+the Bubblewrap mount boundary deny the upstream runtime's edit/shell/web/memory
+capabilities.
+
+The Qwen Python SDK is not used. Odysseus owns a narrow HTTP/SSE adapter to
+`qwen serve`; it does not port or duplicate Qwen's agent framework.
 
 ## Lean architecture
 
@@ -132,27 +204,27 @@ ported agent framework.
                               native Chat | native Agent | Qwen Serve
 ```
 
-Only four new concepts are required for the first milestone:
+G1 introduced four continuity concepts:
 
 1. `ScopeResolver`
 2. `ArtifactStore`
 3. `CheckpointCompactor`
 4. `ContextCompiler`
 
-The Qwen adapter is a harness integration around those concepts, not a fifth
-state or memory system.
+All four are implemented. The Qwen adapter is a harness integration around
+them, not a second durable state or memory system.
 
 ### ScopeResolver
 
-Start with deterministic rules:
+Implemented/default deterministic rules:
 
 1. An existing conversation's server-owned home binding always wins.
 2. A new conversation opened from a project is bound to that project.
 3. The UI reopens or creates the owner's primary Personal Advisor and Computer
    Help chats for those destinations.
 4. Legacy/unclassified conversations retain a `general` compatibility scope.
-5. Moving an existing conversation is an explicit user action and is audited;
-   changing the browser's currently selected folder cannot silently rebind it.
+5. Changing the browser's selected folder cannot silently rebind an existing
+   conversation. An explicit audited move operation is deferred.
 6. Looking up a related project does not change the conversation's home.
 
 Do not build an LLM domain classifier yet. `Project`, `Personal`, and `Computer`
@@ -207,9 +279,9 @@ ContextBundle
   related_project_bundles, episodic_hits, transcript_tail, request, manifest
 ```
 
-Implement only `ThreadCheckpointV1` and `ProjectBriefV1` initially. Decisions,
-plans, questions, reviews, and worker outputs can become separate artifact kinds
-later only when the two-record model proves insufficient.
+G1 implements only `ThreadCheckpointV1` and `ProjectBriefV1`. Decisions, plans,
+questions, reviews, and worker outputs can become separate artifact kinds only
+when the two-record model proves insufficient.
 
 Both records are derived, versioned, and source-linked; neither silently becomes
 project canon. Files remain the source truth. A thread checkpoint continues one
@@ -218,32 +290,39 @@ conversation bound to that project.
 
 ### Conversation, project, and related-project boundaries
 
-- [ ] Never inject another conversation's raw transcript or private tail.
-- [ ] A fresh project conversation loads the active `ProjectBriefV1`, not an old
+- [x] Never inject another conversation's raw transcript or private tail.
+- [x] A fresh project conversation loads the active `ProjectBriefV1`, not an old
   thread's `ThreadCheckpointV1`.
-- [ ] The Personal Advisor and Computer Help chats load no project material
-  unless the user explicitly names or invokes a project.
-- [ ] For the first MVP, cross-project access requires a direct project relation
-  plus an explicit project name or `@project` reference in the request.
-- [ ] Include only a labeled related `ProjectBriefV1` and source references in
+- [x] The Personal Advisor and Computer Help chats load no project material in
+  G1.5. A future explicit project invocation must be separately designed and
+  tested rather than inferred from ordinary message text.
+- [x] The store/compiler admits only an explicitly supplied related-project ID
+  that is present in the home project's direct allowlist.
+- [ ] Resolve owner-facing project names or `@project` references to those IDs
+  and expose the direct allowlist in the UI. G1/G1.5 tests currently pass IDs
+  directly to the compiler.
+- [x] Include only a labeled related `ProjectBriefV1` and source references in
   the initial cross-project bundle. Fetch exact cited file excerpts on demand in
   a later increment.
-- [ ] Exclude related projects' raw chats, personal memories, credentials,
+- [x] Exclude related projects' raw chats, personal memories, credentials,
   shell/tool transcripts, Qwen state, unlinked projects, and transitive links.
-- [ ] Keep related-project context ephemeral, separately labeled, and subject to
-  strict item/token limits; never merge it into the primary project's brief.
+- [x] Keep related-project context ephemeral and separately labeled; never
+  merge it into the primary project's brief.
+- [ ] Add explicit item/token caps before exposing multi-related-project
+  selection in the UI. G1 currently accepts only explicit server-validated
+  related-project IDs and uses bounded transcript tails.
 
-All approved memories remain discoverable through scoped retrieval. “Available”
-does not mean “inserted into every prompt.” That distinction provides continuity
-without recreating the long, mixed web-chat problem.
+Future approved memories must remain discoverable only through scoped retrieval.
+“Available” must not mean “inserted into every prompt.” G1.5 does not yet make
+AgentMemory a continuity writer or retrieval authority.
 
 Default owner-facing layout:
 
 | Destination | Default conversation behavior | Shared durable context |
 |---|---|---|
-| Personal Advisor | Reopen one ongoing chat for quick general and personal questions | Companion profile plus scoped personal recall |
-| Computer Help | Reopen one ongoing chat because only one repair/diagnosis is normally active | That thread's checkpoint; later a reviewed device profile |
-| A project | Reopen one primary chat; allow a new thread/fork when useful | The project's `ProjectBriefV1` across all its chats |
+| Personal Advisor | Reopen one ongoing native chat for quick general and personal questions | Companion profile plus existing native personal-recall behavior; scoped AgentMemory is deferred |
+| Computer Help | Reopen one ongoing native chat; show “Qwen coming next” | Its own retained chat history; a reviewed device profile is deferred |
+| A project | Reopen one primary chat; allow a new thread/fork when useful | Compiled project scope and raw tail now; `ProjectBriefV1` across chats after semantic derivation closure |
 
 These are navigation defaults, not uniqueness constraints. An intentional second
 computer chat or project fork must remain possible.
@@ -254,22 +333,32 @@ The current compactor eventually replaces persisted message rows with a summary.
 That destroys the evidence needed for later re-compaction, auditing, forking, and
 better future models.
 
-The replacement behavior must become:
+The replacement behavior is now:
 
-- [ ] Never delete or rewrite raw persisted chat messages during compaction.
-- [ ] Summarize only messages after that thread's previous checkpoint cursor.
-- [ ] Keep tool-call/result groups atomic.
-- [ ] Validate `ThreadCheckpointV1` before committing it.
-- [ ] Store stable source message IDs and a content hash.
-- [ ] Compile the next prompt from the latest checkpoint plus a recent raw tail.
-- [ ] On summarization failure, retain everything and trim only that model call.
-- [ ] Project only source-linked, shareable state into `ProjectBriefV1`; keep
-  conversation-local details in `ThreadCheckpointV1`.
-- [ ] Permit a new chat bound to the same project to load its project brief
-  without copying another chat's checkpoint or transcript.
+- [x] Never delete or rewrite raw persisted chat messages during compaction.
+- [x] Summarize only messages after that thread's previous checkpoint cursor.
+- [x] Keep tool-call/result groups atomic.
+- [x] Validate `ThreadCheckpointV1` before committing it.
+- [x] Store stable source message IDs and a content hash.
+- [x] Compile the next prompt from the latest checkpoint plus a recent raw tail.
+- [x] On summarization failure, retain everything and trim only that model call.
+- [ ] Supply a production semantic derivation function so checkpoints contain
+  meaningful objective, decisions, proposals, questions, actions, references,
+  and failures instead of only a durable cursor/hash.
+- [ ] Project only reviewed, source-linked, shareable checkpoint state into a
+  new `ProjectBriefV1` revision. No production caller currently invokes
+  `write_project_brief()`.
+- [x] Permit a new chat bound to the same project to load its project brief
+  without copying another chat's checkpoint or transcript when a brief exists.
 
 The existing persisted compaction summaries remain historical messages. No
 destructive migration is needed.
+
+> [!QUESTION]
+> Should the continuity closure use the currently selected conversation model
+> for semantic checkpoint/brief derivation, or a separately configured utility
+> model? Either route must remain owner-scoped, bounded, source-linked, and
+> non-destructive.
 
 ### Deterministic context compiler
 
@@ -297,7 +386,7 @@ never part of the continuity contract.
 |---|---|---|
 | Project lore, notes, code, and media | Markdown/filesystem and Git | Source truth; Qwen reads and cites it |
 | Project identity and direct relationships | Odysseus `projects` table | Stable owner-scoped configuration |
-| Raw conversation | Odysseus message database | Immutable retained evidence |
+| Raw conversation | Odysseus message database | Retained evidence; compaction never rewrites it, while explicit owner edit/delete remains possible |
 | One thread's working state | Odysseus `ThreadCheckpointV1` | Local, derived, and source-linked |
 | Shared cross-chat project notebook | Odysseus `ProjectBriefV1` | Compact derived artifact; not canon |
 | Companion identity and approved global profile | Existing personality/profile layer | Shared across chats; no project facts by default |
@@ -310,9 +399,13 @@ both auto-capture the same turn.
 
 ### AgentMemory adapter
 
+**State: Deferred.** The provider seam exists, but G1/G1.5 deliberately did not
+inspect, migrate, or change the writer for the owner's real memory data. The
+rules below remain the acceptance contract for a future memory milestone.
+
 The existing `MemoryProviderRegistry` is initialized but normal prompt recall
-still reads `memory.json` directly. The MVP must wire the provider abstraction
-into context assembly before calling AgentMemory “integrated.”
+still reads `memory.json` directly. A future AgentMemory milestone must wire the
+provider abstraction into context assembly before calling it “integrated.”
 
 Safety rules for the existing AgentMemory installation:
 
@@ -332,10 +425,10 @@ Safety rules for the existing AgentMemory installation:
 
 ## Qwen Serve adapter
 
-Implement a narrow, capability-gated client rather than mirroring the complete
-Qwen API.
+Odysseus implements a narrow, capability-gated client rather than mirroring the
+complete Qwen API.
 
-Initial HTTP/SSE surface:
+Implemented HTTP/SSE surface:
 
 - `GET /health`
 - `GET /capabilities`
@@ -343,43 +436,49 @@ Initial HTTP/SSE surface:
 - `GET /session/:id/events` with `Last-Event-ID`
 - `POST /session/:id/prompt`
 - `POST /session/:id/cancel`
-- `POST /session/:id/approval-mode` with non-persistent `plan`
 
 Later, after the read-only milestone:
 
 - `GET /session/:id/transcript`
 - `POST /permission/:requestId`
+- `POST /session/:id/approval-mode` if an interactive writable milestone needs
+  runtime mode changes; G1 enforces safe/Plan behavior in disposable settings
+  instead
 - explicit resume/load and file-diff review
 
-The adapter normalizes Qwen events into the existing Odysseus SSE vocabulary:
-assistant/thought deltas, tool start/update/output, plan updates, questions,
-permissions, completion, failure, cancellation, reconnect/resync, and worker
-death. Unknown events are logged and ignored safely.
+The internal adapter tracks assistant chunks, sanitized tool updates, completion,
+failure, cancellation, reconnect/replay, and worker death. The browser receives
+only the G1.5 `status`, `tool`, `delta`, `done`, and `error` vocabulary. Raw tool
+output and unknown daemon frames are never forwarded.
 
-Process rules for the first real spike:
+Implemented worker rules:
 
-- [ ] Pin Qwen Code `0.21.3` at the reviewed revision
+- [x] Pin Qwen Code `0.21.3` at the reviewed revision
   `c0196b422665aa000e9643555331baff8aef29da` and verify capabilities at
   startup.
-- [ ] Bind to `127.0.0.1` on an allocated port.
-- [ ] Generate a random bearer token and require authentication on all routes.
-- [ ] Disable the Qwen web UI.
-- [ ] Register only the exact read-only Dust workspace.
-- [ ] Use an isolated Qwen home/runtime directory and a scrubbed allowlisted
+- [x] Bind to `127.0.0.1` on an allocated port.
+- [x] Generate a random bearer token and require authentication on all routes.
+- [x] Disable the Qwen web UI.
+- [x] Register only the exact read-only project workspace.
+- [x] Use an isolated Qwen home/runtime directory and a scrubbed allowlisted
   environment.
-- [ ] Disable Qwen managed auto-memory and unrelated ambient MCP servers.
-- [ ] Start in Plan mode with write and shell tools unavailable.
-- [ ] Treat Qwen sessions as disposable: a fresh session must work from the
+- [x] Disable Qwen managed auto-memory and unrelated ambient MCP servers.
+- [x] Start in safe/Plan mode with write, shell, network, skills, and memory
+  tools unavailable.
+- [x] Treat Qwen sessions as disposable: a fresh session must work from the
   Odysseus `ContextBundle`, not hidden Qwen history.
 
 ### Local installation and provider-neutral model bridge
 
-Qwen is an optional external runtime, not vendored application source:
+Qwen is an optional external runtime, not vendored application source. The
+implemented launch contract is:
 
-1. Detect a user-provided `qwen` binary and reject unsupported versions.
-2. Otherwise offer an explicit data-local install of the exact npm package
-   `@qwen-code/qwen-code@0.21.3`, with a lockfile and no global install.
-3. Allow an advanced custom binary path.
+1. Read the explicitly configured `ODYSSEUS_QWEN_BINARY` path and reject any
+   version other than `0.21.3`.
+2. Use the owner-approved data-local npm package at
+   `data/qwen/0.21.3/node_modules/.bin/qwen` in the supplied launcher.
+3. Permit another explicitly configured path only when it resolves to the same
+   verified version.
 
 Do not use `latest`, `npx`, or a Git submodule. A submodule would pin the entire
 development monorepo and make every user build it from source. Keep the current
@@ -402,36 +501,32 @@ Qwen's private disposable configuration contains only the bridge URL, fixed
 model id, and the environment-key name holding the ephemeral bridge token. It
 must never contain the upstream URL or reusable provider credential.
 
-- [ ] Resolve the route by endpoint id and owner; do not use a silent fallback
+- [x] Resolve the route by endpoint id and owner; do not use a silent fallback
   chain or accept endpoint/model choices from Qwen.
-- [ ] Bind one expiring bridge token to one owner, run, endpoint, and model;
+- [x] Bind one expiring bridge token to one owner, run, endpoint, and model;
   enforce constant-time authentication plus body, request, concurrency, and
   wall-time limits.
-- [ ] Construct outbound provider headers from scratch inside Odysseus and never
+- [x] Construct outbound provider headers from scratch inside Odysseus and never
   forward Qwen authentication, host, or arbitrary custom headers.
-- [ ] Support the OpenAI chat/tool protocol required by G1 and fail closed for a
+- [x] Support the OpenAI chat/tool protocol required by G1 and fail closed for a
   native provider protocol the bridge cannot represent honestly.
-- [ ] Stream ordinary JSON/SSE, usage, tool calls, errors, and cancellation in
+- [x] Stream ordinary JSON/SSE, usage, tool calls, errors, and cancellation in
   the exact shape the pinned Qwen client consumes.
-- [ ] Restrict the Qwen runtime directory to the owner, scrub all other
+- [x] Restrict the Qwen runtime directory to the owner, scrub all other
   credentials from its environment, and remove/revoke runtime state on teardown.
-- [ ] Fake-test the complete Qwen -> bridge -> provider path before one approved
+- [x] Fake-test the complete Qwen -> bridge -> provider path before one approved
   live canary through the configured FAL endpoint.
-- [ ] If `deepseek/deepseek-v4-flash` is inadequate, select another compatible
-  configured endpoint/model without redesigning the harness.
+- [x] Keep the configured endpoint/model replaceable without redesigning the
+  harness. The accepted live run used `deepseek/deepseek-v4-flash-0731`.
 
-The bridge is a credential-routing boundary, not an operating-system sandbox.
-Qwen Serve documents that a same-UID worker can reach ambient files and
-credentials. G1 disables shell/write tools, uses an allowlisted environment and
-an exact read-only workspace, and must state this residual same-UID risk in the
-report. Prefer rootless containment for the live canary if it can be added
-without weakening loopback authentication; separate-identity containment is
-required before untrusted workspaces, mutation, or distribution.
-
-Qwen Serve is not a sandbox. A VM is unnecessary for this read-only milestone.
-Rootless Podman is the preferred containment experiment for the canary and is
-required before generic mutation; a snapshot-capable Fedora VM is needed only
-for real systemd, package, codec, boot, or repair/rollback experiments.
+The bridge is a credential-routing boundary, while Bubblewrap is the current OS
+containment boundary. Qwen gets one exact read-only project bind, a private home,
+a tmpfs `/tmp`, an allowlisted environment, and no shell/write/web/memory tools.
+It still shares the host kernel, user identity, and loopback networking needed
+for ModelBridge, so it is not Codex-grade isolation. Stronger, separately
+identified or Codex-derived containment is required before untrusted workspaces,
+generic mutation, or distribution. A snapshot-capable Fedora VM is relevant
+only for real systemd, package, codec, boot, or repair/rollback experiments.
 
 ## Dust fixture policy
 
@@ -454,12 +549,16 @@ No separate snapshot decision is required for the first local evaluation:
 
 Initial golden questions:
 
-- [ ] Does destroying the final crystal definitely end immortality?
+- [x] Does destroying the final crystal definitely end immortality?
 - [ ] Did the mage rebellion or the king originate resurrection?
-- [ ] What are the practices of the fish church?
+- [x] What are the practices of the fish church?
 - [ ] Are healing and speed-boost talismans accepted designs?
 - [ ] What quests are currently described despite the case-colliding files?
 - [ ] What changed from HEAD in the temple-library and unsorted ideas?
+
+The final-crystal and fish-church questions formed the accepted G1 semantic
+gate. The remaining questions are useful evaluation coverage, not prerequisites
+for keeping G1.5 available during normal use.
 
 Expected answers must distinguish exact source text, unresolved material,
 conflict, inference, and advice. Portable unresolved questions use:
@@ -482,218 +581,303 @@ conflict, inference, and advice. Portable unresolved questions use:
 | Obsidian | Use native callout syntax and a synthetic compatibility fixture | Build a full Obsidian clone |
 | Aider / markdown-oxide | Revisit only if Qwen's Git/search behavior fails measured tests | Add a second repository map/indexer pre-emptively |
 
-## Branches
+## Branches and upstream policy
 
 Keep branch overhead small:
 
 ```text
-upstream/dev
-  -> feat/brain-extension-foundation        # current docs/baseline
-      -> feat/companion-continuity-mvp       # one integration branch for the goal
-          -> feat/artifact-continuity        # short-lived; only for parallel work
-          -> feat/qwen-runtime-harness       # short-lived; only for parallel work
-          -> feat/agentmemory-adapter        # begins after the real-data checkpoint
+upstream/dev == dev                          # pristine synchronization branch
+  -> feat/brain-extension-foundation        # historical foundation
+      -> feat/companion-continuity-mvp       # completed G1/G1.5 integration
 ```
 
-The goal may use short-lived child branches/worktrees for genuinely parallel
-work, but the MVP should finish on `feat/companion-continuity-mvp`; the child
-branches separate concurrent edits, not product modes or permanent architectures.
-Do not push or open a PR without explicit user instruction. Generic fixes can
-still be prepared separately from `upstream/dev`; the project/artifact/Qwen
-integration remains a downstream feature. Regular upstream merges happen first
-on a temporary sync branch and are tested before entering the integration branch.
+G1/G1.5 is committed on `feat/companion-continuity-mvp`. Do not push or open a
+PR without explicit owner instruction. Keep local `dev` identical to
+`upstream/dev`; inspect new upstream commits there, merge them first on a
+temporary sync branch, test, and only then merge the sync result into the
+downstream feature branch. The detailed procedure lives in
+[`docs/upstream-sync.md`](docs/upstream-sync.md).
 
 ## Test-first implementation phases
 
-### Phase 0 — Baseline and contracts (0.5–1 agent day)
+### Phase 0 — Baseline and contracts — **Complete**
 
-- [ ] Commit or otherwise freeze the approved specification and lean plan.
-- [ ] Record current test baseline and focused chat/memory/compaction tests.
-- [ ] Characterize FAL Key authentication, URL construction, key redaction,
-  exact model selection, and the existing `kimicode` alias in regression tests.
-- [ ] Add ADRs for conversation/project/artifact ownership, the Qwen boundary,
-  and one-writer memory policy.
-- [ ] Create fake Qwen/model-upstream fixtures, a two-project relation fixture,
-  and the Dust evaluation manifest.
+- [x] Freeze the approved specification, lean plan, upstream base, and feature
+  branch boundary.
+- [x] Record full and focused regression baselines.
+- [x] Characterize FAL authentication, URL construction, model selection,
+  endpoint ownership, redaction, and webhook compatibility in tests.
+- [x] Encode conversation/project/artifact ownership, the Qwen boundary, and
+  one-writer memory rules in the product/implementation contracts and tests.
+- [x] Create fake provider/Qwen services, project-isolation fixtures, protected
+  workspace checks, and Dust evaluation questions.
 
-### Phase 1A — Non-destructive continuity kernel (2–3 agent days)
+Separate ADR files were not created; the accepted decisions are currently
+canonical in this plan, the product spec, and the executable tests.
 
-- [ ] Add `projects`, stable session scope/project fields, and
-  `continuity_artifacts`, with typed repositories and migrations.
-- [ ] Write failing preservation, idempotency, binding, artifact-isolation, and
-  explicit related-project tests first.
-- [ ] Implement `ScopeResolver`, `ArtifactStore`, `CheckpointCompactor`, and
-  `ContextCompiler` with only `ThreadCheckpointV1` and `ProjectBriefV1`.
-- [ ] Make session binding server-owned so a changed browser workspace cannot
-  silently move an existing conversation.
-- [ ] Reopen/create the owner's primary Personal and Computer chats and primary
-  per-project chat deterministically; extra/forked project chats stay explicit.
-- [ ] Route native chat context through the compiler behind a feature flag.
-- [ ] Preserve the complete raw transcript and support rollback by disabling the
-  flag.
+### Phase 1A — Non-destructive continuity kernel — **Complete**
 
-### Phase 1B — ModelBridge and Qwen runtime harness (3–4 agent days, parallel with 1A)
+- [x] Add projects, server-owned session scope/project state, and versioned
+  continuity artifacts through additive migration.
+- [x] Implement owner isolation, deterministic primaries, explicit forks,
+  direct project relationships, and browser-workspace non-authority.
+- [x] Implement `ScopeResolver`, `ArtifactStore`, `CheckpointCompactor`, and
+  `ContextCompiler` with `ThreadCheckpointV1` and `ProjectBriefV1`.
+- [x] Preserve raw transcripts and always compile continuity for project-scoped
+  native turns; keep the legacy unscoped path behind its compatibility flag.
 
-- [ ] Add `src/harnesses/base.py`, `native.py`, `qwen_serve.py`, and `router.py`.
-- [ ] Add a small Qwen lifecycle supervisor outside the existing giant agent
-  loop.
-- [ ] Implement binary discovery/version checks and a data-local pinned-install
-  contract; do not perform a network install until approved.
-- [ ] Implement the run-scoped `ModelRoute` and loopback `ModelBridge`, including
-  owner-safe resolution, authentication translation, limits, redaction,
-  streaming, cancellation, and teardown against a fake upstream.
-- [ ] Generate private Qwen configuration containing only the bridge URL, fixed
-  model, and ephemeral token env-key; prove the upstream URL/key never reaches
-  Qwen configuration, environment, events, or logs.
-- [ ] Implement the minimum capability/HTTP/SSE surface against a fake daemon.
-- [ ] Map events into existing Odysseus streaming events.
-- [ ] Prove cancellation, reconnect, prompt/completion correlation, capability
-  downgrade, default denial, and process failure.
+### Phase 1B — ModelBridge and Qwen runtime harness — **Complete**
 
-### Phase 2 — Headless Dust vertical slice (1–2 agent days)
+- [x] Implement the narrow integration as `src/model_bridge.py`,
+  `src/qwen_harness.py`, `src/qwen_supervisor.py`, and
+  `src/scoped_turn_service.py`; a larger generic harness package was not needed.
+- [x] Verify the exact data-local Qwen version and supervise its disposable
+  lifecycle outside the native agent loop.
+- [x] Implement owner/run/endpoint/model-bound routing, ephemeral credentials,
+  loopback authentication, bounded relay, cancellation, and teardown.
+- [x] Generate private safe-mode configuration and prove upstream credentials,
+  URLs, absolute project paths, and raw logs are not exposed to Qwen UI events.
+- [x] Prove reconnect/replay, prompt completion, denial, timeout, cancellation,
+  worker death, and process-group cleanup.
 
-- [ ] Route a scoped read-only project turn to the Qwen harness.
-- [ ] Inject the same selected personality and the compact `ContextBundle`.
-- [ ] Install the approved pinned Qwen runtime and run one approved live
-  Qwen -> `ModelBridge` -> configured FAL endpoint canary with
-  `deepseek/deepseek-v4-flash`.
-- [ ] Run the golden Dust questions without changing its worktree.
-- [ ] Persist a thread checkpoint and project brief; prove the primary Dust chat
-  can continue compactly and an explicit test fork gets the brief but not the
-  primary chat's raw tail or checkpoint.
-- [ ] Prove the Personal Advisor and Computer Help contexts receive no Dust data.
-- [ ] Prove an explicitly invoked, directly linked project brief is labeled and
-  available while unlinked and transitive projects remain absent.
-- [ ] Compare the native and Qwen answers for usefulness, evidence, latency, and
-  failure behavior.
+### Phase 2A — Headless Dust runtime vertical slice — **Complete**
 
-**Checkpoint G1:** show the owner the test report and several Dust answers. The
-owner decides whether Qwen is useful enough to keep and corrects semantic errors.
+- [x] Run a scoped project turn through Qwen, ModelBridge, and the configured
+  provider using the selected personality and compiled continuity bundle.
+- [x] Prove compiler isolation for seeded checkpoints/project briefs, explicit
+  forks, Personal/Computer homes, and direct-related projects.
+- [x] Run protected synthetic and Dust canaries with unchanged workspace hashes
+  and Git status.
+- [x] Pass the final-crystal and fish-church semantic gates, including conflict
+  labeling and abstention on missing lore.
+- [x] Record owner-readable G1 evidence without committing private project text
+  or reusable credentials.
 
-### Phase 3 — AgentMemory provider switch (2–4 agent days)
+The owner kept Qwen and proceeded to the UI trial, completing the Qwen
+retention decision at checkpoint G1. Automatic semantic artifact derivation was
+not exercised by this slice and is deliberately tracked next.
+
+### Phase 2B — Semantic continuity closure — **Active**
+
+- [ ] Define a bounded, schema-validated derivation request for
+  `ThreadCheckpointV1`; retain all source message IDs/hashes and never rewrite
+  raw messages if the derivation fails.
+- [ ] Select the derivation route according to the `[!QUESTION]` above, resolve
+  it owner-safely, and prevent the derivation call from receiving more authority
+  than the corresponding chat turn.
+- [ ] Derive and write a `ProjectBriefV1` only from explicitly shareable,
+  source-linked checkpoint fields; retain a revision and source cursor for every
+  projection.
+- [ ] Prove an automatically produced checkpoint survives restart and a fresh
+  project fork receives the automatically produced brief, never another thread's
+  raw tail.
+- [ ] Cover invalid JSON, provider failure, cancellation, concurrent projection,
+  stale cursor/hash, cross-owner access, and a model that tries to invent canon.
+- [ ] Add a visible but compact context disclosure that distinguishes raw tail,
+  checkpoint, and project brief only after those artifacts are meaningful.
+
+### Phase 3 — AgentMemory provider switch — **Deferred**
 
 - [ ] Implement the strictly scoped adapter and fake-server contract tests.
 - [ ] Wire normal context recall through `MemoryProviderRegistry`.
-- [ ] Index only new structured artifacts/tool outcomes initially, with separate
+- [ ] Index only approved structured artifacts/tool outcomes in separate
   Personal, Computer, and project namespaces.
 - [ ] Provide inventory, backup, dry-run migration, rollback, and duplicate
   reports for existing native and AgentMemory data.
 
-**Checkpoint G2:** obtain explicit approval before touching the owner's real
-AgentMemory data, disabling an existing writer, or migrating native memories.
+**Checkpoint G2:** obtain explicit approval before reading the owner's real
+memory stores, changing a writer, or migrating memory data.
 
-### Phase 4 — Thin GUI and long-history integration (3–5 agent days)
+### Phase 4A — G1.5 Companion UI trial — **Complete**
 
-- [ ] Keep the current Chat / Agent control and folder chip.
-- [ ] Add persistent Personal Advisor and Computer Help destinations plus one
-  primary chat entry per project, without forbidding extra chats or forks.
-- [ ] Paginate or virtualize long chat history: load the checkpoint and recent
-  tail by default, while retaining older raw messages behind a history action.
-- [ ] Show and edit the stable home binding and direct related-project allowlist.
-- [ ] Show harness, workspace, read-only status, plan, tool activity, questions,
-  citations, and failure/reconnect status using existing UI patterns.
-- [ ] Add native `> [!question]` rendering/export.
-- [ ] Add a small “context used” inspector only if debugging shows it is needed.
+- [x] Keep ordinary chats, Chat / Agent, model selection, and the folder chip.
+- [x] Add deterministic Personal Advisor, Computer Help, and project homes plus
+  explicit project forks.
+- [x] Persist project workspace/model/endpoint/harness state and restore it on
+  launch without trusting browser `localStorage`.
+- [x] Stream Qwen project turns with Stop, sanitized status/tool/delta/done/error
+  events, one active turn, mutation verification, and no silent native fallback.
+- [x] Show an explicit scope banner, model/personality label, read-only integrity
+  badge, collapsed Process trace, compact expandable tool lines, context
+  disclosure, and Helpful/Wrong/Unsafe feedback.
+- [x] Persist Process and feedback across reload; fix inline edit/resend,
+  deletion, duplicate primary/project records, service-worker caching, and form
+  label/ID regressions.
+- [x] Retain Cookbook/document shell APIs while preventing browser project chat
+  from requesting native bash or heavy workspace tools.
+- [x] Audit desktop and mobile behavior in a rendered browser and run a real
+  provider-backed synthetic Qwen canary.
 
-### Phase 5 — Read-only Fedora diagnosis (later, 2–4 agent days)
+### Phase 4B — UI hardening beyond G1.5 — **Deferred**
+
+- [ ] Paginate or virtualize very long chat history while retaining all older
+  raw messages behind an explicit history action.
+- [ ] Add a UI editor for stable home bindings and direct related-project
+  allowlists; current bindings are created and enforced by the server.
+- [ ] Add native `> [!QUESTION]` rendering/export if ordinary use demonstrates
+  that callout artifacts belong in chat rather than only project files.
+- [ ] Expand the context inspector only when a concrete debugging need cannot be
+  met by the current manifest disclosure.
+- [ ] Add explicit related-project item/token caps before exposing multi-project
+  selection in the UI.
+
+### Phase 5 — Read-only Fedora diagnosis — **Deferred**
 
 - [ ] Begin with captured `journalctl`/service/package fixtures.
-- [ ] Add allowlisted read-only commands in rootless containment.
-- [ ] Verify that project and personal context are absent from the worker packet
-  unless explicitly relevant.
-- [ ] Harden the G1 `ModelBridge` and worker containment for longer-running
-  diagnostic tasks; retain per-worker tokens, one endpoint/model, bounded
-  requests, transparent streaming, and redacted logs.
+- [ ] Add a separately reviewed allowlist of read-only diagnostic operations in
+  stronger containment; do not reuse project Qwen's file-reading policy as host
+  authority.
+- [ ] Prove project and personal context are absent unless explicitly relevant.
+- [ ] Retain per-worker route tokens, one endpoint/model, bounded requests,
+  transparent streaming, redacted logs, teardown, and integrity checks.
 
-**Checkpoint G3:** stop before enabling any real file write, unrestricted shell,
-package/service change, privilege escalation, or host repair. Decide then whether
-to create a Fedora VM with snapshots.
+**Checkpoint G3:** stop before any real file write, unrestricted shell,
+package/service change, privilege escalation, or host repair. Decide separately
+whether those experiments require a snapshot-capable Fedora VM.
 
-## Effort and likely outcome
+### Phase 6 — Normal-use stabilization — **Active**
 
-| Milestone | Agent effort | Likely result |
-|---|---:|---|
-| Fake-tested artifact continuity | 2–3 days | Stable bindings, raw transcripts preserved, thread checkpoints and shared project briefs |
-| Fake-tested Qwen + ModelBridge | 3–4 days | Provider-neutral credential boundary, runtime lifecycle, Serve protocol, streaming, and cancellation |
-| First read-only Dust proof | 1–2 days | Cited answer, compact primary-chat continuation, explicit fork isolation, and related-project context |
-| **Useful API-level prototype** | **6–9 agent days, with 1A/1B parallel** | **Enough evidence for G1; no production write/shell** |
-| Robust first integration including AgentMemory | 9–13 days | Scoped recall, migration plan, failure handling, regression coverage |
-| Thin GUI exposure and long-history loading | +3–5 days | Default rooms, project bindings, worker inspection, and non-lagging history access |
+- [ ] Use G1.5 for real project conversations and record Helpful, Wrong, and
+  Unsafe feedback with short reproducible notes.
+- [ ] Exercise Qwen/native comparison, edit/resend, Stop, reload/restart,
+  project forks/deletion, model changes, and desktop/mobile navigation.
+- [ ] Treat correctness, containment, data loss, credential exposure, orphaned
+  workers, or broken native/Cookbook behavior as release blockers.
+- [ ] Keep convenience and polish requests in this plan without enabling
+  writable tools or importing `_HUGE` scope.
 
-The owner's twenty available hours are more than enough for decisions and answer
-review during this first run; they are not expected to perform twenty hours of
-manual testing. Agents can implement and test most backend work autonomously.
+## Milestone outcomes
+
+| Milestone | State | Outcome |
+|---|---|---|
+| Continuity storage/compiler | **Complete** | Stable bindings, retained raw history, artifact contracts/store, deterministic context |
+| Semantic continuity derivation | **Active** | Production checkpoints need meaningful derived fields and production project-brief projection |
+| Qwen + ModelBridge | **Complete** | Provider-neutral credential boundary, disposable Serve lifecycle, read-only Bubblewrap containment |
+| Protected Dust runtime proof | **Complete** | Cited conflict-aware answers, read-only integrity, fresh-worker raw-tail continuation, and scope isolation |
+| Companion UI trial | **Complete** | Testable homes/projects, Qwen/native comparison, Process visibility, feedback and lifecycle controls |
+| Normal-use stabilization | **Active** | Gather real failures and correct regressions without adding authority |
+| AgentMemory integration | **Deferred** | Requires a separate G2 decision and safe inventory/migration design |
+| Computer Help diagnostics | **Deferred** | Requires a separate tool/containment contract |
+
+> [!QUESTION]
+> After normal-use stabilization, which contained milestone should become
+> active first: scoped AgentMemory recall, read-only Computer Help diagnostics,
+> or the remaining long-history/related-project UI hardening?
+
+> [!QUESTION]
+> In a project home, should selecting **Chat** while Qwen is enabled still use
+> Qwen's read/search tools, or should **Chat** always force a tool-free native
+> comparison turn? G1.5 currently treats Chat / Agent and the Qwen toggle as
+> separate controls.
+
+> [!QUESTION]
+> Should a later project-Qwen milestone receive a separately brokered web-search
+> capability, or remain workspace-only? G1.5 denies Qwen `WebSearch` and
+> `WebFetch` even when the ordinary Odysseus web-search control is visible.
 
 ## Acceptance tests
 
-- [ ] Compaction leaves raw database row IDs, count, order, and content unchanged.
-- [ ] Repeating compaction at the same cursor/hash is idempotent.
-- [ ] A summarizer failure loses no data.
-- [ ] Tool calls and results remain atomic across checkpoint boundaries.
-- [ ] Reopening Personal, Computer, or a project returns its primary chat; an
+- [x] Compaction leaves raw database row IDs, count, order, and content unchanged.
+- [x] Repeating compaction at the same cursor/hash is idempotent.
+- [x] A summarizer failure loses no data.
+- [x] Tool calls and results remain atomic across checkpoint boundaries.
+- [x] Reopening Personal, Computer, or a project returns its primary chat; an
   explicit fork remains a separate session.
-- [ ] The primary Dust chat continues from its own checkpoint and recent tail
-  after compaction.
-- [ ] A deliberately created Dust fork shares the active `ProjectBriefV1` but
-  never the primary chat's raw tail or `ThreadCheckpointV1`.
-- [ ] The Personal Advisor “why is lemon acidic?” turn receives no Dust artifact,
+- [x] The compiler can continue a primary chat from a seeded checkpoint and
+  recent tail without rewriting raw history.
+- [ ] An automatically derived primary checkpoint must continue a fresh worker
+  after the raw tail no longer contains its source conversation.
+- [x] A deliberately created Dust fork can share a seeded active
+  `ProjectBriefV1` without receiving the primary chat's raw tail or
+  `ThreadCheckpointV1`.
+- [ ] A project fork must receive an automatically derived `ProjectBriefV1`,
+  not merely a seeded fixture artifact.
+- [x] The Personal Advisor “why is lemon acidic?” turn receives no Dust artifact,
   transcript, episodic hit, or worker state.
-- [ ] The Computer Help chat receives no project/personal context unless the user
-  explicitly invokes it.
-- [ ] A browser-wide workspace selection cannot silently change a bound session.
-- [ ] A named directly linked project contributes only a separately labeled,
-  capped brief; unlinked and transitive projects contribute nothing.
-- [ ] A related-project bundle contains no raw chat, personal memory,
+- [x] The Computer Help chat receives no project or Personal Advisor context in
+  G1.5.
+- [x] A browser-wide workspace selection cannot silently change a bound session.
+- [x] An explicitly supplied directly linked project ID contributes a separately
+  labeled brief; unlinked and transitive projects contribute nothing.
+- [ ] Resolve a user-entered project name or `@project` reference to an owned,
+  directly linked project ID before passing it to the compiler.
+- [ ] Enforce explicit item/token caps before more than one related project can
+  be selected through the UI.
+- [x] A related-project bundle contains no raw chat, personal memory,
   credentials, tool transcript, or Qwen session state.
 - [ ] AgentMemory mismatched and unscoped seeded hits are discarded.
 - [ ] AgentMemory downtime still leaves exact checkpoint continuity working.
-- [ ] Native and Qwen harnesses compile the same semantic context inputs.
-- [ ] The disposable Qwen runtime receives only its ephemeral bridge token; its
+- [x] Native and Qwen harnesses compile the same semantic context inputs.
+- [x] The disposable Qwen runtime receives only its ephemeral bridge token; its
   configuration, environment, process arguments, events, and logs contain no
   upstream URL or reusable provider credential, and runtime state is removed
   after the live test.
-- [ ] Missing or unsupported Qwen produces a clear capability downgrade and the
+- [x] Missing or unsupported Qwen produces a clear capability downgrade and the
   native harness remains usable.
-- [ ] Qwen always requests a distinct thread rather than attaching unrelated
+- [x] Qwen always requests a distinct thread rather than attaching unrelated
   Odysseus conversations to one daemon session.
-- [ ] Prompt admission is not mistaken for turn completion.
-- [ ] Fragmented/unknown/replayed SSE events do not corrupt the transcript.
-- [ ] Cancellation and worker death terminate the Odysseus run cleanly.
-- [ ] Read-only Plan mode produces no Dust file, status, or hash changes.
-- [ ] The final-crystal answer cites both passages and labels the conflict.
-- [ ] The fish-church answer abstains rather than inventing missing lore.
-- [ ] Disabling the feature flag restores the existing native path.
+- [x] Prompt admission is not mistaken for turn completion.
+- [x] Fragmented/unknown/replayed SSE events do not corrupt the transcript.
+- [x] Cancellation and worker death terminate the Odysseus run cleanly.
+- [x] Read-only safe/Plan mode produces no Dust file, status, or hash changes.
+- [x] The final-crystal answer cites both passages and labels the conflict.
+- [x] The fish-church answer abstains rather than inventing missing lore.
+- [x] Disabling the feature flag restores the existing native path.
+
+G1.5 adds these accepted UI/runtime checks:
+
+- [x] Repeated or concurrent home opens resolve to one deterministic primary.
+- [x] A project restores its server-owned workspace, endpoint, model, harness,
+  and primary/fork identity across reload and restart.
+- [x] Qwen streams only sanitized Process events and persists the collapsed
+  readable trace with the assistant message.
+- [x] Inline edit/resend truncates the old suffix and starts exactly one
+  replacement Qwen turn.
+- [x] Stop, disconnect, timeout, worker death, and provider failure tear down the
+  admitted worker and verify workspace integrity.
+- [x] Native project comparison sends `allow_bash=false`, does not call
+  `/api/shell/*`, and cannot recover bash state from browser storage.
+- [x] Helpful/Wrong/Unsafe feedback and notes persist and export without the
+  project corpus.
+- [x] Form controls have unique IDs, accessible labels, and working desktop and
+  mobile navigation.
+- [x] Cookbook and document execution retain their shared shell APIs.
 
 ## Autonomous goal checkpoints and authority
 
-Once the owner explicitly starts a goal, agents can implement autonomously
-inside each G1 sub-checkpoint. They may inspect/edit this repository, create
-local feature branches/worktrees, run tests and local fake services, and study
-the already cloned reference repositories as normal implementation work. The
-agent commits, reports, and stops at every G1A1–G1E boundary defined in
-`ODYSSEUS_G1_EXECUTION_PLAN.md`; the owner resumes it for the next increment.
+The G1 runtime/safety and G1.5 UI checkpoints are completed. The historical
+G1A1–G1E execution sequence remains in `ODYSSEUS_G1_EXECUTION_PLAN.md` as
+implementation evidence, not as an active to-do list. Semantic continuity
+closure is the active follow-up recorded in Phase 2B.
+
+Once the owner explicitly starts a new contained goal, agents may inspect/edit
+this repository, create local feature branches/worktrees, run tests and local
+fake services, and study already approved references as normal implementation
+work. They must preserve owner data and external projects, keep the stated
+authority boundary, commit coherent reviewed changes, and report evidence at
+the next named product decision.
 
 The larger product decision gates remain:
 
-1. **G1 — semantic/Qwen decision:** after the headless read-only Dust demo.
+1. **G1 — semantic/Qwen decision: Complete.** Qwen was retained and exposed in
+   G1.5.
 2. **G2 — real memory mutation:** before changing or migrating the owner's
    AgentMemory/native memory data.
 3. **G3 — computer mutation:** before any write/shell/privileged host capability.
 
 Dependency installation, live provider use, external pushes/PRs, and other
-actions requiring new authority remain separate approvals; the goal itself does
-not grant them. The configured FAL endpoint is the intended first live provider,
-but its credential remains durably stored and resolved only inside Odysseus.
-Qwen receives a short-lived route-scoped bridge token. If live access is
-unavailable, complete the fake provider/adapter and continuity work, report the
-live-test blocker at G1, and do not stop earlier.
+actions requiring new authority remain separate approvals; a goal does not grant
+them implicitly. Provider credentials remain durably stored and resolved only
+inside Odysseus. Qwen receives a short-lived route-scoped bridge token.
 
-Suggested goal objective:
+Suggested stabilization objective:
 
-> Implement the active lean MVP in `ODYSSEUS_IMPLEMENTATION_PLAN.md` through
-> Phase 2, test it autonomously, preserve Dust and all existing user data, and
-> stop at checkpoint G1 with a headless read-only Dust demonstration and full
-> test report. Do not migrate real memory or enable write/shell capabilities.
+> Exercise and harden the committed G1.5 Companion homes and read-only Qwen UI.
+> Reproduce and fix correctness, persistence, lifecycle, accessibility, and
+> containment regressions. Preserve all raw messages, owner data, external
+> projects, native chat, Cookbook, and document execution. Do not migrate real
+> memory, enable writable Qwen tools, grant host shell authority, or begin the
+> `_HUGE` plan.
 
 ## Explicitly deferred
 
@@ -722,16 +906,16 @@ when a measured MVP failure or accepted next milestone requires them.
 
 ## Remaining owner inputs
 
-- [x] Use an explicit project name or `@project` reference for the first directly
-  related-project lookup; automatic relevance waits until isolation is proven.
+- [x] Decide that related-project access must be explicit; automatic relevance
+  waits until isolation is proven. Owner-facing name/`@project` resolution is
+  still deferred.
 - [x] Keep provider selection neutral through an Odysseus-owned `ModelBridge`;
   never hand the reusable FAL credential to Qwen.
-- [ ] Approve the data-local installation of pinned
-  `@qwen-code/qwen-code@0.21.3` when the live G1 test begins. Node 22, npm, and
-  Podman are already present; `qwen` itself is not currently installed.
-- [ ] At G1, judge several Dust answers for usefulness and correct the expected
-  labels rather than manually testing the GUI.
+- [x] Approve and install data-local pinned
+  `@qwen-code/qwen-code@0.21.3`; the launcher uses the ignored repository-local
+  installation and never requires a global Qwen process.
+- [x] Judge the initial Dust answers and retain Qwen for the G1.5 UI trial.
 - [ ] At G2, approve an inventory-only read of the existing AgentMemory/native
   data before any migration or writer change.
-- [ ] After this intensive week, state whether future checkpoints can assume a
-  few review hours per week or should be fully asynchronous.
+- [ ] Answer the four `[!QUESTION]` callouts above before selecting the next
+  capability milestone. They do not block ordinary G1.5 stabilization.
