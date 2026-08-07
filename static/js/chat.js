@@ -1806,7 +1806,10 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
           const capabilityBadge = doneData?.effective_capability === 'project_inspect'
             ? 'Sandboxed inspection'
             : 'Read-only';
-          if (answer) addMessage('assistant', `${answer}\n\n*Qwen · ${capabilityBadge} · Workspace unchanged*`, doneData?.model || 'Qwen Companion', {
+          const integrityBadge = doneData?.workspace_unchanged
+            ? 'Workspace unchanged'
+            : proposalData ? 'Concurrent changes preserved' : 'Workspace changed';
+          if (answer) addMessage('assistant', `${answer}\n\n*Qwen · ${capabilityBadge} · ${integrityBadge}*`, doneData?.model || 'Qwen Companion', {
             _db_id: doneData?.message_id || '', harness: 'qwen', qwen_read_only: true,
             capability_profile: doneData?.effective_capability || 'project_read',
             workspace_unchanged: !!doneData?.workspace_unchanged,

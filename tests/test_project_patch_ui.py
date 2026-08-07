@@ -37,6 +37,7 @@ def test_automatic_mode_applies_only_the_server_proposal_revision():
     assert "/api/companion/patches/${encodeURIComponent(proposalData.id)}/apply" in chat
     assert "body: JSON.stringify({expected_revision: proposalData.revision})" in chat
     assert "Project change applied and verified · diff and Undo available" in chat
+    assert "Concurrent changes preserved" in chat
 
 
 def test_patch_card_is_reconstructed_from_persisted_assistant_metadata():

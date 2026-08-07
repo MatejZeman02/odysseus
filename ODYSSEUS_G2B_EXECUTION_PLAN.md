@@ -27,6 +27,9 @@ project and clears on browser reload.
    acquires a project lock, rejects stale or dirty affected paths, journals
    preimages, replaces all files atomically, verifies hashes and unrelated-file
    integrity, and restores prior contents after a partial failure.
+   Unrelated editor/agent changes made while Qwen was reading are preserved and
+   reported instead of being misattributed to the physically read-only worker;
+   any affected-path change still makes the proposal stale.
 7. **Roll back** restores
    an applied patch only while every affected file still matches its applied
    hash. **Review applied change** prepares a separate ordinary read-only Qwen

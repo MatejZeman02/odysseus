@@ -160,8 +160,9 @@ async def test_patch_turn_extracts_envelope_before_persisting_assistant(monkeypa
             return f"I prepared the change.\n{PATCH_START}\n{json.dumps(envelope)}\n{PATCH_END}", {}
         async def stop(self): pass
 
+    snapshots = iter([("before",), ("changed concurrently",)])
     monkeypatch.setattr(service_module, "ModelBridgeRuntime", BridgeRuntime)
-    monkeypatch.setattr(service_module, "snapshot_workspace", lambda path: (str(path), "same"))
+    monkeypatch.setattr(service_module, "snapshot_workspace", lambda path: next(snapshots))
     result = await ReadOnlyScopedTurnService(
         Manager(), qwen_binary=Path("/qwen"), store=Store(),
         bridge_factory=Bridge, supervisor_factory=Supervisor,
@@ -171,6 +172,9 @@ async def test_patch_turn_extracts_envelope_before_persisting_assistant(monkeypa
     assert result.proposal.summary == "Update heading"
     assert result.proposal.public_files[0]["path"] == "README.md"
     assert PATCH_START not in session.history[-1].content
+    assert result.dust_unchanged is False
+    assert result.qwen_process["integrity_result"] == "concurrent_changes_preserved"
+    assert session.history[-1].metadata["workspace_unchanged"] is False
 
 
 def test_patch_failures_have_stable_turn_codes():

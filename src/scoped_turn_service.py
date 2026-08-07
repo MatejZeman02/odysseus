@@ -246,7 +246,21 @@ class ReadOnlyScopedTurnService:
             # workspace mutation behind the original worker exception.
             after = snapshot_workspace(workspace)
             workspace_unchanged = after == before
-            if not workspace_unchanged:
+            # Patch proposals are generated inside the same physically
+            # read-only Bubblewrap boundary as normal Qwen turns. An editor or
+            # another agent may legitimately change this checkout while the
+            # model is reading it. Once a complete proposal has been validated,
+            # per-target preimage hashes are the correct concurrency fence: the
+            # transaction engine rejects a changed target as stale and preserves
+            # every unrelated change. Keep the stricter whole-workspace failure
+            # for ordinary turns and for proposals that never completed.
+            concurrent_proposal_change = (
+                not workspace_unchanged
+                and proposal_mode
+                and prepared_proposal is not None
+                and worker_error is None
+            )
+            if not workspace_unchanged and not concurrent_proposal_change:
                 worker_error = RuntimeError("protected project changed during Qwen turn")
             elif teardown_error is not None and worker_error is None:
                 worker_error = RuntimeError("Qwen teardown failed")
@@ -255,6 +269,7 @@ class ReadOnlyScopedTurnService:
             "events": process_events,
             "capability_profile": capability_profile,
             "workspace_unchanged": workspace_unchanged,
+            "integrity_result": "unchanged" if workspace_unchanged else "concurrent_changes_preserved",
         }
         if worker_error is not None:
             failure_code = classify_turn_failure(worker_error)
@@ -275,7 +290,7 @@ class ReadOnlyScopedTurnService:
         assistant_message = ChatMessage("assistant", answer, metadata={
             "harness": "qwen", "qwen_read_only": True,
             "capability_profile": capability_profile,
-            "workspace_unchanged": True, "context_manifest": bundle.manifest,
+            "workspace_unchanged": workspace_unchanged, "context_manifest": bundle.manifest,
             "model": model,
             "qwen_process": qwen_process,
         })
@@ -284,7 +299,7 @@ class ReadOnlyScopedTurnService:
             owner=owner, session_id=session_id, messages=session.history,
         )
         return ScopedTurnResult(
-            answer, bundle.manifest, True,
+            answer, bundle.manifest, workspace_unchanged,
             assistant_message.metadata.get("_db_id", ""),
             user_message.metadata.get("_db_id", ""),
             qwen_process,
