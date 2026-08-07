@@ -54,6 +54,7 @@ class Project(TimestampMixin, Base):
         Index("ix_projects_owner_name", "owner", "name", unique=True),
     )
 
+
 # Ensure the writable data directory exists before SQLite connects.
 from src.constants import DATA_DIR, AUTH_FILE, MEMORY_FILE, USER_PREFS_FILE, SETTINGS_FILE
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
@@ -335,6 +336,40 @@ class ChatMessage(Base):
     # Indexes - optimized composite
     __table_args__ = (
         Index('ix_messages_session_time', 'session_id', 'timestamp'),  # Composite for efficient message retrieval
+    )
+
+
+class ProjectChangeSet(TimestampMixin, Base):
+    """Owner-approved, auditable project patch transaction."""
+    __tablename__ = "project_change_sets"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True, index=True)
+    model = Column(String, nullable=False)
+    endpoint_id = Column(String, nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default="proposed", index=True)
+    summary = Column(Text, nullable=False)
+    rationale = Column(Text, nullable=False, default="")
+    base_git_revision = Column(String, nullable=False)
+    # Patch bodies can contain unpublished project material. Keep both the
+    # proposal and rollback preimages encrypted at rest.
+    proposal_json = Column(EncryptedText, nullable=False)
+    rollback_json = Column(EncryptedText, nullable=True)
+    result_json = Column(Text, nullable=False, default="{}")
+    failure_code = Column(String, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    applied_at = Column(DateTime, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+    rolled_back_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_project_change_sets_project_created", "project_id", "created_at"),
+        Index("ix_project_change_sets_owner_status", "owner", "status"),
     )
 
 class Document(TimestampMixin, Base):
