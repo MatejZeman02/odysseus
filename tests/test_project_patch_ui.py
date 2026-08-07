@@ -47,8 +47,14 @@ def test_patch_card_is_reconstructed_from_persisted_assistant_metadata():
     assert ".project-patch-card" in (ROOT / "static/style.css").read_text()
 
 
+def test_failed_process_replays_its_actionable_safe_detail():
+    renderer = (ROOT / "static/js/chatRenderer.js").read_text()
+    assert "process.failure_detail" in renderer
+    assert "failure.textContent = failureDetail" in renderer
+
+
 def test_patch_build_id_invalidates_existing_service_worker_cache():
     index = (ROOT / "static/index.html").read_text()
     worker = (ROOT / "static/sw.js").read_text()
-    assert "20260807g2bpatch3" in index
-    assert "20260807g2bpatch3" in worker
+    assert "20260807g2bpatch4" in index
+    assert "20260807g2bpatch4" in worker

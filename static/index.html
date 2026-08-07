@@ -249,9 +249,9 @@
       }, { once: true });
     })();
   </script>
-  <meta name="odysseus-build" content="20260807g2bpatch3">
-  <link rel="stylesheet" href="/static/style.css?v=20260807g2bpatch3">
-  <link rel="modulepreload" href="/static/app.js?v=20260807g2bpatch3">
+  <meta name="odysseus-build" content="20260807g2bpatch4">
+  <link rel="stylesheet" href="/static/style.css?v=20260807g2bpatch4">
+  <link rel="modulepreload" href="/static/app.js?v=20260807g2bpatch4">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -2528,7 +2528,7 @@
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js?v=20260722emailfastindex1"></script>
 <script type="module" src="/static/js/gallery.js?v=20260708match1"></script>
-<script type="module" src="/static/js/chatRenderer.js?v=20260807g2bpatch1"></script>
+<script type="module" src="/static/js/chatRenderer.js?v=20260807g2bpatch4"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js?v=20260722emailfastindex1"></script>
   <!-- chat.js is imported once by app.js; a second module instance has its own send state. -->
@@ -2539,11 +2539,11 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260723compareicon1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-  <script type="module" src="/static/app.js?v=20260807g2bpatch3"></script>  <!-- app.js must be LAST -->
-  <script type="module" src="/static/js/init.js?v=20260807g2bpatch3"></script>
+  <script type="module" src="/static/app.js?v=20260807g2bpatch4"></script>  <!-- app.js must be LAST -->
+  <script type="module" src="/static/js/init.js?v=20260807g2bpatch4"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">
-window.__ODYSSEUS_BUILD_ID='20260807g2bpatch3';
+window.__ODYSSEUS_BUILD_ID='20260807g2bpatch4';
 document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
@@ -2561,7 +2561,7 @@ if('serviceWorker' in navigator){
     button.addEventListener('click',()=>location.reload());
     banner.append(text,button);document.body.appendChild(banner);
   });
-  navigator.serviceWorker.register('/static/sw.js?v=20260807g2bpatch3',{updateViaCache:'none'})
+  navigator.serviceWorker.register('/static/sw.js?v=20260807g2bpatch4',{updateViaCache:'none'})
     .then(reg=>reg.update()).catch(()=>{});
 }
 </script>

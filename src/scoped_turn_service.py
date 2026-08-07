@@ -39,6 +39,36 @@ QWEN_TURN_ERROR_CODES = frozenset({
 })
 
 
+_SAFE_TURN_FAILURE_DETAILS = {
+    "turn_timeout": "Qwen did not finish within the turn limit. No project files were changed; try a smaller request.",
+    "workspace_changed": (
+        "Project files changed while Qwen was inspecting them, so the result was discarded and no patch was applied. "
+        "Wait for editors or Git tasks to finish, then try again."
+    ),
+    "teardown_failed": "Qwen finished, but its isolated worker did not shut down cleanly. No patch was applied.",
+    "sandbox_unavailable": "The required Qwen sandbox is unavailable. No less-protected fallback was used.",
+    "command_denied": "Qwen requested an operation that this project profile does not permit.",
+    "command_timeout": "A project inspection operation exceeded its time limit.",
+    "command_output_limited": "A project inspection operation produced more output than the safety limit allows.",
+    "command_resource_limit": "A project inspection operation exceeded its resource limit.",
+    "provider_failed": "The selected model provider failed before Qwen could finish. No patch was applied.",
+    "worker_died": "The isolated Qwen worker stopped before producing a complete result. No patch was applied.",
+    "cancelled": "The Qwen turn was stopped. No patch was applied.",
+    "proposal_invalid": (
+        "Qwen finished but did not return a valid structured patch proposal. No files were changed. "
+        "Try a smaller, more specific change."
+    ),
+    "proposal_too_large": "The proposed patch exceeded the file or size limit. No files were changed; request a smaller change.",
+    "path_denied": "The proposal targeted a protected or out-of-project path. No files were changed.",
+    "unsupported_file": "The proposal included an unsupported file type or operation. No files were changed.",
+}
+
+
+def safe_turn_failure_detail(code: str) -> str:
+    """Return an actionable browser-safe explanation for a stable code."""
+    return _SAFE_TURN_FAILURE_DETAILS.get(code, "The read-only Qwen turn failed before completing. No patch was applied.")
+
+
 def classify_turn_failure(exc: BaseException) -> str:
     if isinstance(exc, PatchError):
         return exc.code
@@ -273,7 +303,11 @@ class ReadOnlyScopedTurnService:
         }
         if worker_error is not None:
             failure_code = classify_turn_failure(worker_error)
-            qwen_process.update({"outcome": "failed", "failure_code": failure_code})
+            qwen_process.update({
+                "outcome": "failed",
+                "failure_code": failure_code,
+                "failure_detail": safe_turn_failure_detail(failure_code),
+            })
             if user_message.metadata is None:
                 user_message.metadata = {}
             user_message.metadata.update({

@@ -21,7 +21,7 @@ from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.companion_runs import CompanionRunRegistry
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
 from src.qwen_inspection import effective_capability, inspection_readiness
-from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure
+from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure, safe_turn_failure_detail
 
 logger = logging.getLogger(__name__)
 
@@ -93,20 +93,7 @@ def _qwen_binary() -> Path:
 def _qwen_error_payload(exc: Exception) -> dict:
     """Map worker failures to stable, credential-free browser errors."""
     code = classify_turn_failure(exc)
-    details = {
-        "turn_timeout": "Qwen reached the read-only turn limit before finishing",
-        "workspace_changed": "The protected workspace integrity check failed",
-        "teardown_failed": "Qwen finished but its isolated worker did not shut down cleanly",
-        "sandbox_unavailable": "Sandboxed project inspection is unavailable",
-        "command_denied": "The inspection command is not permitted",
-        "command_timeout": "The inspection command exceeded its time limit",
-        "command_output_limited": "The inspection command exceeded its output limit",
-        "command_resource_limit": "The inspection command exceeded its resource limit",
-        "provider_failed": "The selected model provider failed during the Qwen turn",
-        "worker_died": "The isolated Qwen worker stopped unexpectedly",
-        "cancelled": "Qwen turn stopped",
-    }
-    return {"code": code, "detail": details.get(code, "Read-only Qwen turn failed")}
+    return {"code": code, "detail": safe_turn_failure_detail(code)}
 
 
 def _safe_workspace(value: str) -> str:

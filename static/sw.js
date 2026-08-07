@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const BUILD_ID = '20260807g2bpatch3';
+const BUILD_ID = '20260807g2bpatch4';
 const CACHE_NAME = `odysseus-v387-${BUILD_ID}`;
 
 // Core shell precached on install so repeat opens are instant without any

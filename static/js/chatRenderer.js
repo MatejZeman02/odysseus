@@ -962,7 +962,8 @@ export function buildQwenProcessCard(process) {
   if (process.failure_code) {
     const failure = document.createElement('p');
     failure.className = 'qwen-process-failure';
-    failure.textContent = `Turn failed · ${String(process.failure_code).replaceAll('_', ' ')}`;
+    const failureDetail = String(process.failure_detail || '').trim();
+    failure.textContent = failureDetail || `Turn failed · ${String(process.failure_code).replaceAll('_', ' ')}`;
     detail.appendChild(failure);
   }
   card.append(summary, detail);

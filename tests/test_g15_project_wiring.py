@@ -786,8 +786,22 @@ def test_qwen_timeout_error_is_specific_and_safe():
     )
     assert payload == {
         "code": "turn_timeout",
-        "detail": "Qwen reached the read-only turn limit before finishing",
+        "detail": "Qwen did not finish within the turn limit. No project files were changed; try a smaller request.",
     }
+    assert "provider-secret" not in repr(payload)
+
+
+def test_qwen_patch_errors_are_actionable_and_safe():
+    import routes.g1_continuity_routes as project_routes
+    from src.project_patches import PatchError
+
+    payload = project_routes._qwen_error_payload(
+        PatchError("proposal_invalid", "raw model output with provider-secret")
+    )
+
+    assert payload["code"] == "proposal_invalid"
+    assert "valid structured patch proposal" in payload["detail"]
+    assert "No files were changed" in payload["detail"]
     assert "provider-secret" not in repr(payload)
 
 
