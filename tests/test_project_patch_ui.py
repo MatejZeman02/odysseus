@@ -50,5 +50,5 @@ def test_patch_card_is_reconstructed_from_persisted_assistant_metadata():
 def test_patch_build_id_invalidates_existing_service_worker_cache():
     index = (ROOT / "static/index.html").read_text()
     worker = (ROOT / "static/sw.js").read_text()
-    assert "20260807g2bpatch2" in index
-    assert "20260807g2bpatch2" in worker
+    assert "20260807g2bpatch3" in index
+    assert "20260807g2bpatch3" in worker
