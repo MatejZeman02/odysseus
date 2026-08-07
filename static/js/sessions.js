@@ -2095,6 +2095,16 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
       qwenBtn.title = qwenActive ? 'Qwen Companion · read-only project access' :
         (meta?.scope_kind === 'computer' ? 'Computer Help · Qwen coming next' : 'Qwen Companion (project read-only)');
     }
+    const patchBtn = document.getElementById('project-patch-btn');
+    if (patchBtn) {
+      patchBtn.hidden = !qwenActive;
+      patchBtn.style.display = qwenActive ? '' : 'none';
+      if (!qwenActive) {
+        patchBtn.classList.remove('active');
+        patchBtn.setAttribute('aria-pressed', 'false');
+        window.__odysseusPatchProposalActive = false;
+      }
+    }
     const setModeReliably = (mode) => {
       const toggleState = Storage.loadToggleState(); toggleState.mode = mode; Storage.saveToggleState(toggleState);
       const agent = document.getElementById('mode-agent-btn'), chat = document.getElementById('mode-chat-btn');

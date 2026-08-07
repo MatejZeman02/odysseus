@@ -969,6 +969,149 @@ export function buildQwenProcessCard(process) {
   return card;
 }
 
+function _patchErrorDetail(payload, fallback) {
+  const detail = payload?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail.detail === 'string') return detail.detail;
+  return fallback;
+}
+
+function _patchStatusLabel(status) {
+  return String(status || 'proposed').replaceAll('_', ' ');
+}
+
+/** Persistent whole-patch review card. All displayed paths/diffs came from the
+ * server's trusted proposal normalization; the browser never sends content. */
+export function buildProjectPatchCard(seed) {
+  if (!seed?.id) return null;
+  const card = document.createElement('section');
+  card.className = 'project-patch-card';
+  card.dataset.patchId = String(seed.id);
+  card.setAttribute('aria-label', 'Reviewed project patch');
+
+  const render = (patch) => {
+    card.replaceChildren();
+    const header = document.createElement('div'); header.className = 'project-patch-header';
+    const heading = document.createElement('strong'); heading.textContent = patch.summary || 'Project patch';
+    const state = document.createElement('span'); state.className = `project-patch-status status-${patch.status || 'proposed'}`;
+    state.textContent = _patchStatusLabel(patch.status);
+    header.append(heading, state); card.appendChild(header);
+
+    if (patch.rationale) {
+      const rationale = document.createElement('p'); rationale.className = 'project-patch-rationale';
+      rationale.textContent = patch.rationale; card.appendChild(rationale);
+    }
+    if (patch.status === 'stale') {
+      const warning = document.createElement('p'); warning.className = 'project-patch-warning';
+      warning.textContent = 'The affected files changed after this proposal. Generate a fresh patch.'; card.appendChild(warning);
+    } else if (patch.failure_code) {
+      const warning = document.createElement('p'); warning.className = 'project-patch-warning';
+      warning.textContent = `Transaction needs attention · ${_patchStatusLabel(patch.failure_code)}`; card.appendChild(warning);
+    }
+
+    const stats = document.createElement('div'); stats.className = 'project-patch-stats';
+    const files = Array.isArray(patch.files) ? patch.files : [];
+    const added = files.reduce((n, file) => n + Number(file.added || 0), 0);
+    const removed = files.reduce((n, file) => n + Number(file.removed || 0), 0);
+    stats.textContent = `${files.length} file${files.length === 1 ? '' : 's'} · +${added} −${removed}`;
+    card.appendChild(stats);
+
+    const fileList = document.createElement('div'); fileList.className = 'project-patch-files';
+    for (const file of files) {
+      const disclosure = document.createElement('details'); disclosure.className = 'project-patch-file';
+      const summary = document.createElement('summary');
+      const path = document.createElement('span'); path.className = 'project-patch-path'; path.textContent = file.path || 'file';
+      const fileStats = document.createElement('span'); fileStats.className = 'project-patch-file-stats';
+      fileStats.textContent = `${file.operation === 'create' ? 'new · ' : ''}+${Number(file.added || 0)} −${Number(file.removed || 0)}`;
+      summary.append(path, fileStats);
+      const diff = document.createElement('pre'); diff.className = 'project-patch-diff'; diff.textContent = file.diff || 'Diff unavailable';
+      disclosure.append(summary, diff); fileList.appendChild(disclosure);
+    }
+    card.appendChild(fileList);
+
+    if (Array.isArray(patch.process) && patch.process.length) {
+      const process = document.createElement('details'); process.className = 'project-patch-transaction';
+      const summary = document.createElement('summary'); summary.textContent = 'Transaction record'; process.appendChild(summary);
+      for (const row of patch.process) {
+        const line = document.createElement('div'); line.className = 'project-patch-transaction-row';
+        line.textContent = `${row.status === 'completed' ? '✓' : '•'} ${row.label || 'Patch transaction'}`;
+        process.appendChild(line);
+      }
+      card.appendChild(process);
+    }
+
+    const actions = document.createElement('div'); actions.className = 'project-patch-actions';
+    const action = (label, className, handler) => {
+      const button = document.createElement('button'); button.type = 'button'; button.className = className;
+      button.textContent = label; button.addEventListener('click', handler); actions.appendChild(button); return button;
+    };
+    const mutate = async (verb) => {
+      actions.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      try {
+        const response = await fetch(`/api/companion/patches/${encodeURIComponent(patch.id)}/${verb}`, {
+          method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({expected_revision: patch.revision}),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(_patchErrorDetail(result, `Could not ${verb} patch`));
+        render(result);
+        uiModule.showToast(verb === 'apply' ? 'Approved patch applied and verified' : verb === 'rollback' ? 'Patch rolled back' : 'Patch rejected', 2400);
+      } catch (error) {
+        uiModule.showError(error.message || `Could not ${verb} patch`);
+        try {
+          const refreshedResponse = await fetch(`/api/companion/patches/${encodeURIComponent(patch.id)}`, {
+            credentials: 'same-origin', cache: 'no-store',
+          });
+          const refreshed = await refreshedResponse.json();
+          if (refreshedResponse.ok) render(refreshed);
+          else actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        } catch (_) {
+          actions.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        }
+      }
+    };
+    if (patch.status === 'proposed') {
+      action('Apply patch', 'project-patch-primary', async () => {
+        const ok = await uiModule.styledConfirm(
+          `Apply the complete reviewed patch to ${files.length} project file${files.length === 1 ? '' : 's'}?`,
+          {title: 'Apply reviewed patch', confirmText: 'Apply patch'}
+        );
+        if (ok) await mutate('apply');
+      });
+      action('Reject', 'project-patch-secondary', () => mutate('reject'));
+    } else if (patch.status === 'applied') {
+      const badge = document.createElement('div'); badge.className = 'project-patch-applied-badge';
+      badge.textContent = `Odysseus · Approved patch applied · ${files.length} file${files.length === 1 ? '' : 's'} verified`;
+      card.appendChild(badge);
+      action('Review applied change', 'project-patch-primary', () => {
+        const input = document.getElementById('message');
+        if (!input) return;
+        input.value = `Review the applied change “${patch.summary || 'project patch'}” for consistency and possible issues. Do not propose another patch.`;
+        input.dispatchEvent(new Event('input', {bubbles: true})); input.focus();
+      });
+      action('Roll back', 'project-patch-secondary', async () => {
+        const ok = await uiModule.styledConfirm(
+          'Roll back this patch? This is allowed only if none of its files changed afterward.',
+          {title: 'Roll back patch', confirmText: 'Roll back', danger: true}
+        );
+        if (ok) await mutate('rollback');
+      });
+    }
+    if (actions.childElementCount) card.appendChild(actions);
+  };
+
+  const loading = document.createElement('div'); loading.className = 'project-patch-loading'; loading.textContent = 'Loading reviewed patch…';
+  card.appendChild(loading);
+  fetch(`/api/companion/patches/${encodeURIComponent(seed.id)}`, {credentials: 'same-origin', cache: 'no-store'})
+    .then(async response => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(_patchErrorDetail(payload, 'Patch details unavailable'));
+      render(payload);
+    })
+    .catch(error => { loading.textContent = error.message || 'Patch details unavailable'; card.classList.add('project-patch-error'); });
+  return card;
+}
+
 /**
  * Strip tool invocation blocks from text before rendering.
  */
@@ -2876,6 +3019,10 @@ export function addMessage(role, content, modelName, metadata) {
       if (processCard) box.appendChild(processCard);
     }
     box.appendChild(wrap);
+    if (role === 'assistant' && metadata?.project_patch) {
+      const patchCard = buildProjectPatchCard(metadata.project_patch);
+      if (patchCard) box.appendChild(patchCard);
+    }
     if (role === 'user' && metadata?.qwen_process) {
       const processCard = buildQwenProcessCard(metadata.qwen_process);
       if (processCard) box.appendChild(processCard);
@@ -2908,6 +3055,7 @@ const chatRenderer = {
   updateSessionCostUI,
   roleTimestamp,
   buildQwenProcessCard,
+  buildProjectPatchCard,
   stripToolBlocks,
   copyMessageText,
   safeToolScreenshotSrc,

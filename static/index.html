@@ -249,9 +249,9 @@
       }, { once: true });
     })();
   </script>
-  <meta name="odysseus-build" content="20260806g2agate1">
-  <link rel="stylesheet" href="/static/style.css?v=20260806g2agate1">
-  <link rel="modulepreload" href="/static/app.js?v=20260806g2agate1">
+  <meta name="odysseus-build" content="20260807g2bpatch1">
+  <link rel="stylesheet" href="/static/style.css?v=20260807g2bpatch1">
+  <link rel="modulepreload" href="/static/app.js?v=20260807g2bpatch1">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -1151,6 +1151,11 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
+          </button>
+          <button type="button" class="input-icon-btn project-patch-toggle" title="Propose a reviewed project patch" id="project-patch-btn" data-mode-tool="true" aria-label="Propose patch" aria-pressed="false" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/><path d="m15 5 3 3"/>
+            </svg><span>Patch</span>
           </button>
           <!-- Workspace indicator (hidden until a folder is set) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Workspace - click to clear" id="workspace-indicator-btn" aria-label="Clear workspace" style="display:none;">
@@ -2523,7 +2528,7 @@
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js?v=20260722emailfastindex1"></script>
 <script type="module" src="/static/js/gallery.js?v=20260708match1"></script>
-<script type="module" src="/static/js/chatRenderer.js?v=20260722emailfastindex1"></script>
+<script type="module" src="/static/js/chatRenderer.js?v=20260807g2bpatch1"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js?v=20260722emailfastindex1"></script>
   <!-- chat.js is imported once by app.js; a second module instance has its own send state. -->
@@ -2534,11 +2539,11 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260723compareicon1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-  <script type="module" src="/static/app.js?v=20260806g2agate1"></script>  <!-- app.js must be LAST -->
-  <script type="module" src="/static/js/init.js?v=20260806g2agate1"></script>
+  <script type="module" src="/static/app.js?v=20260807g2bpatch1"></script>  <!-- app.js must be LAST -->
+  <script type="module" src="/static/js/init.js?v=20260807g2bpatch1"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">
-window.__ODYSSEUS_BUILD_ID='20260806g2agate1';
+window.__ODYSSEUS_BUILD_ID='20260807g2bpatch1';
 document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
@@ -2556,7 +2561,7 @@ if('serviceWorker' in navigator){
     button.addEventListener('click',()=>location.reload());
     banner.append(text,button);document.body.appendChild(banner);
   });
-  navigator.serviceWorker.register('/static/sw.js?v=20260806g2agate1',{updateViaCache:'none'})
+  navigator.serviceWorker.register('/static/sw.js?v=20260807g2bpatch1',{updateViaCache:'none'})
     .then(reg=>reg.update()).catch(()=>{});
 }
 </script>

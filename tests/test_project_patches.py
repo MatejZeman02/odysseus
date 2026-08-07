@@ -19,6 +19,7 @@ from src.project_patches import (
     reject_change_set,
     rollback_change_set,
 )
+import src.project_patches as patches_module
 
 
 @pytest.fixture
@@ -95,6 +96,18 @@ def test_prepare_apply_and_rollback_atomic_text_patch(workspace, database):
     assert not (workspace / "notes.md").exists()
 
 
+def test_proposal_and_rollback_material_are_encrypted_at_rest(workspace, database):
+    row = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "update", "path": "README.md", "content": "# Private proposal\n"},
+    ])))
+    apply_change_set(database, row, workspace, expected_revision=1)
+    raw = database.connection().exec_driver_sql(
+        "SELECT proposal_json, rollback_json FROM project_change_sets WHERE id = ?", (row.id,),
+    ).one()
+    assert raw[0].startswith("enc:") and "Private proposal" not in raw[0]
+    assert raw[1].startswith("enc:") and "# Before" not in raw[1]
+
+
 def stat_mode(path: Path) -> int:
     return path.stat().st_mode & 0o777
 
@@ -110,6 +123,29 @@ def test_stale_target_fails_without_overwriting_external_change(workspace, datab
 
     assert raised.value.code == "patch_stale"
     assert (workspace / "README.md").read_text() == "# External\n"
+    assert row.status == "stale"
+    assert row.failure_code == "patch_stale"
+
+
+def test_dirty_affected_file_is_rejected_but_unrelated_dirty_file_is_allowed(workspace, database):
+    row = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "update", "path": "README.md", "content": "# Proposed\n"},
+    ])))
+    (workspace / "unrelated.txt").write_text("keep me\n", encoding="utf-8")
+    applied = apply_change_set(database, row, workspace, expected_revision=1)
+    assert applied["status"] == "applied"
+    assert (workspace / "unrelated.txt").read_text() == "keep me\n"
+
+    rollback_change_set(database, row, workspace, expected_revision=3)
+    (workspace / "README.md").write_text("# User work\n", encoding="utf-8")
+    second = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "update", "path": "README.md", "content": "# Other proposal\n"},
+    ])))
+    with pytest.raises(PatchError) as raised:
+        apply_change_set(database, second, workspace, expected_revision=1)
+    assert raised.value.code == "apply_conflict"
+    assert second.status == "stale"
+    assert (workspace / "README.md").read_text() == "# User work\n"
 
 
 def test_rollback_refuses_to_overwrite_later_work(workspace, database):
@@ -152,6 +188,54 @@ def test_reject_is_revision_guarded(workspace, database):
     with pytest.raises(PatchError) as raised:
         apply_change_set(database, row, workspace, expected_revision=2)
     assert raised.value.code == "apply_conflict"
+
+
+def test_partial_apply_failure_restores_every_written_target(workspace, database, monkeypatch):
+    (workspace / "SECOND.md").write_text("second before\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "SECOND.md"], check=True)
+    subprocess.run(["git", "-C", str(workspace), "commit", "-qm", "second fixture"], check=True)
+    row = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "update", "path": "README.md", "content": "# First after\n"},
+        {"operation": "update", "path": "SECOND.md", "content": "second after\n"},
+    ])))
+    real_write = patches_module._write_atomic
+    writes = 0
+
+    def fail_second_write(target, content, *, mode=0o600):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("injected replacement failure")
+        return real_write(target, content, mode=mode)
+
+    monkeypatch.setattr(patches_module, "_write_atomic", fail_second_write)
+    with pytest.raises(PatchError) as raised:
+        apply_change_set(database, row, workspace, expected_revision=1)
+    assert raised.value.code == "apply_failed"
+    assert (workspace / "README.md").read_text() == "# Before\n"
+    assert (workspace / "SECOND.md").read_text() == "second before\n"
+    assert json.loads(row.result_json)["integrity"] == "restored"
+
+
+def test_proposal_limits_and_unsupported_shapes_are_rejected(workspace):
+    with pytest.raises(PatchError) as raised:
+        prepare_proposal(workspace, _answer([
+            {"operation": "delete", "path": "README.md", "content": ""},
+        ]))
+    assert raised.value.code == "proposal_invalid"
+
+    with pytest.raises(PatchError) as raised:
+        prepare_proposal(workspace, _answer([
+            {"operation": "create", "path": "binary.dat", "content": "bad\x00data"},
+        ]))
+    assert raised.value.code == "unsupported_file"
+
+    with pytest.raises(PatchError) as raised:
+        prepare_proposal(workspace, _answer([
+            {"operation": "create", "path": f"file-{index}.md", "content": "x"}
+            for index in range(21)
+        ]))
+    assert raised.value.code == "proposal_too_large"
 
 
 def test_startup_recovery_restores_interrupted_applied_content(workspace, database):

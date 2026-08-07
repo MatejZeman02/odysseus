@@ -8,7 +8,7 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import chatRenderer from './chatRenderer.js?v=20260722emailfastindex1';
+import chatRenderer from './chatRenderer.js?v=20260807g2bpatch1';
 import chatStream from './chatStream.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
@@ -1656,6 +1656,14 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
       const _g15AgentMode = document.getElementById('mode-agent-btn')?.classList.contains('active') ||
         (Storage.loadToggleState().mode || 'chat') === 'agent';
       if (_g15AgentMode && _g15Session?.scope_kind === 'project' && _g15Session?.harness_kind === 'qwen') {
+        const _patchProposalRequested = !!window.__odysseusPatchProposalActive;
+        const _patchButton = document.getElementById('project-patch-btn');
+        const _clearPatchProposalMode = () => {
+          window.__odysseusPatchProposalActive = false;
+          _patchButton?.classList.remove('active');
+          _patchButton?.setAttribute('aria-pressed', 'false');
+          if (_patchButton) _patchButton.title = 'Propose a reviewed project patch';
+        };
         const _qwenProcessStarted = Date.now();
         const _qwenProcess = (() => {
           const card = document.createElement('details');
@@ -1742,14 +1750,20 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
           // The visible web-search setting continues to apply to native Agent
           // turns, but must not make a hidden browser-side network request for
           // a read-only Qwen turn.
-          const response = await fetch('/api/g1/project-turn/stream', {
+          const qwenTurnUrl = _patchProposalRequested
+            ? `/api/companion/projects/${encodeURIComponent(_g15Session.project_id)}/patch-turn/stream`
+            : '/api/g1/project-turn/stream';
+          const qwenTurnBody = _patchProposalRequested
+            ? { session_id: streamSessionId, message: _finalMsgWithInject }
+            : { session_id: streamSessionId, message: _finalMsgWithInject, companion_profile: companionProfile };
+          const response = await fetch(qwenTurnUrl, {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session_id: streamSessionId, message: _finalMsgWithInject, companion_profile: companionProfile }),
+            body: JSON.stringify(qwenTurnBody),
             signal: (_qwenAbortController = new AbortController()).signal
           });
           if (!response.ok || !response.body) throw new Error((await response.json().catch(() => ({}))).detail || 'Qwen Companion could not start');
-          const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let event = ''; let answer = ''; let doneData = null;
+          const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let event = ''; let answer = ''; let doneData = null; let proposalData = null;
           while (true) {
             const { value, done } = await reader.read(); if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -1762,6 +1776,7 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
               if (event === 'commentary') _qwenProcess.commentary(data);
               if (event === 'tool') _qwenProcess.tool(data);
               if (event === 'delta') answer += data.text || '';
+              if (event === 'proposal') proposalData = data;
               if (event === 'done') doneData = data;
               if (event === 'error') {
                 const failure = new Error(typeof data.detail === 'string' ? data.detail : 'Qwen Companion failed');
@@ -1787,12 +1802,14 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
             capability_profile: doneData?.effective_capability || 'project_read',
             workspace_unchanged: !!doneData?.workspace_unchanged,
             qwen_process: doneData?.qwen_process || null,
+            project_patch: proposalData,
           });
         } catch (error) {
           const stopped = error?.name === 'AbortError';
           _qwenProcess.finish(stopped ? 'stopped' : 'failed');
           if (!stopped) _qwenProcess.error(error.message || 'Read-only Qwen turn failed');
         } finally {
+          if (_patchProposalRequested) _clearPatchProposalMode();
           _qwenAbortController = null;
           _qwenActiveSessionId = null;
           isStreaming = false; _streamSessionId = null; updateSubmitButton('idle', submitBtn); _releaseSendFlag();

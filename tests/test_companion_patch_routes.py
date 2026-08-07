@@ -125,3 +125,30 @@ def test_patch_details_are_owner_scoped(monkeypatch, database):
     with pytest.raises(HTTPException) as raised:
         endpoint("missing", _request("bob"))
     assert raised.value.status_code == 404
+
+
+def test_source_message_detaches_and_project_delete_cascades_patch_body(workspace, database):
+    prepared = prepare_proposal(workspace, (
+        "Ready.\n<odysseus-change-set>\n"
+        + json.dumps({
+            "version": 1, "summary": "Update docs", "rationale": "Test lifecycle",
+            "changes": [{"operation": "update", "path": "README.md", "content": "# Proposed\n"}],
+        })
+        + "\n</odysseus-change-set>"
+    ))
+    row = ProjectChangeSet(
+        id="patch", owner="alice", project_id="project", session_id="session",
+        source_message_id="assistant-message", model="model", endpoint_id="endpoint",
+        revision=1, status="proposed", summary=prepared.summary, rationale=prepared.rationale,
+        base_git_revision=prepared.base_git_revision, proposal_json=json.dumps(prepared.payload), result_json="{}",
+    )
+    database.add(row); database.commit()
+
+    database.delete(database.query(DbMessage).filter_by(id="assistant-message").one()); database.commit()
+    database.refresh(row)
+    assert row.source_message_id is None
+
+    database.delete(database.query(Project).filter_by(id="project").one())
+    database.commit()
+    assert database.query(ProjectChangeSet).count() == 0
+    assert workspace.exists()

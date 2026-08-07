@@ -88,6 +88,20 @@ def _project_lock(project_id: str) -> threading.Lock:
         return _project_locks.setdefault(project_id, threading.Lock())
 
 
+def _dirty_tracked_targets(root: Path, changes: list[dict[str, Any]]) -> bool:
+    tracked = [change["path"] for change in changes if change["operation"] == "update"]
+    if not tracked:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain=v1", "--", *tracked],
+            check=True, capture_output=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PatchError("apply_failed", "Affected-file status could not be verified", 500) from exc
+    return bool(result.stdout)
+
+
 def _safe_target(root: Path, raw_path: object, *, must_exist: bool | None) -> tuple[str, Path]:
     if not isinstance(raw_path, str) or not raw_path or len(raw_path) > MAX_PATH_LENGTH:
         raise PatchError("path_denied", "Patch path is invalid")
@@ -333,13 +347,25 @@ def apply_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_rev
     with _project_lock(row.project_id):
         before = snapshot_workspace(root)
         rollback_files = []
-        for change in changes:
-            base = _current_bytes(root, change)
-            rollback_files.append({
-                "path": change["path"], "existed": base is not None,
-                "content": base.decode("utf-8") if base is not None else "",
-                "mode": stat.S_IMODE((root / change["path"]).stat().st_mode) if base is not None else 0o600,
-            })
+        try:
+            for change in changes:
+                base = _current_bytes(root, change)
+                rollback_files.append({
+                    "path": change["path"], "existed": base is not None,
+                    "content": base.decode("utf-8") if base is not None else "",
+                    "mode": stat.S_IMODE((root / change["path"]).stat().st_mode) if base is not None else 0o600,
+                })
+            if _dirty_tracked_targets(root, changes):
+                raise PatchError("apply_conflict", "An affected file has uncommitted changes", 409)
+        except PatchError as exc:
+            row.status = "stale"
+            row.failure_code = exc.code
+            row.revision += 1
+            row.result_json = json.dumps({"integrity": "unchanged", "process": [
+                {"label": f"Validate: {len(changes)} proposed files", "status": "failed"},
+            ]}, separators=(",", ":"))
+            db.commit()
+            raise
         rollback = {"version": PATCH_VERSION, "files": rollback_files}
         row.rollback_json = json.dumps(rollback, ensure_ascii=False, separators=(",", ":"))
         row.status = "applying"

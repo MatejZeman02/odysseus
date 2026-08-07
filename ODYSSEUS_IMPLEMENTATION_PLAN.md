@@ -1,9 +1,9 @@
 # Odysseus Lean MVP Implementation Plan
 
-**Status:** G1 runtime/safety foundation and G1.5 UI trial implemented;
+**Status:** Companion continuity and reviewed project patches implemented;
 semantic continuity closure and normal-use stabilization active
 
-**Last reconciled with the implementation:** 2026-08-05
+**Last reconciled with the implementation:** 2026-08-07
 
 **Product specification:** [`ODYSSEUS_PRODUCT_SPEC.md`](ODYSSEUS_PRODUCT_SPEC.md)
 
@@ -18,6 +18,9 @@ semantic continuity closure and normal-use stabilization active
 
 **Proposed G2 execution plan:**
 [`ODYSSEUS_G2_EXECUTION_PLAN.md`](ODYSSEUS_G2_EXECUTION_PLAN.md)
+
+**G2B reviewed-patch implementation:**
+[`ODYSSEUS_G2B_EXECUTION_PLAN.md`](ODYSSEUS_G2B_EXECUTION_PLAN.md)
 
 **Deferred architecture backlog:**
 [`ODYSSEUS_ARCHITECTURE_BACKLOG.md`](ODYSSEUS_ARCHITECTURE_BACKLOG.md)
@@ -50,6 +53,7 @@ Progress labels are deliberately non-temporal:
 | AgentMemory provider switch | **Deferred** | No real memory store has been inventoried, migrated, or assigned as the writer |
 | Computer Help read-only diagnostics | **Deferred** | UI destination exists; Qwen diagnostics and host-read tooling do not |
 | G2A sandboxed project inspection | **Blocked by qualification** | Qwen 0.21.3 Podman shares model/Shell authority and mounts the workspace writable; `project_read` remains enforced pending a separate broker design |
+| G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; Odysseus validates, displays, atomically applies, verifies, and conditionally rolls back only after owner approval |
 | Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
 
 ## Goal
@@ -898,12 +902,14 @@ Suggested stabilization objective:
 - Qwen auto-memory, AgentMemory graph/mesh/decay, and memory federation;
 - custom MCP gateway and generic worker ecosystem;
 - custom Codex-derived sandbox implementation;
-- direct file writes, unrestricted shell, OS repair, and rollback automation;
+- direct model file writes, unrestricted shell, and OS repair;
 - persistent evolving multi-personality groups;
 - Android, Windows, and macOS support;
 - browser automation of consumer AI products;
 - production encryption/privacy/security hardening;
-- full Antigravity-style artifact/review application.
+- full Antigravity-style artifact/review application;
+- per-file or per-hunk patch selection, delete/rename/binary patches, automatic
+  formatting/tests, and automatic Git branches or commits.
 
 These ideas are not rejected. They are allowed back into the active plan only
 when a measured MVP failure or accepted next milestone requires them.

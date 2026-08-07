@@ -19,7 +19,7 @@ import documentModule from './js/document.js?v=20260722emailfastindex1';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js?v=20260722emailfastindex1';
+import chatRenderer from './js/chatRenderer.js?v=20260807g2bpatch1';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -47,7 +47,7 @@ import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js?v=20260715startupclean';
-import { initSectionCollapse, initSectionDrag } from './js/section-management.js?v=20260806g2agate1';
+import { initSectionCollapse, initSectionDrag } from './js/section-management.js?v=20260807g2bpatch1';
 
 const API_BASE = window.location.origin;
 const UI_BUILD_ID = window.__ODYSSEUS_BUILD_ID || 'unknown';
@@ -1797,6 +1797,8 @@ function initializeEventListeners() {
       if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
       const companionBtn = el('qwen-toggle-btn');
       if (companionBtn) companionBtn.style.display = mode === 'agent' ? '' : 'none';
+      const patchBtn = el('project-patch-btn');
+      if (patchBtn) patchBtn.style.display = mode === 'agent' && !patchBtn.hidden ? '' : 'none';
       // Workspace pill + overflow entry are agent-only - hide immediately (no flash).
       try { workspaceModule.applyMode(mode); } catch (_) {}
       // Delay tool glow-up for a staggered effect
@@ -1970,11 +1972,34 @@ function initializeEventListeners() {
       if (cached) cached.harness_kind = result.harness_kind;
       qwenBtn.classList.toggle('active', result.harness_kind === 'qwen');
       qwenBtn.setAttribute('aria-pressed', String(result.harness_kind === 'qwen'));
+      const patchBtn = el('project-patch-btn');
+      if (patchBtn) {
+        const patchAvailable = result.harness_kind === 'qwen';
+        patchBtn.hidden = !patchAvailable;
+        patchBtn.style.display = patchAvailable ? '' : 'none';
+        if (!patchAvailable) {
+          patchBtn.classList.remove('active');
+          patchBtn.setAttribute('aria-pressed', 'false');
+          window.__odysseusPatchProposalActive = false;
+        }
+      }
       uiModule.showToast?.(result.harness_kind === 'qwen' ? 'Qwen Companion: read-only' : 'Native Chat: shell disabled', 1800);
       if (result.harness_kind === 'qwen' && typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode('agent');
       await window.sessionModule?.loadSessions?.();
     } catch (error) { uiModule.showToast?.(error.message || 'Qwen Companion unavailable', 2500); }
     finally { qwenBtn.disabled = false; }
+  });
+  const projectPatchBtn = el('project-patch-btn');
+  if (projectPatchBtn) projectPatchBtn.addEventListener('click', () => {
+    if (projectPatchBtn.disabled || projectPatchBtn.hidden) return;
+    const active = !projectPatchBtn.classList.contains('active');
+    projectPatchBtn.classList.toggle('active', active);
+    projectPatchBtn.setAttribute('aria-pressed', String(active));
+    projectPatchBtn.title = active
+      ? 'Patch proposal active — the next message creates a reviewable diff'
+      : 'Propose a reviewed project patch';
+    window.__odysseusPatchProposalActive = active;
+    uiModule.showToast?.(active ? 'Patch proposal: review required before files change' : 'Patch proposal cancelled', 2200);
   });
   const createCompanionProject = async () => {
     let current = window.sessionModule?.getSessions?.().find(s => s.id === window.sessionModule?.getCurrentSessionId?.());
