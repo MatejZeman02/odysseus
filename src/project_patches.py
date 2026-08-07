@@ -2,7 +2,8 @@
 
 Qwen may propose bytes, but only this module can change a project checkout.
 It deliberately supports a small surface: complete UTF-8 contents for an
-existing regular file or a new regular file in an existing directory.
+existing regular file or a new regular file in safe project-relative
+directories.
 """
 
 from __future__ import annotations
@@ -102,7 +103,13 @@ def _dirty_tracked_targets(root: Path, changes: list[dict[str, Any]]) -> bool:
     return bool(result.stdout)
 
 
-def _safe_target(root: Path, raw_path: object, *, must_exist: bool | None) -> tuple[str, Path]:
+def _safe_target(
+    root: Path,
+    raw_path: object,
+    *,
+    must_exist: bool | None,
+    allow_missing_parents: bool = False,
+) -> tuple[str, Path]:
     if not isinstance(raw_path, str) or not raw_path or len(raw_path) > MAX_PATH_LENGTH:
         raise PatchError("path_denied", "Patch path is invalid")
     if "\\" in raw_path or "\x00" in raw_path:
@@ -115,15 +122,25 @@ def _safe_target(root: Path, raw_path: object, *, must_exist: bool | None) -> tu
 
     root = root.resolve(strict=True)
     current = root
+    missing_parent = False
     for component in relative.parts[:-1]:
         current = current / component
+        if missing_parent:
+            continue
         try:
             info = current.lstat()
         except FileNotFoundError as exc:
-            raise PatchError("path_denied", "Patch parent directory does not exist") from exc
+            if not allow_missing_parents:
+                raise PatchError("path_denied", "Patch parent directory does not exist") from exc
+            missing_parent = True
+            continue
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            raise PatchError("path_denied", "Patch path contains an unsafe component")
+            raise PatchError("path_denied", "Patch path passes through a symlink or non-directory")
     target = current / relative.name
+    if missing_parent:
+        if must_exist is True:
+            raise PatchError("patch_stale", "A patch target no longer exists", 409)
+        return relative.as_posix(), target
     try:
         info = target.lstat()
         exists = True
@@ -216,7 +233,12 @@ def prepare_proposal(workspace: Path, raw_answer: str) -> PreparedProposal:
         operation = candidate.get("operation")
         if operation not in {"update", "create"}:
             raise PatchError("proposal_invalid", "Patch operation is unsupported")
-        path, target = _safe_target(root, candidate.get("path"), must_exist=(operation == "update"))
+        path, target = _safe_target(
+            root,
+            candidate.get("path"),
+            must_exist=(operation == "update"),
+            allow_missing_parents=(operation == "create"),
+        )
         if path in seen:
             raise PatchError("proposal_invalid", "Patch contains the same file more than once")
         seen.add(path)
@@ -288,7 +310,12 @@ def serialize_change_set(row: ProjectChangeSet, *, include_diff: bool = False) -
 
 
 def _current_bytes(root: Path, change: dict[str, Any], *, proposed: bool = False) -> bytes | None:
-    path, target = _safe_target(root, change["path"], must_exist=None)
+    path, target = _safe_target(
+        root,
+        change["path"],
+        must_exist=None,
+        allow_missing_parents=(change.get("operation") == "create"),
+    )
     del path
     if not target.exists():
         return None
@@ -319,15 +346,68 @@ def _write_atomic(target: Path, content: bytes, *, mode: int = 0o600) -> None:
             pass
 
 
+def _ensure_parent_directories(root: Path, raw_path: str) -> list[str]:
+    """Create missing parents while rechecking every existing component."""
+    relative = PurePosixPath(raw_path)
+    current = root.resolve(strict=True)
+    created: list[str] = []
+    for component in relative.parts[:-1]:
+        current = current / component
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            try:
+                current.mkdir(mode=0o755)
+            except FileExistsError:
+                info = current.lstat()
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                    raise PatchError("path_denied", "Patch path passes through a symlink or non-directory")
+            else:
+                created.append(str(current.relative_to(root)))
+                continue
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise PatchError("path_denied", "Patch path passes through a symlink or non-directory")
+    return created
+
+
+def _remove_created_directories(root: Path, rollback: dict[str, Any]) -> None:
+    """Remove transaction-created parents only when they remain empty."""
+    directories = sorted(
+        {str(item) for item in rollback.get("created_directories", [])},
+        key=lambda item: (len(PurePosixPath(item).parts), item),
+        reverse=True,
+    )
+    for relative in directories:
+        path = root / relative
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            continue
+        try:
+            path.rmdir()
+        except OSError:
+            # Later user-created contents keep the directory alive. Rollback
+            # must never remove those unrelated files.
+            continue
+
+
 def _restore(root: Path, rollback: dict[str, Any], changes: list[dict[str, Any]]) -> None:
     by_path = {item["path"]: item for item in rollback["files"]}
     for change in reversed(changes):
-        _, target = _safe_target(root, change["path"], must_exist=None)
+        _, target = _safe_target(
+            root,
+            change["path"],
+            must_exist=None,
+            allow_missing_parents=(change.get("operation") == "create"),
+        )
         before = by_path[change["path"]]
         if before["existed"]:
             _write_atomic(target, before["content"].encode("utf-8"), mode=int(before["mode"]))
         elif target.exists():
             target.unlink()
+    _remove_created_directories(root, rollback)
 
 
 def _verify_only_targets_changed(before: WorkspaceSnapshot, after: WorkspaceSnapshot, targets: set[str]) -> bool:
@@ -366,7 +446,7 @@ def apply_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_rev
             ]}, separators=(",", ":"))
             db.commit()
             raise
-        rollback = {"version": PATCH_VERSION, "files": rollback_files}
+        rollback = {"version": PATCH_VERSION, "files": rollback_files, "created_directories": []}
         row.rollback_json = json.dumps(rollback, ensure_ascii=False, separators=(",", ":"))
         row.status = "applying"
         row.approved_at = utcnow_naive()
@@ -385,8 +465,24 @@ def apply_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_rev
             for change in changes:
                 _current_bytes(root, change)
             for change in changes:
+                if change["operation"] != "create":
+                    continue
+                for directory in _ensure_parent_directories(root, change["path"]):
+                    if directory not in rollback["created_directories"]:
+                        rollback["created_directories"].append(directory)
+            if rollback["created_directories"]:
+                # Make newly created parents part of the durable recovery
+                # journal before replacing any approved file.
+                row.rollback_json = json.dumps(rollback, ensure_ascii=False, separators=(",", ":"))
+                db.commit()
+            for change in changes:
                 _current_bytes(root, change)
-                _, target = _safe_target(root, change["path"], must_exist=(change["operation"] == "update"))
+                _, target = _safe_target(
+                    root,
+                    change["path"],
+                    must_exist=(change["operation"] == "update"),
+                    allow_missing_parents=(change["operation"] == "create"),
+                )
                 mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
                 _write_atomic(target, change["content"].encode("utf-8"), mode=mode)
                 written.append(change)
@@ -459,7 +555,7 @@ def rollback_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_
         try:
             _restore(root, rollback, changes)
             for before in rollback["files"]:
-                _, target = _safe_target(root, before["path"], must_exist=None)
+                _, target = _safe_target(root, before["path"], must_exist=None, allow_missing_parents=True)
                 if before["existed"]:
                     data, _ = _read_text_file(target)
                     if _sha256(data) != _sha256(before["content"].encode("utf-8")):
@@ -499,7 +595,12 @@ def recover_applying_change_sets(db) -> int:
             proposal = json.loads(row.proposal_json)
             rollback = json.loads(row.rollback_json)
             for change in proposal["changes"]:
-                _, target = _safe_target(root, change["path"], must_exist=None)
+                _, target = _safe_target(
+                    root,
+                    change["path"],
+                    must_exist=None,
+                    allow_missing_parents=(change.get("operation") == "create"),
+                )
                 if target.exists():
                     data, _ = _read_text_file(target)
                     digest = _sha256(data)

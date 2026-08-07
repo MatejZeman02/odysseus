@@ -96,6 +96,38 @@ def test_prepare_apply_and_rollback_atomic_text_patch(workspace, database):
     assert not (workspace / "notes.md").exists()
 
 
+def test_create_file_in_missing_directories_and_remove_them_on_rollback(workspace, database):
+    prepared = prepare_proposal(workspace, _answer([
+        {"operation": "create", "path": "documents/guides/g2b-test.md", "content": "Project summary\n"},
+    ]))
+    row = _persist(database, prepared)
+
+    applied = apply_change_set(database, row, workspace, expected_revision=1)
+
+    target = workspace / "documents" / "guides" / "g2b-test.md"
+    assert applied["status"] == "applied"
+    assert target.read_text() == "Project summary\n"
+    assert stat_mode(target) == 0o600
+
+    rolled_back = rollback_change_set(database, row, workspace, expected_revision=3)
+    assert rolled_back["status"] == "rolled_back"
+    assert not target.exists()
+    assert not (workspace / "documents").exists()
+
+
+def test_rollback_keeps_later_files_in_a_created_directory(workspace, database):
+    row = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "create", "path": "documents/g2b-test.md", "content": "Project summary\n"},
+    ])))
+    apply_change_set(database, row, workspace, expected_revision=1)
+    (workspace / "documents" / "user-note.md").write_text("later work\n")
+
+    rollback_change_set(database, row, workspace, expected_revision=3)
+
+    assert not (workspace / "documents" / "g2b-test.md").exists()
+    assert (workspace / "documents" / "user-note.md").read_text() == "later work\n"
+
+
 def test_proposal_and_rollback_material_are_encrypted_at_rest(workspace, database):
     row = _persist(database, prepare_proposal(workspace, _answer([
         {"operation": "update", "path": "README.md", "content": "# Private proposal\n"},
@@ -179,6 +211,20 @@ def test_symlink_target_is_rejected(workspace, tmp_path):
     assert outside.read_text() == "private"
 
 
+def test_symlink_parent_for_new_file_is_rejected(workspace, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace / "documents").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(PatchError) as raised:
+        prepare_proposal(workspace, _answer([
+            {"operation": "create", "path": "documents/g2b-test.md", "content": "blocked\n"},
+        ]))
+
+    assert raised.value.code == "path_denied"
+    assert not (outside / "g2b-test.md").exists()
+
+
 def test_reject_is_revision_guarded(workspace, database):
     row = _persist(database, prepare_proposal(workspace, _answer([
         {"operation": "update", "path": "README.md", "content": "# Proposed\n"},
@@ -215,6 +261,22 @@ def test_partial_apply_failure_restores_every_written_target(workspace, database
     assert (workspace / "README.md").read_text() == "# Before\n"
     assert (workspace / "SECOND.md").read_text() == "second before\n"
     assert json.loads(row.result_json)["integrity"] == "restored"
+
+
+def test_apply_failure_removes_new_parent_directories(workspace, database, monkeypatch):
+    row = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "create", "path": "documents/g2b-test.md", "content": "summary\n"},
+    ])))
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("injected replacement failure")
+
+    monkeypatch.setattr(patches_module, "_write_atomic", fail_write)
+    with pytest.raises(PatchError) as raised:
+        apply_change_set(database, row, workspace, expected_revision=1)
+
+    assert raised.value.code == "apply_failed"
+    assert not (workspace / "documents").exists()
 
 
 def test_proposal_limits_and_unsupported_shapes_are_rejected(workspace):
@@ -256,3 +318,27 @@ def test_startup_recovery_restores_interrupted_applied_content(workspace, databa
     assert row.status == "apply_failed"
     assert json.loads(row.result_json)["integrity"] == "restored"
     assert (workspace / "README.md").read_text() == "# Before\n"
+
+
+def test_startup_recovery_removes_interrupted_nested_create(workspace, database):
+    row = _persist(database, prepare_proposal(workspace, _answer([
+        {"operation": "create", "path": "documents/g2b-test.md", "content": "summary\n"},
+    ])))
+    proposal = json.loads(row.proposal_json)
+    row.rollback_json = json.dumps({
+        "version": 1,
+        "files": [{"path": "documents/g2b-test.md", "existed": False, "content": "", "mode": 0o600}],
+        "created_directories": ["documents"],
+    })
+    row.status = "applying"
+    row.revision = 2
+    database.commit()
+    (workspace / "documents").mkdir()
+    (workspace / "documents" / "g2b-test.md").write_text(
+        proposal["changes"][0]["content"], encoding="utf-8",
+    )
+
+    assert recover_applying_change_sets(database) == 1
+    database.refresh(row)
+    assert row.status == "apply_failed"
+    assert not (workspace / "documents").exists()
