@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.database import ChatMessage as DbMessage, ContinuityArtifact, ModelEndpoint, Project, Session as DbSession, SessionLocal, utcnow_naive
 from src.auth_helpers import effective_user, owner_filter, require_user
 from src.continuity.store import ContinuityStore, ScopeConflictError
+from src.companion_runs import CompanionRunRegistry
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
 from src.qwen_inspection import effective_capability, inspection_readiness
 from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure
@@ -269,11 +270,12 @@ def _require_qwen_ready() -> None:
     raise HTTPException(503, f"Qwen Companion is not ready ({', '.join(missing)} missing)")
 
 
-def setup_g1_continuity_routes(session_manager) -> APIRouter:
+def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegistry | None = None) -> APIRouter:
     router = APIRouter(prefix="/api/g1", tags=["g1-continuity"])
-    runs: dict[str, asyncio.Task] = {}
-    admitted: set[str] = set()
-    cancel_requested: set[str] = set()
+    registry = run_registry or CompanionRunRegistry()
+    runs = registry.runs
+    admitted = registry.admitted
+    cancel_requested = registry.cancel_requested
 
     @router.get("/status")
     def status(request: Request):

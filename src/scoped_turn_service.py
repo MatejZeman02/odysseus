@@ -16,6 +16,7 @@ from src.continuity.contracts import ContextBundle
 from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.model_bridge import ModelBridge, ModelBridgeRuntime
 from src.protected_workspace import snapshot_workspace
+from src.project_patches import PatchError, PreparedProposal, prepare_proposal, proposal_instructions
 from src.qwen_supervisor import QwenSupervisor
 
 
@@ -31,10 +32,16 @@ QWEN_TURN_ERROR_CODES = frozenset({
     "workspace_changed",
     "teardown_failed",
     "cancelled",
+    "proposal_invalid",
+    "proposal_too_large",
+    "path_denied",
+    "unsupported_file",
 })
 
 
 def classify_turn_failure(exc: BaseException) -> str:
+    if isinstance(exc, PatchError):
+        return exc.code
     text = str(exc).lower()
     for stable_code in (
         "command_denied",
@@ -112,6 +119,7 @@ class ScopedTurnResult:
     message_id: str = ""
     user_message_id: str = ""
     qwen_process: dict | None = None
+    proposal: PreparedProposal | None = None
 
 
 class ReadOnlyScopedTurnService:
@@ -131,6 +139,7 @@ class ReadOnlyScopedTurnService:
         self, *, owner: str, session_id: str, request: str,
         endpoint_id: str, model: str, companion_profile: str = "",
         capability_profile: str = "project_read",
+        proposal_mode: bool = False,
         progress_callback: Optional[Callable[[dict], object]] = None,
     ) -> ScopedTurnResult:
         if capability_profile != "project_read":
@@ -152,6 +161,8 @@ class ReadOnlyScopedTurnService:
             transcript=transcript_before_request, companion_profile=companion_profile,
         )
         prompt = render_context_bundle(bundle)
+        if proposal_mode:
+            prompt = f"{prompt}\n\n{proposal_instructions()}"
         workspace = Path(scope.workspace_root)
         before = snapshot_workspace(workspace)
 
@@ -215,8 +226,12 @@ class ReadOnlyScopedTurnService:
                 bridge_model=model, bridge_token=route.token,
             )
             answer, _metadata = await supervisor.run_prompt(prompt, progress_callback=record_progress)
+            prepared_proposal = prepare_proposal(workspace, answer) if proposal_mode else None
+            if prepared_proposal is not None:
+                answer = prepared_proposal.answer
         except BaseException as exc:
             worker_error = exc
+            prepared_proposal = None
         finally:
             teardown_error = None
             try:
@@ -273,4 +288,5 @@ class ReadOnlyScopedTurnService:
             assistant_message.metadata.get("_db_id", ""),
             user_message.metadata.get("_db_id", ""),
             qwen_process,
+            prepared_proposal,
         )

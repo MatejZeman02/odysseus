@@ -863,10 +863,17 @@ app.include_router(setup_contacts_routes())
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
 
-# Experimental project continuity worker. The route itself remains invisible
-# unless ODYSSEUS_QWEN_HARNESS is explicitly enabled by the local operator.
+# Experimental project continuity worker and reviewed-patch API. Both share a
+# single admission registry so Stop and one-turn-per-session also cover patch
+# proposals. The worker remains unavailable unless the local Qwen harness is
+# explicitly enabled.
+from src.companion_runs import CompanionRunRegistry
 from routes.g1_continuity_routes import setup_g1_continuity_routes
-app.include_router(setup_g1_continuity_routes(session_manager))
+from routes.companion_patch_routes import setup_companion_patch_routes
+
+companion_run_registry = CompanionRunRegistry()
+app.include_router(setup_g1_continuity_routes(session_manager, companion_run_registry))
+app.include_router(setup_companion_patch_routes(session_manager, companion_run_registry))
 
 # ========= ROUTES (kept in app.py) =========
 
