@@ -13,7 +13,7 @@ export DEBUG=false
 
 action="${1:-start}"
 if [[ $# -gt 1 ]]; then
-  echo "Usage: $0 [start|stop|status]" >&2
+  echo "Usage: $0 [start|reload|stop|status]" >&2
   exit 2
 fi
 
@@ -97,10 +97,10 @@ case "$action" in
     stop_this_checkout
     exit $?
     ;;
-  start)
+  start|reload)
     ;;
   *)
-    echo "Usage: $0 [start|stop|status]" >&2
+    echo "Usage: $0 [start|reload|stop|status]" >&2
     exit 2
     ;;
 esac
@@ -109,8 +109,14 @@ esac
 # bind time, leaving the browser connected to stale Python modules. Start
 # therefore restarts an existing server only when it belongs to this checkout.
 if [[ -n "$(port_pids)" ]]; then
-  echo "Restarting the existing Companion server before launch..."
+  if [[ "$action" == "reload" ]]; then
+    echo "Reloading the existing Companion server..."
+  else
+    echo "Restarting the existing Companion server before launch..."
+  fi
   stop_this_checkout
+elif [[ "$action" == "reload" ]]; then
+  echo "Odysseus Companion is not running; starting it instead."
 fi
 
 exec "$python_bin" app.py
