@@ -53,7 +53,7 @@ Progress labels are deliberately non-temporal:
 | AgentMemory provider switch | **Deferred** | No real memory store has been inventoried, migrated, or assigned as the writer |
 | Computer Help read-only diagnostics | **Deferred** | UI destination exists; Qwen diagnostics and host-read tooling do not |
 | G2A sandboxed project inspection | **Blocked by qualification** | Qwen 0.21.3 Podman shares model/Shell authority and mounts the workspace writable; `project_read` remains enforced pending a separate broker design |
-| G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; Odysseus validates, displays, atomically applies, verifies, and conditionally rolls back only after owner approval |
+| G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
 | Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
 
 ## Goal

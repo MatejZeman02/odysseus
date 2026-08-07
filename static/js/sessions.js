@@ -2097,12 +2097,23 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     }
     const patchBtn = document.getElementById('project-patch-btn');
     if (patchBtn) {
-      patchBtn.hidden = !qwenActive;
-      patchBtn.style.display = qwenActive ? '' : 'none';
+      const projectScope = !!meta && meta.scope_kind === 'project';
+      patchBtn.hidden = !projectScope;
+      patchBtn.style.display = projectScope ? '' : 'none';
+      patchBtn.disabled = projectScope && !qwenActive;
+      patchBtn.title = qwenActive
+        ? 'Enable automatic reviewed project changes'
+        : 'Enable Qwen Companion to propose project changes';
+      if (window.__odysseusPatchProposalSessionId && window.__odysseusPatchProposalSessionId !== id) {
+        window.__odysseusPatchProposalSessionId = null;
+      }
+      const patchActive = qwenActive && window.__odysseusPatchProposalSessionId === id;
+      patchBtn.classList.toggle('active', patchActive);
+      patchBtn.setAttribute('aria-pressed', String(patchActive));
       if (!qwenActive) {
         patchBtn.classList.remove('active');
         patchBtn.setAttribute('aria-pressed', 'false');
-        window.__odysseusPatchProposalActive = false;
+        if (window.__odysseusPatchProposalSessionId === id) window.__odysseusPatchProposalSessionId = null;
       }
     }
     const setModeReliably = (mode) => {

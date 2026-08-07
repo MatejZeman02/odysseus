@@ -3,37 +3,42 @@
 **State:** Implemented; owner acceptance testing active
 
 **Authority boundary:** Qwen remains on `project_read` and never receives file
-write, Shell, network, approval, or patch-application authority. Only the
-authenticated owner can ask the Odysseus transaction engine to apply a complete
-reviewed proposal.
+write, Shell, network, approval, or patch-application authority. The
+authenticated owner authorizes automatic application by enabling **Patch** for
+the current project session; that permission does not transfer to another
+project and clears on browser reload.
 
 ## Implemented flow
 
-1. In a Qwen project home, the owner enables **Patch** and sends a change
-   request.
+1. In a Qwen project home, the owner enables **Patch** once for that browser
+   session and sends change requests. The control remains active until disabled
+   or the owner switches projects.
 2. The normal read-only Qwen worker inspects project files and returns one
    versioned, machine-readable proposal containing complete UTF-8 file contents.
 3. Odysseus removes that envelope from assistant prose, validates every path and
    operation, calculates trusted preimage hashes and unified diffs, and stores an
    encrypted owner-scoped change set.
-4. A persistent Patch card shows the summary, rationale, file list, line counts,
+4. Odysseus automatically submits the validated proposal to its transaction
+   engine using only the server-issued patch ID and expected revision.
+5. A persistent Patch card shows the summary, rationale, file list, line counts,
    and expandable exact diffs. Reloading or restarting reconstructs it from the
    saved assistant metadata and change-set record.
-5. **Apply patch** sends only the patch ID and expected revision. The server
+6. The server
    acquires a project lock, rejects stale or dirty affected paths, journals
    preimages, replaces all files atomically, verifies hashes and unrelated-file
    integrity, and restores prior contents after a partial failure.
-6. **Reject** permanently closes an unapproved proposal. **Roll back** restores
+7. **Roll back** restores
    an applied patch only while every affected file still matches its applied
    hash. **Review applied change** prepares a separate ordinary read-only Qwen
-   review turn.
+   review turn. A proposal left pending by a transport or validation failure can
+   still be applied or rejected from its card without an extra confirmation.
 
 ## Supported patch scope
 
 - `update` an existing regular UTF-8 text file;
 - `create` a regular UTF-8 text file inside an existing project directory;
 - at most 20 files, 512 KiB per file, and 1 MiB total proposed content;
-- whole-patch approval only.
+- atomic whole-patch application only.
 
 Absolute paths, traversal, `.git`, symlinks, special/binary files, deletion,
 rename, mode changes, executable creation, commands, hooks, formatters, tests,

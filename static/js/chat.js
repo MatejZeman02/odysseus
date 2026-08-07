@@ -1656,14 +1656,7 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
       const _g15AgentMode = document.getElementById('mode-agent-btn')?.classList.contains('active') ||
         (Storage.loadToggleState().mode || 'chat') === 'agent';
       if (_g15AgentMode && _g15Session?.scope_kind === 'project' && _g15Session?.harness_kind === 'qwen') {
-        const _patchProposalRequested = !!window.__odysseusPatchProposalActive;
-        const _patchButton = document.getElementById('project-patch-btn');
-        const _clearPatchProposalMode = () => {
-          window.__odysseusPatchProposalActive = false;
-          _patchButton?.classList.remove('active');
-          _patchButton?.setAttribute('aria-pressed', 'false');
-          if (_patchButton) _patchButton.title = 'Propose a reviewed project patch';
-        };
+        const _patchProposalRequested = window.__odysseusPatchProposalSessionId === streamSessionId;
         const _qwenProcessStarted = Date.now();
         const _qwenProcess = (() => {
           const card = document.createElement('details');
@@ -1788,6 +1781,22 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
           if (!doneData) {
             throw new Error('Qwen Companion ended before completing the turn');
           }
+          if (_patchProposalRequested && proposalData?.status === 'proposed') {
+            const applyResponse = await fetch(`/api/companion/patches/${encodeURIComponent(proposalData.id)}/apply`, {
+              method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({expected_revision: proposalData.revision}),
+            });
+            const applyResult = await applyResponse.json().catch(() => ({}));
+            if (applyResponse.ok) {
+              proposalData = applyResult;
+              uiModule.showToast?.('Project change applied and verified · diff and Undo available', 2600);
+            } else {
+              const detail = typeof applyResult.detail === 'string'
+                ? applyResult.detail
+                : applyResult.detail?.detail || 'Automatic patch application was refused';
+              uiModule.showError?.(detail);
+            }
+          }
           _qwenProcess.finish('worked');
           if (doneData?.user_message_id && _userMsgEl) _userMsgEl.dataset.dbId = doneData.user_message_id;
           // The server saved this safe trace in the assistant metadata.  Swap
@@ -1809,7 +1818,6 @@ import { appendProcessCommentary, compactProcessLabel, createProcessThread, crea
           _qwenProcess.finish(stopped ? 'stopped' : 'failed');
           if (!stopped) _qwenProcess.error(error.message || 'Read-only Qwen turn failed');
         } finally {
-          if (_patchProposalRequested) _clearPatchProposalMode();
           _qwenAbortController = null;
           _qwenActiveSessionId = null;
           isStreaming = false; _streamSessionId = null; updateSubmitButton('idle', submitBtn); _releaseSendFlag();

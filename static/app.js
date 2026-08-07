@@ -1798,7 +1798,7 @@ function initializeEventListeners() {
       const companionBtn = el('qwen-toggle-btn');
       if (companionBtn) companionBtn.style.display = mode === 'agent' ? '' : 'none';
       const patchBtn = el('project-patch-btn');
-      if (patchBtn) patchBtn.style.display = mode === 'agent' && !patchBtn.hidden ? '' : 'none';
+      if (patchBtn) patchBtn.style.display = patchBtn.hidden ? 'none' : '';
       // Workspace pill + overflow entry are agent-only - hide immediately (no flash).
       try { workspaceModule.applyMode(mode); } catch (_) {}
       // Delay tool glow-up for a staggered effect
@@ -1975,12 +1975,16 @@ function initializeEventListeners() {
       const patchBtn = el('project-patch-btn');
       if (patchBtn) {
         const patchAvailable = result.harness_kind === 'qwen';
-        patchBtn.hidden = !patchAvailable;
-        patchBtn.style.display = patchAvailable ? '' : 'none';
+        patchBtn.hidden = false;
+        patchBtn.style.display = '';
+        patchBtn.disabled = !patchAvailable;
+        patchBtn.title = patchAvailable
+          ? 'Enable automatic reviewed project changes'
+          : 'Enable Qwen Companion to propose project changes';
         if (!patchAvailable) {
           patchBtn.classList.remove('active');
           patchBtn.setAttribute('aria-pressed', 'false');
-          window.__odysseusPatchProposalActive = false;
+          window.__odysseusPatchProposalSessionId = null;
         }
       }
       uiModule.showToast?.(result.harness_kind === 'qwen' ? 'Qwen Companion: read-only' : 'Native Chat: shell disabled', 1800);
@@ -1992,14 +1996,17 @@ function initializeEventListeners() {
   const projectPatchBtn = el('project-patch-btn');
   if (projectPatchBtn) projectPatchBtn.addEventListener('click', () => {
     if (projectPatchBtn.disabled || projectPatchBtn.hidden) return;
-    const active = !projectPatchBtn.classList.contains('active');
+    if (typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode('agent');
+    const sid = window.sessionModule?.getCurrentSessionId?.();
+    if (!sid) return;
+    const active = window.__odysseusPatchProposalSessionId !== sid;
     projectPatchBtn.classList.toggle('active', active);
     projectPatchBtn.setAttribute('aria-pressed', String(active));
     projectPatchBtn.title = active
-      ? 'Patch proposal active — the next message creates a reviewable diff'
-      : 'Propose a reviewed project patch';
-    window.__odysseusPatchProposalActive = active;
-    uiModule.showToast?.(active ? 'Patch proposal: review required before files change' : 'Patch proposal cancelled', 2200);
+      ? 'Automatic project changes enabled — click to return to read-only'
+      : 'Enable automatic reviewed project changes';
+    window.__odysseusPatchProposalSessionId = active ? sid : null;
+    uiModule.showToast?.(active ? 'Automatic project changes enabled · diffs and Undo remain available' : 'Returned to read-only project mode', 2400);
   });
   const createCompanionProject = async () => {
     let current = window.sessionModule?.getSessions?.().find(s => s.id === window.sessionModule?.getCurrentSessionId?.());

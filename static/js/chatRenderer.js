@@ -1071,13 +1071,7 @@ export function buildProjectPatchCard(seed) {
       }
     };
     if (patch.status === 'proposed') {
-      action('Apply patch', 'project-patch-primary', async () => {
-        const ok = await uiModule.styledConfirm(
-          `Apply the complete reviewed patch to ${files.length} project file${files.length === 1 ? '' : 's'}?`,
-          {title: 'Apply reviewed patch', confirmText: 'Apply patch'}
-        );
-        if (ok) await mutate('apply');
-      });
+      action('Apply patch', 'project-patch-primary', () => mutate('apply'));
       action('Reject', 'project-patch-secondary', () => mutate('reject'));
     } else if (patch.status === 'applied') {
       const badge = document.createElement('div'); badge.className = 'project-patch-applied-badge';
