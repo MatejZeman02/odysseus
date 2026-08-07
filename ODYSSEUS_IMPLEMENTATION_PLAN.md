@@ -16,6 +16,9 @@ semantic continuity closure and normal-use stabilization active
 **G1.5 acceptance evidence:**
 [`docs/G1_5_ACCEPTANCE_REPORT.md`](docs/G1_5_ACCEPTANCE_REPORT.md)
 
+**Proposed G2 execution plan:**
+[`ODYSSEUS_G2_EXECUTION_PLAN.md`](ODYSSEUS_G2_EXECUTION_PLAN.md)
+
 **Deferred architecture backlog:**
 [`ODYSSEUS_ARCHITECTURE_BACKLOG.md`](ODYSSEUS_ARCHITECTURE_BACKLOG.md)
 
@@ -46,6 +49,7 @@ Progress labels are deliberately non-temporal:
 | Normal-use stabilization | **Active** | Use real project conversations, record incorrect/unsafe answers and UI failures, fix regressions without broadening authority |
 | AgentMemory provider switch | **Deferred** | No real memory store has been inventoried, migrated, or assigned as the writer |
 | Computer Help read-only diagnostics | **Deferred** | UI destination exists; Qwen diagnostics and host-read tooling do not |
+| G2A sandboxed project inspection | **Blocked by qualification** | Qwen 0.21.3 Podman shares model/Shell authority and mounts the workspace writable; `project_read` remains enforced pending a separate broker design |
 | Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
 
 ## Goal

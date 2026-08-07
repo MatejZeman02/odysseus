@@ -5,8 +5,22 @@ import pytest
 
 from core.models import ChatMessage, Session
 from src.continuity.contracts import ContextBundle, ProjectBriefV1, ResolvedScope, ThreadCheckpointV1
-from src.scoped_turn_service import ReadOnlyScopedTurnService, render_context_bundle
+from src.scoped_turn_service import (
+    QWEN_TURN_ERROR_CODES,
+    ReadOnlyScopedTurnService,
+    classify_turn_failure,
+    render_context_bundle,
+)
 import src.scoped_turn_service as service_module
+
+
+def test_g2a_failure_codes_are_stable_even_while_inspection_is_unavailable():
+    assert {
+        "sandbox_unavailable", "command_denied", "command_timeout",
+        "command_output_limited", "command_resource_limit", "provider_failed",
+        "worker_died", "turn_timeout", "workspace_changed", "teardown_failed",
+    }.issubset(QWEN_TURN_ERROR_CODES)
+    assert classify_turn_failure(RuntimeError("command_output_limited: private output")) == "command_output_limited"
 
 
 def test_context_bundle_render_order_is_stable():
@@ -21,6 +35,8 @@ def test_context_bundle_render_order_is_stable():
         "# Recent raw transcript tail", "# Current request",
     ]
     assert [rendered.index(heading) for heading in headings] == sorted(rendered.index(heading) for heading in headings)
+    assert "use the supplied conversation and project context first" in rendered
+    assert "do not invoke another tool after drafting the final answer" in rendered
 
 
 @pytest.mark.asyncio
@@ -129,6 +145,8 @@ async def test_scoped_turn_persists_sanitized_qwen_process(monkeypatch, tmp_path
         def __init__(self, **kwargs): pass
         async def start(self, **kwargs): pass
         async def run_prompt(self, prompt, *, progress_callback=None):
+            await progress_callback({"kind": "commentary", "text": "I found the project index; next I’ll search it.",
+                                     "status": "completed"})
             await progress_callback({"operation": "Search project files", "tool": "search", "path": ".",
                                      "label": "Search: fish", "command": "Search: 'fish' .", "status": "running"})
             await progress_callback({"operation": "Search project files", "tool": "search", "path": ".",
@@ -141,10 +159,12 @@ async def test_scoped_turn_persists_sanitized_qwen_process(monkeypatch, tmp_path
     service = ReadOnlyScopedTurnService(Manager(), qwen_binary=Path("/qwen"), store=Store(),
                                         bridge_factory=Bridge, supervisor_factory=Supervisor)
     result = await service.run(owner="alice", session_id="s", request="question", endpoint_id="e", model="m")
-    assert result.qwen_process["events"] == [{
-        "operation": "Search project files", "tool": "search", "path": ".", "label": "Search: fish",
-        "command": "Search: 'fish' .", "status": "completed",
-    }]
+    assert result.qwen_process["events"] == [
+        {"kind": "commentary", "text": "I found the project index; next I’ll search it.",
+         "status": "completed"},
+        {"operation": "Search project files", "tool": "search", "path": ".", "label": "Search: fish",
+         "command": "Search: 'fish' .", "status": "completed"},
+    ]
     assert session.history[-1].metadata["qwen_process"] == result.qwen_process
 
 
@@ -154,6 +174,8 @@ async def test_cancelled_scoped_turn_keeps_user_message_and_tears_down(monkeypat
 
     session = Session("s", "chat", "http://x", "m", owner="alice", scope_kind="project", project_id="p")
 
+    persisted_metadata = []
+
     class Manager:
         def get_session(self, session_id):
             return session
@@ -161,6 +183,9 @@ async def test_cancelled_scoped_turn_keeps_user_message_and_tears_down(monkeypat
         def add_message(self, session_id, message):
             message.metadata = {"_db_id": f"m{len(session.history) + 1}"}
             session.history.append(message)
+
+        def update_message_metadata(self, session_id, message_id, metadata):
+            persisted_metadata.append((session_id, message_id, dict(metadata)))
 
     class Store:
         def resolve_scope(self, **kwargs):
@@ -215,6 +240,10 @@ async def test_cancelled_scoped_turn_keeps_user_message_and_tears_down(monkeypat
         )
     assert [(message.role, message.content) for message in session.history] == [("user", "question")]
     assert stopped == ["qwen", "bridge"]
+    assert persisted_metadata[0][0:2] == ("s", "m1")
+    assert persisted_metadata[0][2]["qwen_process"]["outcome"] == "failed"
+    assert persisted_metadata[0][2]["qwen_process"]["failure_code"] == "cancelled"
+    assert persisted_metadata[0][2]["qwen_process"]["workspace_unchanged"] is True
 
 
 @pytest.mark.asyncio

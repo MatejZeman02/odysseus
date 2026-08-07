@@ -47,7 +47,7 @@ import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js?v=20260715startupclean';
-import { initSectionCollapse, initSectionDrag } from './js/section-management.js?v=20260804g15ui29';
+import { initSectionCollapse, initSectionDrag } from './js/section-management.js?v=20260806g2agate1';
 
 const API_BASE = window.location.origin;
 const UI_BUILD_ID = window.__ODYSSEUS_BUILD_ID || 'unknown';

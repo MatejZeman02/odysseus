@@ -53,6 +53,8 @@ async def test_g1_route_runs_explicitly_enabled_service(monkeypatch, tmp_path):
         "answer": "answer",
         "context_manifest": {"scope": "project"},
         "workspace_unchanged": True,
+        "requested_capability": "project_read",
+        "effective_capability": "project_read",
         "qwen_process": None,
     }
     assert seen["manager"] is manager

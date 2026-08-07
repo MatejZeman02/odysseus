@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import re
 import signal
 import shutil
 import socket
@@ -191,9 +192,28 @@ class QwenSupervisor:
             raise QwenHarnessError("Qwen runtime is not active")
         session_id = await self._create_session()
         prompt_id, cursor = await self.runtime.client.prompt(session_id, prompt)
-        answer_parts: list[str] = []
+        # Qwen ACP uses the same agent_message_chunk event for user-facing
+        # narration before a tool batch and for the final answer.  Keep the
+        # current message round provisional: a following tool call classifies
+        # it as commentary, while turn_complete classifies it as the answer.
+        pending_message_parts: list[str] = []
         terminal: Optional[dict] = None
         seen_event_ids: set[str] = set()
+
+        async def flush_commentary() -> None:
+            if not pending_message_parts:
+                return
+            raw_text = "".join(pending_message_parts)
+            pending_message_parts.clear()
+            if not self._looks_like_commentary(raw_text):
+                return
+            text = self._sanitize_commentary_text(raw_text)
+            if text:
+                await self._emit_progress(progress_callback, {
+                    "kind": "commentary",
+                    "text": text,
+                    "status": "completed",
+                })
         try:
             async with asyncio.timeout(timeout):
                 # A cleanly dropped SSE connection is retried from its last
@@ -209,13 +229,18 @@ class QwenSupervisor:
                         event_type = str(event.get("type") or event.get("event") or "unknown")
                         if event_type == "session_update":
                             update = ((event.get("data") or {}).get("update") or {})
+                            update_kind = update.get("sessionUpdate")
+                            if update_kind in {"tool_call", "tool_call_update"}:
+                                await flush_commentary()
                             progress = self._sanitize_progress_update(update)
                             if progress:
                                 await self._emit_progress(progress_callback, progress)
-                            if update.get("sessionUpdate") == "agent_message_chunk":
+                            if update_kind == "agent_message_chunk":
                                 content = update.get("content") or {}
                                 if isinstance(content, dict) and content.get("text"):
-                                    answer_parts.append(str(content["text"]))
+                                    pending_message_parts.append(str(content["text"]))
+                            # agent_thought_chunk is deliberately ignored. It
+                            # is private reasoning, not a user-facing update.
                         if event_type in {"turn_complete", "turn_error", "session_died", "client_evicted"}:
                             terminal = event
                             break
@@ -225,10 +250,22 @@ class QwenSupervisor:
             await self.runtime.client.cancel(session_id)
             raise
         if not terminal or terminal.get("type") != "turn_complete":
-            raise QwenHarnessError(f"Qwen turn failed: {(terminal or {}).get('type', 'missing terminal event')}")
+            terminal_type = str((terminal or {}).get("type") or "missing_terminal_event")
+            terminal_data = (terminal or {}).get("data")
+            if not isinstance(terminal_data, dict):
+                terminal_data = {}
+            # Qwen Serve exposes a closed error-kind vocabulary. Retain only a
+            # conservative identifier so callers can present a useful stable
+            # message without leaking provider responses or worker logs.
+            raw_kind = terminal_data.get("errorKind") or terminal_data.get("code") or terminal_data.get("reason")
+            error_kind = str(raw_kind or "").strip().lower()
+            if not re.fullmatch(r"[a-z0-9_]{1,80}", error_kind):
+                error_kind = ""
+            suffix = f":{error_kind}" if error_kind else ""
+            raise QwenHarnessError(f"Qwen turn failed: {terminal_type}{suffix}")
         if ((terminal.get("data") or {}).get("stopReason")) != "end_turn":
             raise QwenHarnessError("Qwen turn did not finish normally")
-        return "".join(answer_parts), {"prompt_id": prompt_id, "terminal": terminal}
+        return "".join(pending_message_parts), {"prompt_id": prompt_id, "terminal": terminal}
 
     @staticmethod
     async def _emit_progress(callback: Optional[Callable[[dict], object]], payload: dict) -> None:
@@ -237,6 +274,44 @@ class QwenSupervisor:
         result = callback(payload)
         if inspect.isawaitable(result):
             await result
+
+    @staticmethod
+    def _looks_like_commentary(value: object) -> bool:
+        """Reject answer-shaped prose accidentally followed by another tool."""
+        if not isinstance(value, str):
+            return False
+        text = value.strip()
+        if not text or len(text) > 600:
+            return False
+        # Progress is deliberately one or two short prose sentences. A model
+        # sometimes drafts its answer, then changes its mind and invokes one
+        # more tool; headings and multi-item lists must not be displayed as a
+        # giant faux progress update in that case.
+        if re.search(r"(?m)^\s*(?:#{1,6}\s|[-*]\s+|\d+[.)]\s+)", text):
+            return False
+        return len([line for line in text.splitlines() if line.strip()]) <= 3
+
+    @staticmethod
+    def _sanitize_commentary_text(value: object) -> str:
+        """Return a compact, display-safe user-facing progress sentence."""
+        if not isinstance(value, str):
+            return ""
+        text = " ".join(value.replace("/workspace/", "").replace("/workspace", "workspace").split())
+        if not text:
+            return ""
+        # Commentary crosses the SSE and persistence boundary before the final
+        # answer. Redact implementation paths, local bridge URLs, and common
+        # credential shapes even though the contained worker should not see
+        # reusable secrets in the first place.
+        text = re.sub(
+            r"(?<![\w:])/(?:home|root|run/user|tmp/odysseus-qwen-run-)(?:/[^\s`\"']+)+",
+            "[private path]",
+            text,
+        )
+        text = re.sub(r"https?://(?:127\.0\.0\.1|localhost)(?::\d+)?(?:/\S*)?", "[local service]", text, flags=re.I)
+        text = re.sub(r"\bBearer\s+[A-Za-z0-9._~-]{8,}", "Bearer [redacted]", text, flags=re.I)
+        text = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}", "[redacted key]", text)
+        return text if len(text) <= 800 else f"{text[:799]}✂"
 
     @staticmethod
     def _sanitize_progress_update(update: dict) -> Optional[dict]:

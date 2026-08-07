@@ -63,6 +63,29 @@ async def test_bridge_rejects_non_loopback_and_oversized_requests():
 
 
 @pytest.mark.asyncio
+async def test_bridge_returns_a_safe_openai_error_when_the_provider_is_offline():
+    async def offline_handler(_request):
+        raise httpx.ConnectError("http://provider.internal:9999 refused; token=secret")
+
+    bridge = ModelBridge(
+        resolver=lambda endpoint_id, model, owner: ("https://provider.test/v1/chat/completions", model, {"Authorization": "Bearer secret"}),
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(offline_handler), **kwargs),
+    )
+    route = bridge.issue_route(owner="alice", endpoint_id="endpoint-a", model="fixed-model")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bridge.app), base_url="http://bridge") as client:
+        response = await client.post(
+            "/v1/chat/completions", headers={"Authorization": f"Bearer {route.token}"}, json={"messages": []},
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {"error": {
+        "message": "Model provider request failed", "type": "provider_error", "code": "provider_failed",
+    }}
+    assert "provider.internal" not in response.text
+    assert "secret" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_bridge_runtime_owns_a_dedicated_loopback_listener():
     runtime = ModelBridgeRuntime(ModelBridge())
     base_url = await runtime.start()

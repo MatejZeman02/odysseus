@@ -15,6 +15,7 @@ from src.auth_helpers import effective_user, _auth_disabled, owner_filter
 from src.session_image_cleanup import _generated_image_path_for_cleanup, session_image_refs
 from src.session_actions import is_session_recently_active
 from src.upload_handler import reserve_message_upload_references
+from src.qwen_inspection import effective_capability
 
 
 def _sanitize_export_filename(name: str) -> str:
@@ -296,11 +297,15 @@ def setup_session_routes(
                 mode_map[row.id] = row.mode
                 msg_count_map[row.id] = row.message_count or 0
                 project = project_map.get(row.project_id)
+                requested_capability = getattr(row, "capability_profile", None) or "project_read"
                 scope_map[row.id] = {"scope_kind": row.scope_kind or "general", "project_id": row.project_id,
                                      "project_name": project.name if project else None,
                                      "workspace_root": project.workspace_root if project else None,
                                      "endpoint_id": getattr(row, "endpoint_id", None),
                                      "harness_kind": getattr(row, "harness_kind", None) or "native",
+                                     "capability_profile": requested_capability,
+                                     "requested_capability": requested_capability,
+                                     "effective_capability": effective_capability(requested_capability),
                                      "is_scope_primary": bool(getattr(row, "is_scope_primary", False))}
             # Sessions with active documents that have content
             from sqlalchemy import func

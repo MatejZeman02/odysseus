@@ -25,10 +25,12 @@ def test_restored_tool_screenshot_uses_raster_data_url_whitelist():
 
 def test_streaming_tool_labels_are_escaped_before_inner_html():
     chat = (_REPO / "static" / "js" / "chat.js").read_text(encoding="utf-8")
+    timeline = (_REPO / "static" / "js" / "processTimeline.js").read_text(encoding="utf-8")
     compare = (_REPO / "static" / "js" / "compare" / "stream.js").read_text(encoding="utf-8")
 
-    assert '<span class="agent-thread-tool">${esc(toolLabel)}</span>' in chat
-    assert '<span class="agent-thread-tool">${toolLabel}</span>' not in chat
+    assert "createProcessToolNode({" in chat
+    assert "labelNode.textContent = String(label || 'Tool');" in timeline
+    assert "labelNode.innerHTML" not in timeline
     assert '<span class="agent-thread-tool">${escapeHtml(toolLabel)}</span>' in compare
     assert '<span class="agent-thread-tool">${toolLabel}</span>' not in compare
 

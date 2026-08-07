@@ -52,8 +52,9 @@ function _syncCompanionScopeBanner(meta) {
     const projectName = meta.project_name || meta.name || 'Project';
     const workspaceName = String(meta.workspace_root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
     title.textContent = `Project · ${projectName}`;
+    const effectiveCapability = meta.effective_capability || meta.capability_profile || 'project_read';
     detail.textContent = meta.harness_kind === 'qwen'
-      ? `Qwen · read-only${workspaceName ? ` · ${workspaceName}` : ''}`
+      ? `Qwen · ${effectiveCapability === 'project_inspect' ? 'sandboxed inspection' : 'read-only'}${workspaceName ? ` · ${workspaceName}` : ''}`
       : 'Native · continuity context · workspace tools off';
   } else if (scope === 'personal') {
     title.textContent = 'Personal Advisor';
@@ -1277,7 +1278,12 @@ function _renderSessionListImpl() {
       _loadG15Readiness();
     } else if (_g15Readiness.qwen_ready) {
       readiness.classList.add('ready');
-      readiness.textContent = 'Qwen ready · read-only sandbox';
+      if (_g15Readiness.inspection?.enabled && !_g15Readiness.inspection?.ready) {
+        readiness.textContent = 'Qwen ready · project read-only · inspection unavailable';
+        readiness.title = 'The pinned Qwen Podman sandbox did not pass the G2A isolation gate';
+      } else {
+        readiness.textContent = 'Qwen ready · project read-only';
+      }
     } else if (_g15Readiness.error) {
       readiness.classList.add('unavailable');
       readiness.textContent = 'Qwen status unavailable';

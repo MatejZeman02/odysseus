@@ -40,6 +40,19 @@ def test_project_workspace_comes_from_server_owned_binding(monkeypatch, tmp_path
     assert rejected == ""
 
 
+def test_companion_owner_honors_established_loopback_bypass(monkeypatch):
+    import routes.g1_continuity_routes as project_routes
+
+    request = SimpleNamespace(
+        state=SimpleNamespace(api_token=False, current_user=None),
+        client=SimpleNamespace(host="127.0.0.1"),
+        app=SimpleNamespace(state=SimpleNamespace(auth_manager=None)),
+    )
+    monkeypatch.setenv("LOCALHOST_BYPASS", "true")
+
+    assert project_routes._owner(request) == "__odysseus_local__"
+
+
 def test_missing_stored_project_workspace_does_not_override_ordinary_chat(monkeypatch):
     import routes.chat_routes as chat_routes
 
@@ -84,6 +97,127 @@ def test_project_delete_route_is_registered():
 
     assert ("/api/g1/projects/{project_id}", "DELETE") in routes
     assert ("/api/g1/sessions/{session_id}/harness", "GET") in routes
+    assert ("/api/g1/sessions/{session_id}/capability", "PATCH") in routes
+
+
+def test_project_inspection_capability_is_rejected_without_qualified_sandbox(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import routes.g1_continuity_routes as project_routes
+    from core.database import Base, Session as DbSession
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    local = sessionmaker(bind=engine)
+    db = local()
+    try:
+        db.add(DbSession(
+            id="project-session", name="Dust", endpoint_url="http://model", model="m",
+            owner="alice", scope_kind="project", project_id="dust", endpoint_id="endpoint",
+            harness_kind="qwen", capability_profile="project_read",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(project_routes, "SessionLocal", local)
+    monkeypatch.setattr(project_routes, "_owner", lambda _request: "alice")
+    monkeypatch.setattr(
+        project_routes,
+        "inspection_readiness",
+        lambda: SimpleNamespace(ready=False),
+    )
+    manager = SimpleNamespace(sessions={})
+    router = project_routes.setup_g1_continuity_routes(manager)
+    endpoint = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/g1/sessions/{session_id}/capability"
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        endpoint(
+            "project-session",
+            project_routes.CapabilityRequest(capability_profile="project_inspect"),
+            object(),
+        )
+
+    assert raised.value.status_code == 503
+    assert raised.value.detail["code"] == "sandbox_unavailable"
+    db = local()
+    try:
+        assert db.get(DbSession, "project-session").capability_profile == "project_read"
+    finally:
+        db.close()
+
+
+def test_project_read_capability_update_is_owner_scoped_and_qwen_only(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import routes.g1_continuity_routes as project_routes
+    from core.database import Base, Session as DbSession
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    local = sessionmaker(bind=engine)
+    db = local()
+    try:
+        db.add_all([
+            DbSession(
+                id="qwen-project", name="Dust", endpoint_url="http://model", model="m",
+                owner="alice", scope_kind="project", project_id="dust", endpoint_id="endpoint",
+                harness_kind="qwen", capability_profile="project_read",
+            ),
+            DbSession(
+                id="native-project", name="Native", endpoint_url="http://model", model="m",
+                owner="alice", scope_kind="project", project_id="native", endpoint_id="endpoint",
+                harness_kind="native", capability_profile="project_read",
+            ),
+            DbSession(
+                id="bob-project", name="Bob", endpoint_url="http://model", model="m",
+                owner="bob", scope_kind="project", project_id="bob", endpoint_id="endpoint",
+                harness_kind="qwen", capability_profile="project_read",
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(project_routes, "SessionLocal", local)
+    monkeypatch.setattr(project_routes, "_owner", lambda _request: "alice")
+    router = project_routes.setup_g1_continuity_routes(SimpleNamespace(sessions={}))
+    endpoint = next(
+        route.endpoint for route in router.routes
+        if route.path == "/api/g1/sessions/{session_id}/capability"
+    )
+    payload = project_routes.CapabilityRequest(capability_profile="project_read")
+
+    result = endpoint("qwen-project", payload, object())
+    assert result["requested_capability"] == "project_read"
+    assert result["effective_capability"] == "project_read"
+
+    with pytest.raises(HTTPException) as native_error:
+        endpoint("native-project", payload, object())
+    assert native_error.value.status_code == 409
+
+    with pytest.raises(HTTPException) as owner_error:
+        endpoint("bob-project", payload, object())
+    assert owner_error.value.status_code == 404
+
+
+def test_capability_request_rejects_browser_submitted_execution_fields():
+    from pydantic import ValidationError
+
+    import routes.g1_continuity_routes as project_routes
+
+    with pytest.raises(ValidationError):
+        project_routes.CapabilityRequest(
+            capability_profile="project_read",
+            command="find .",
+            workspace_root="/tmp/other",
+            endpoint_id="other-owner-endpoint",
+        )
 
 
 def test_delete_project_without_a_chat_removes_artifacts_too(monkeypatch):
@@ -493,6 +627,7 @@ async def test_stream_admission_rejects_a_second_request_before_generator_starts
     monkeypatch.setenv("ODYSSEUS_QWEN_BINARY", str(binary))
     monkeypatch.setattr(project_routes.shutil, "which", lambda name: "/usr/bin/bwrap" if name == "bwrap" else None)
     monkeypatch.setattr(project_routes, "_stored_route", lambda *_args, **_kwargs: ("endpoint", "model"))
+    monkeypatch.setattr(project_routes, "_stored_capability", lambda *_args, **_kwargs: ("project_read", "project_read"))
     monkeypatch.setattr(project_routes, "_qwen_binary", lambda: binary)
     router = project_routes.setup_g1_continuity_routes(SimpleNamespace())
     endpoint = next(
@@ -520,6 +655,7 @@ async def test_stop_cancels_an_admitted_turn_before_its_generator_starts(monkeyp
     monkeypatch.setenv("ODYSSEUS_QWEN_BINARY", str(binary))
     monkeypatch.setattr(project_routes.shutil, "which", lambda name: "/usr/bin/bwrap" if name == "bwrap" else None)
     monkeypatch.setattr(project_routes, "_stored_route", lambda *_args, **_kwargs: ("endpoint", "model"))
+    monkeypatch.setattr(project_routes, "_stored_capability", lambda *_args, **_kwargs: ("project_read", "project_read"))
     monkeypatch.setattr(project_routes, "_qwen_binary", lambda: binary)
 
     class Query:
@@ -598,7 +734,13 @@ def test_readiness_reports_components_without_exposing_paths(monkeypatch, tmp_pa
     result = endpoint(request)
 
     assert result["qwen_ready"] is True
-    assert result["components"] == {"qwen_binary": True, "bubblewrap": True}
+    assert result["components"]["qwen_binary"] is True
+    assert result["components"]["bubblewrap"] is True
+    assert result["components"]["podman"] in {True, False}
+    assert result["components"]["sandbox_image"] is False
+    assert result["inspection"]["pinned_image"] is False
+    assert result["inspection"]["ready"] is False
+    assert result["inspection"]["sandbox_probe"] is False
     assert str(binary) not in repr(result)
 
 
@@ -610,6 +752,7 @@ async def test_qwen_turn_is_rejected_before_admission_when_containment_is_not_re
     monkeypatch.setenv("ODYSSEUS_QWEN_BINARY", str(tmp_path / "missing-qwen"))
     monkeypatch.setattr(project_routes.shutil, "which", lambda _name: None)
     monkeypatch.setattr(project_routes, "_stored_route", lambda *_args, **_kwargs: ("endpoint", "model"))
+    monkeypatch.setattr(project_routes, "_stored_capability", lambda *_args, **_kwargs: ("project_read", "project_read"))
     router = project_routes.setup_g1_continuity_routes(SimpleNamespace())
     endpoint = next(route.endpoint for route in router.routes if route.path == "/api/g1/project-turn/stream")
     payload = project_routes.G1TurnRequest(session_id="project-session", message="question")
@@ -628,10 +771,24 @@ def test_companion_sidebar_renders_safe_qwen_readiness_status():
     source = open("static/js/sessions.js", encoding="utf-8").read()
 
     assert "/api/g1/status" in source
-    assert "Qwen ready · read-only sandbox" in source
+    assert "Qwen ready · project read-only" in source
+    assert "inspection unavailable" in source
     assert "Qwen setup needed" in source
     assert "components?.qwen_binary" in source
     assert "components?.bubblewrap" in source
+
+
+def test_qwen_timeout_error_is_specific_and_safe():
+    import routes.g1_continuity_routes as project_routes
+
+    payload = project_routes._qwen_error_payload(
+        RuntimeError("Qwen turn failed: turn_error:prompt_deadline_exceeded provider-secret")
+    )
+    assert payload == {
+        "code": "turn_timeout",
+        "detail": "Qwen reached the read-only turn limit before finishing",
+    }
+    assert "provider-secret" not in repr(payload)
 
 
 def test_companion_scope_is_disclosed_above_the_composer():
@@ -640,7 +797,8 @@ def test_companion_scope_is_disclosed_above_the_composer():
 
     assert index.index('id="companion-scope-banner"') < index.index('class="chat-input-bar"')
     assert "Project · ${projectName}" in sessions
-    assert "Qwen · read-only" in sessions
+    assert "effectiveCapability === 'project_inspect'" in sessions
+    assert "'sandboxed inspection' : 'read-only'" in sessions
     assert "Native · continuity context · workspace tools off" in sessions
     assert "Native · personal scope" in sessions
     assert "Native · Qwen coming next" in sessions

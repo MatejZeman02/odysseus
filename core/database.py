@@ -248,6 +248,7 @@ class Session(TimestampMixin, Base):
     # remain ordinary native/general sessions until explicitly adopted.
     endpoint_id = Column(String, nullable=True, index=True)
     harness_kind = Column(String, nullable=False, default="native")
+    capability_profile = Column(String, nullable=False, default="project_read")
     is_scope_primary = Column(Boolean, nullable=False, default=False)
 
     # Relationship to chat messages
@@ -2185,6 +2186,8 @@ def _migrate_add_g15_session_columns():
             conn.execute("ALTER TABLE sessions ADD COLUMN endpoint_id TEXT")
         if "harness_kind" not in columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN harness_kind TEXT NOT NULL DEFAULT 'native'")
+        if "capability_profile" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN capability_profile TEXT NOT NULL DEFAULT 'project_read'")
         if "is_scope_primary" not in columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN is_scope_primary BOOLEAN NOT NULL DEFAULT 0")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_scope_primary ON sessions(owner, scope_kind, is_scope_primary)")

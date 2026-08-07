@@ -90,7 +90,25 @@ class ModelBridge:
         body["model"] = route.model
         # Never forward arbitrary worker headers, credentials, or an alternate URL.
         client = self._client_factory(timeout=90.0)
-        upstream = await client.send(client.build_request("POST", url, headers=headers, json=body), stream=True)
+        try:
+            upstream = await client.send(
+                client.build_request("POST", url, headers=headers, json=body), stream=True,
+            )
+        except httpx.HTTPError:
+            # Qwen needs a normal OpenAI-compatible error response in order to
+            # finish its ACP turn. Letting a transport exception escape this
+            # short-lived loopback server closes the connection mid-request and
+            # leaves the worker waiting for its full prompt deadline. Never
+            # include an upstream URL, credentials, or transport detail here.
+            await client.aclose()
+            return JSONResponse(
+                status_code=502,
+                content={"error": {
+                    "message": "Model provider request failed",
+                    "type": "provider_error",
+                    "code": "provider_failed",
+                }},
+            )
         if body.get("stream"):
             async def stream():
                 try:

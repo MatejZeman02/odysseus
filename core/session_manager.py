@@ -138,6 +138,7 @@ class SessionManager:
             project_id=getattr(db_session, "project_id", None),
             endpoint_id=getattr(db_session, "endpoint_id", None),
             harness_kind=getattr(db_session, "harness_kind", None) or "native",
+            capability_profile=getattr(db_session, "capability_profile", None) or "project_read",
             is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
@@ -201,6 +202,7 @@ class SessionManager:
             project_id=getattr(db_session, "project_id", None),
             endpoint_id=getattr(db_session, "endpoint_id", None),
             harness_kind=getattr(db_session, "harness_kind", None) or "native",
+            capability_profile=getattr(db_session, "capability_profile", None) or "project_read",
             is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
 
@@ -229,6 +231,27 @@ class SessionManager:
         session.message_count = len(session.history)
 
         self._persist_message(session_id, message)
+
+    def update_message_metadata(self, session_id: str, message_id: str, metadata: dict) -> bool:
+        """Persist metadata for an existing owned-in-session message."""
+        db = SessionLocal()
+        try:
+            row = db.query(DbChatMessage).filter(
+                DbChatMessage.id == message_id,
+                DbChatMessage.session_id == session_id,
+            ).first()
+            if row is None:
+                return False
+            persisted = {key: value for key, value in dict(metadata or {}).items() if key != "_db_id"}
+            row.meta_data = json.dumps(persisted, separators=(",", ":")) if persisted else None
+            db.commit()
+            return True
+        except Exception as exc:
+            logger.error("Error updating message metadata %s: %s", message_id, exc)
+            db.rollback()
+            return False
+        finally:
+            db.close()
 
     def _persist_message(self, session_id: str, message: ChatMessage):
         """Persist a single message to the database."""
@@ -459,6 +482,7 @@ class SessionManager:
             session.project_id = getattr(db_session, "project_id", None)
             session.endpoint_id = getattr(db_session, "endpoint_id", None)
             session.harness_kind = getattr(db_session, "harness_kind", None) or "native"
+            session.capability_profile = getattr(db_session, "capability_profile", None) or "project_read"
             session.is_scope_primary = bool(getattr(db_session, "is_scope_primary", False))
             return True
         except Exception as e:

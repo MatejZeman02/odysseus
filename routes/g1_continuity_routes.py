@@ -13,18 +13,20 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.database import ChatMessage as DbMessage, ContinuityArtifact, ModelEndpoint, Project, Session as DbSession, SessionLocal, utcnow_naive
-from src.auth_helpers import effective_user, owner_filter
+from src.auth_helpers import effective_user, owner_filter, require_user
 from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
-from src.scoped_turn_service import ReadOnlyScopedTurnService
+from src.qwen_inspection import effective_capability, inspection_readiness
+from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure
 
 logger = logging.getLogger(__name__)
 
 _home_locks_guard = threading.Lock()
 _home_locks: dict[tuple[str, str, str], threading.Lock] = {}
+_LOCAL_COMPANION_OWNER = "__odysseus_local__"
 
 
 class G1TurnRequest(BaseModel):
@@ -47,6 +49,12 @@ class HarnessRequest(BaseModel):
     harness_kind: str
 
 
+class CapabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capability_profile: str
+
+
 class FeedbackRequest(BaseModel):
     message_id: str
     rating: str
@@ -59,9 +67,18 @@ def _enabled() -> bool:
 
 def _owner(request: Request) -> str:
     owner = effective_user(request)
-    if not owner:
-        raise HTTPException(401, "Authentication required")
-    return owner
+    if owner:
+        return owner
+    # Companion routes are owner-scoped whenever a named browser/API identity
+    # exists.  In the documented single-user and direct-loopback development
+    # modes, though, the common auth helper intentionally authorizes an empty
+    # owner.  Honor that same policy so the SPA's readiness fetch cannot turn a
+    # valid local bypass into a client-side redirect to /login.
+    # Continuity records require a concrete owner even in the app's
+    # intentionally anonymous single-user mode. Keep that owner private and
+    # stable so projects, homes, and endpoint routing remain internally
+    # consistent without pretending there is an authenticated account.
+    return require_user(request) or _LOCAL_COMPANION_OWNER
 
 
 def _qwen_binary() -> Path:
@@ -70,6 +87,25 @@ def _qwen_binary() -> Path:
     if not binary or not binary.is_file():
         raise HTTPException(503, "Read-only Qwen companion is not configured")
     return binary
+
+
+def _qwen_error_payload(exc: Exception) -> dict:
+    """Map worker failures to stable, credential-free browser errors."""
+    code = classify_turn_failure(exc)
+    details = {
+        "turn_timeout": "Qwen reached the read-only turn limit before finishing",
+        "workspace_changed": "The protected workspace integrity check failed",
+        "teardown_failed": "Qwen finished but its isolated worker did not shut down cleanly",
+        "sandbox_unavailable": "Sandboxed project inspection is unavailable",
+        "command_denied": "The inspection command is not permitted",
+        "command_timeout": "The inspection command exceeded its time limit",
+        "command_output_limited": "The inspection command exceeded its output limit",
+        "command_resource_limit": "The inspection command exceeded its resource limit",
+        "provider_failed": "The selected model provider failed during the Qwen turn",
+        "worker_died": "The isolated Qwen worker stopped unexpectedly",
+        "cancelled": "Qwen turn stopped",
+    }
+    return {"code": code, "detail": details.get(code, "Read-only Qwen turn failed")}
 
 
 def _safe_workspace(value: str) -> str:
@@ -96,11 +132,15 @@ def _endpoint(owner: str, endpoint_id: str, model: str) -> tuple[str, dict]:
 
 
 def _session_payload(row: DbSession, project_name: str | None = None, workspace_root: str | None = None) -> dict:
+    requested = getattr(row, "capability_profile", None) or "project_read"
     return {
         "id": row.id, "name": row.name, "model": row.model, "endpoint_id": row.endpoint_id,
         "scope_kind": row.scope_kind or "general", "project_id": row.project_id,
         "project_name": project_name, "workspace_root": workspace_root,
         "harness_kind": row.harness_kind or "native",
+        "capability_profile": requested,
+        "requested_capability": requested,
+        "effective_capability": effective_capability(requested),
         "is_scope_primary": bool(row.is_scope_primary),
     }
 
@@ -191,6 +231,18 @@ def _stored_route(owner: str, session_id: str, *, require_qwen: bool = False) ->
         db.close()
 
 
+def _stored_capability(owner: str, session_id: str) -> tuple[str, str]:
+    db = SessionLocal()
+    try:
+        row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
+        if not row:
+            raise HTTPException(404, "Session not found")
+        requested = getattr(row, "capability_profile", None) or "project_read"
+        return requested, effective_capability(requested)
+    finally:
+        db.close()
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
@@ -227,10 +279,14 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
     def status(request: Request):
         _owner(request)
         qwen_ready, binary_ready, bubblewrap_ready = _qwen_readiness()
+        inspection = inspection_readiness()
         return {"enabled": _enabled(), "qwen_ready": qwen_ready,
                 "containment": "bubblewrap-read-only", "scopes": {"project": "available", "personal": "native", "computer": "coming_soon"},
                 "native_chat_shell": False,
-                "components": {"qwen_binary": binary_ready, "bubblewrap": bubblewrap_ready}}
+                "components": {"qwen_binary": binary_ready, "bubblewrap": bubblewrap_ready,
+                               "podman": inspection.podman_ready,
+                               "sandbox_image": inspection.image_ready},
+                "inspection": inspection.public_payload()}
 
     @router.get("/projects")
     def list_projects(request: Request):
@@ -380,10 +436,45 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
             ).first()
             if not row:
                 raise HTTPException(404, "Session not found")
+            requested = getattr(row, "capability_profile", None) or "project_read"
             return {
                 "scope_kind": row.scope_kind or "general",
                 "harness_kind": row.harness_kind or "native",
+                "requested_capability": requested,
+                "effective_capability": effective_capability(requested),
             }
+        finally:
+            db.close()
+
+    @router.patch("/sessions/{session_id}/capability")
+    def set_capability(session_id: str, payload: CapabilityRequest, request: Request):
+        if payload.capability_profile not in {"project_read", "project_inspect"}:
+            raise HTTPException(400, "Unknown project capability")
+        owner = _owner(request)
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(
+                DbSession.id == session_id,
+                DbSession.owner == owner,
+            ).first()
+            if not row:
+                raise HTTPException(404, "Session not found")
+            if row.scope_kind != "project" or row.harness_kind != "qwen":
+                raise HTTPException(409, "Project capabilities require a Qwen project session")
+            if payload.capability_profile == "project_inspect":
+                readiness = inspection_readiness()
+                if not readiness.ready:
+                    raise HTTPException(503, {
+                        "code": "sandbox_unavailable",
+                        "detail": "Sandboxed project inspection is unavailable; read-only project tools remain active",
+                    })
+            row.capability_profile = payload.capability_profile
+            row.updated_at = utcnow_naive()
+            db.commit()
+            live = getattr(session_manager, "sessions", {}).get(session_id)
+            if live:
+                live.capability_profile = payload.capability_profile
+            return _session_payload(row)
         finally:
             db.close()
 
@@ -395,19 +486,24 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
         owner = _owner(request)
         if not hasattr(session_manager, "get_session"):  # narrow compatibility seam for isolated route tests
             endpoint_id, model = payload.endpoint_id, payload.model
+            requested_capability, admitted_capability = "project_read", "project_read"
         else:
             endpoint_id, model = _stored_route(owner, payload.session_id, require_qwen=True)
+            requested_capability, admitted_capability = _stored_capability(owner, payload.session_id)
         # Headless clients may repeat the stored route but cannot override it.
         if (payload.endpoint_id and payload.endpoint_id != endpoint_id) or (payload.model and payload.model != model):
             raise HTTPException(409, "Session model route does not match stored selection")
         service = ReadOnlyScopedTurnService(session_manager, qwen_binary=_qwen_binary())
         try:
             result = await service.run(owner=owner, session_id=payload.session_id, request=payload.message,
-                                       endpoint_id=endpoint_id, model=model, companion_profile=payload.companion_profile)
+                                       endpoint_id=endpoint_id, model=model, companion_profile=payload.companion_profile,
+                                       capability_profile=admitted_capability)
         except ScopeConflictError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"answer": result.answer, "context_manifest": result.manifest,
                 "workspace_unchanged": result.dust_unchanged,
+                "requested_capability": requested_capability,
+                "effective_capability": admitted_capability,
                 "qwen_process": getattr(result, "qwen_process", None)}
 
     @router.post("/project-turn/stream")
@@ -417,6 +513,7 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
         _require_qwen_ready()
         owner = _owner(request)
         endpoint_id, model = _stored_route(owner, payload.session_id, require_qwen=True)
+        requested_capability, admitted_capability = _stored_capability(owner, payload.session_id)
         qwen_binary = _qwen_binary()
         # Admit before returning StreamingResponse. Two simultaneous requests
         # can otherwise both pass the runs lookup before either generator has
@@ -443,6 +540,7 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
 
                 task = asyncio.create_task(service.run(owner=owner, session_id=payload.session_id, request=payload.message,
                                                        endpoint_id=endpoint_id, model=model, companion_profile=payload.companion_profile,
+                                                       capability_profile=admitted_capability,
                                                        progress_callback=report_progress))
                 runs[payload.session_id] = task
                 while not task.done() or not progress.empty():
@@ -450,12 +548,15 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
                         update = await asyncio.wait_for(progress.get(), timeout=0.25)
                     except asyncio.TimeoutError:
                         continue
-                    yield _sse("tool", update)
+                    event_name = "commentary" if update.get("kind") == "commentary" else "tool"
+                    yield _sse(event_name, update)
                 result = await task
                 yield _sse("delta", {"text": result.answer})
                 yield _sse("done", {"message_id": result.message_id, "user_message_id": result.user_message_id,
                                      "context_manifest": result.manifest, "workspace_unchanged": result.dust_unchanged,
                                      "harness": "qwen", "read_only": True, "model": model,
+                                     "requested_capability": requested_capability,
+                                     "effective_capability": admitted_capability,
                                      "qwen_process": getattr(result, "qwen_process", None)})
             except asyncio.CancelledError:
                 # An explicit Stop cancels the worker task. A disconnected
@@ -468,7 +569,7 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
                     raise
             except Exception as exc:
                 logger.exception("G1.5 Qwen turn failed for session %s: %s", payload.session_id, exc)
-                yield _sse("error", {"code": "qwen_failed", "detail": "Read-only Qwen turn failed"})
+                yield _sse("error", _qwen_error_payload(exc))
             finally:
                 # The service owns a Bubblewrap/Qwen process. Never leave it
                 # running when the browser disconnects or the response is
@@ -558,7 +659,9 @@ def setup_g1_continuity_routes(session_manager) -> APIRouter:
                 feedback = metadata.get("g1_feedback")
                 if feedback:
                     entries.append({"message_id": message.id, "session_id": session.id, "timestamp": message.timestamp.isoformat() if message.timestamp else None,
-                                    "rating": feedback.get("rating"), "note": feedback.get("note", "")})
+                                    "rating": feedback.get("rating"), "note": feedback.get("note", ""),
+                                    "effective_capability": metadata.get("capability_profile", "project_read"),
+                                    "workspace_unchanged": bool(metadata.get("workspace_unchanged", False))})
             counts = {key: sum(1 for entry in entries if entry["rating"] == key) for key in ("helpful", "wrong", "unsafe")}
             return {"project_id": project_id, "counts": counts, "entries": entries}
         finally:

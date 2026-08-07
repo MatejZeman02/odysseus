@@ -254,6 +254,86 @@ async def test_supervisor_collects_only_assistant_chunks_until_end_turn(tmp_path
     assert metadata["prompt_id"] == "prompt"
 
 
+@pytest.mark.asyncio
+async def test_supervisor_classifies_pre_tool_prose_as_commentary(tmp_path):
+    class FakeClient:
+        async def create_session(self, **kwargs):
+            return "session"
+
+        async def prompt(self, session_id, prompt):
+            return "prompt", "7"
+
+        async def events(self, session_id, last_event_id):
+            yield {"type": "session_update", "data": {"update": {
+                "sessionUpdate": "agent_message_chunk", "content": {"text": "I found the index. "},
+            }}}
+            yield {"type": "session_update", "data": {"update": {
+                "sessionUpdate": "agent_message_chunk", "content": {"text": "I’ll inspect its references next."},
+            }}}
+            yield {"type": "session_update", "data": {"update": {
+                "sessionUpdate": "agent_thought_chunk", "content": {"text": "private reasoning"},
+            }}}
+            yield {"type": "session_update", "data": {"update": {
+                "sessionUpdate": "tool_call", "name": "read_file", "status": "running",
+                "rawInput": {"file_path": "/workspace/docs/index.md"},
+            }}}
+            yield {"type": "session_update", "data": {"update": {
+                "sessionUpdate": "agent_message_chunk", "content": {"text": "The project uses three references."},
+            }}}
+            yield {"type": "turn_complete", "data": {"stopReason": "end_turn"}}
+
+    progress = []
+    supervisor = QwenSupervisor(binary=tmp_path / "missing")
+    supervisor.runtime = QwenRuntime(SimpleNamespace(), FakeClient(), tmp_path)
+    answer, _ = await supervisor.run_prompt("question", progress_callback=progress.append)
+
+    assert answer == "The project uses three references."
+    assert progress[0] == {
+        "kind": "commentary",
+        "text": "I found the index. I’ll inspect its references next.",
+        "status": "completed",
+    }
+    assert progress[1]["tool"] == "read_file"
+    assert "private reasoning" not in repr(progress)
+
+
+def test_supervisor_sanitizes_commentary_before_streaming():
+    safe = QwenSupervisor._sanitize_commentary_text(
+        "I read /workspace/docs/index.md via http://127.0.0.1:4312/v1 and "
+        "will compare /home/alice/private/notes.md next."
+    )
+    assert "docs/index.md" in safe
+    assert "127.0.0.1" not in safe
+    assert "/home/alice" not in safe
+    assert "[local service]" in safe
+    assert "[private path]" in safe
+
+
+def test_supervisor_rejects_answer_shaped_commentary():
+    assert QwenSupervisor._looks_like_commentary("I found the story. I’ll compare the ending next.")
+    assert not QwenSupervisor._looks_like_commentary("# Conclusion\n\n- The king is responsible.\n- The wife is the final boss.")
+    assert not QwenSupervisor._looks_like_commentary("A" * 601)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_retains_only_safe_terminal_error_kind(tmp_path):
+    class FakeClient:
+        async def create_session(self, **kwargs): return "session"
+        async def prompt(self, session_id, prompt): return "prompt", "7"
+        async def events(self, session_id, last_event_id):
+            yield {"type": "turn_error", "data": {
+                "errorKind": "prompt_deadline_exceeded",
+                "error": "provider details must not cross the boundary",
+            }}
+
+    supervisor = QwenSupervisor(binary=tmp_path / "missing")
+    supervisor.runtime = QwenRuntime(SimpleNamespace(), FakeClient(), tmp_path)
+    with pytest.raises(QwenHarnessError) as raised:
+        await supervisor.run_prompt("question")
+    assert str(raised.value) == "Qwen turn failed: turn_error:prompt_deadline_exceeded"
+    assert "provider details" not in str(raised.value)
+
+
 def test_supervisor_sanitizes_qwen_tool_updates_for_the_browser():
     # Qwen emits an initial skeletal search event before it has populated the
     # query.  It is not a useful operation and must not become `Search: ""` in

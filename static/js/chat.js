@@ -23,6 +23,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArrowUpRecall.js?v=20260714promptrecall';
+import { appendProcessCommentary, compactProcessLabel, createProcessThread, createProcessToolNode, replaceProcessToolNode } from './processTimeline.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -1665,12 +1666,9 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
           title.className = 'qwen-process-title';
           const detail = document.createElement('div');
           detail.className = 'qwen-process-detail';
-          const status = document.createElement('p');
-          status.className = 'qwen-process-status';
-          status.hidden = true;
-          const tools = document.createElement('ul');
-          tools.className = 'qwen-process-tools';
-          detail.append(status, tools); summary.appendChild(title); card.append(summary, detail);
+          const tools = createProcessThread({ streaming: true });
+          tools.classList.add('qwen-process-timeline');
+          detail.appendChild(tools); summary.appendChild(title); card.append(summary, detail);
           document.getElementById('chat-history')?.appendChild(card);
           const formatElapsed = () => {
             const seconds = Math.max(0, Math.floor((Date.now() - _qwenProcessStarted) / 1000));
@@ -1682,37 +1680,57 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
           const ticker = setInterval(refresh, 1000); refresh();
           return {
             status(message) { currentStatus = String(message || currentStatus).slice(0, 160); refresh(); },
+            commentary(update) {
+              const text = String(update?.text || '').trim().slice(0, 800);
+              if (!text) return;
+              appendProcessCommentary(tools, text);
+              currentStatus = 'Reviewing findings';
+              refresh();
+            },
             tool(update) {
               const operation = String(update.operation || 'Inspect project').slice(0, 80);
               const tool = String(update.tool || 'inspect_workspace').slice(0, 80);
               const path = update.path ? String(update.path).slice(0, 180) : '';
-              const label = String(update.label || `${operation}: ${path || 'workspace'}`).slice(0, 2100);
               const commandText = String(update.command || `${tool} ${path || '.'}`).slice(0, 2100);
               const key = `${operation}\n${path}\n${commandText}`;
+              const state = String(update.status || 'working').toLowerCase();
+              const running = !['completed', 'done', 'failed', 'error'].includes(state);
+              const ok = !['failed', 'error'].includes(state);
+              const displayLabel = compactProcessLabel(commandText, { preserveEnd: tool !== 'shell' });
               let row = toolRows.get(key);
               if (!row) {
-                row = document.createElement('li');
-                const step = document.createElement('details'); step.className = 'qwen-process-tool';
-                const stepSummary = document.createElement('summary'); stepSummary.className = 'qwen-process-tool-label';
-                const stepDetail = document.createElement('div'); stepDetail.className = 'qwen-process-tool-detail';
-                const command = document.createElement('code'); command.className = 'qwen-process-command';
-                // The normal one-line view is the command itself. File and
-                // search targets are most useful at the end; shell commands
-                // are read left-to-right, so they clip at the end.
-                const preview = commandText.length <= 112 ? commandText : (tool === 'shell'
-                  ? `${commandText.slice(0, 111)}✂`
-                  : `${commandText.slice(0, 36)}✂${commandText.slice(-(112 - 37))}`);
-                stepSummary.textContent = preview;
-                command.textContent = commandText;
-                stepDetail.appendChild(command);
-                step.append(stepSummary, stepDetail); row.appendChild(step); tools.appendChild(row); toolRows.set(key, row);
+                row = createProcessToolNode({ label: displayLabel, command: commandText, running, ok });
+                tools.appendChild(row);
+                toolRows.set(key, row);
+              } else if (!running && row.classList.contains('running')) {
+                const replacement = replaceProcessToolNode(row, { label: displayLabel, command: commandText, ok });
+                toolRows.set(key, replacement);
+                row = replacement;
               }
-              row.dataset.status = String(update.status || 'working');
+              row.dataset.status = state;
               currentStatus = operation; refresh();
             },
             finish(outcome = 'worked') {
-              clearInterval(ticker); card.open = false; card.classList.add('complete');
+              clearInterval(ticker);
+              tools.classList.remove('streaming');
+              for (const [key, node] of toolRows) {
+                if (!node.classList.contains('running')) continue;
+                const replacement = replaceProcessToolNode(node, {
+                  label: node.querySelector('.agent-thread-tool')?.textContent || 'Project operation',
+                  command: node.querySelector('.agent-thread-cmd')?.textContent || '',
+                  ok: outcome === 'worked',
+                  status: outcome === 'worked' ? 'done' : outcome,
+                });
+                toolRows.set(key, replacement);
+              }
+              card.open = false; card.classList.add('complete', `qwen-process-${outcome}`);
               title.textContent = `Process · ${outcome} for ${formatElapsed()}`;
+            },
+            error(message) {
+              const failure = document.createElement('p');
+              failure.className = 'qwen-process-failure';
+              failure.textContent = String(message || 'Qwen turn failed').slice(0, 240);
+              card.insertAdjacentElement('afterend', failure);
             },
             remove() { card.remove(); },
           };
@@ -1741,10 +1759,15 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
               const dataLine = frame.split('\n').find(line => line.startsWith('data:'));
               event = eventLine ? eventLine.slice(6).trim() : ''; const data = dataLine ? JSON.parse(dataLine.slice(5)) : {};
               if (event === 'status') _qwenProcess.status(data.message);
+              if (event === 'commentary') _qwenProcess.commentary(data);
               if (event === 'tool') _qwenProcess.tool(data);
               if (event === 'delta') answer += data.text || '';
               if (event === 'done') doneData = data;
-              if (event === 'error') throw new Error(data.detail || 'Qwen Companion failed');
+              if (event === 'error') {
+                const failure = new Error(typeof data.detail === 'string' ? data.detail : 'Qwen Companion failed');
+                failure.code = data.code || data.detail?.code || 'worker_died';
+                throw failure;
+              }
             }
           }
           if (!doneData) {
@@ -1756,15 +1779,19 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
           // the live card for the normal history renderer so refresh/replay
           // gets the identical Process block rather than losing it.
           if (doneData?.qwen_process) _qwenProcess.remove();
-          if (answer) addMessage('assistant', `${answer}\n\n*Qwen · Read-only · Workspace unchanged*`, doneData?.model || 'Qwen Companion', {
+          const capabilityBadge = doneData?.effective_capability === 'project_inspect'
+            ? 'Sandboxed inspection'
+            : 'Read-only';
+          if (answer) addMessage('assistant', `${answer}\n\n*Qwen · ${capabilityBadge} · Workspace unchanged*`, doneData?.model || 'Qwen Companion', {
             _db_id: doneData?.message_id || '', harness: 'qwen', qwen_read_only: true,
+            capability_profile: doneData?.effective_capability || 'project_read',
             workspace_unchanged: !!doneData?.workspace_unchanged,
             qwen_process: doneData?.qwen_process || null,
           });
         } catch (error) {
           const stopped = error?.name === 'AbortError';
-          _qwenProcess.finish('stopped');
-          if (!stopped) addMessage('assistant', `Qwen Companion error: ${error.message || 'read-only turn failed'}`);
+          _qwenProcess.finish(stopped ? 'stopped' : 'failed');
+          if (!stopped) _qwenProcess.error(error.message || 'Read-only Qwen turn failed');
         } finally {
           _qwenAbortController = null;
           _qwenActiveSessionId = null;
@@ -3195,10 +3222,12 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
                 lastToolThread = threadWrap;
                 const toolLabel = _toolLabels[json.tool.toLowerCase()] || json.tool;
                 const toolIcon = _toolIcons[json.tool.toLowerCase()] || '\u25B6';
-                const node = document.createElement('div')
-                node.className = 'agent-thread-node running';
-                const cmdHtml = cmd ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
-                node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${toolIcon}</span><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
+                const node = createProcessToolNode({
+                  label: toolLabel,
+                  command: cmd,
+                  running: true,
+                  iconHtml: toolIcon,
+                });
                 // Expand/collapse via delegated click handler (init at module bottom).
                 threadWrap.appendChild(node);
                 currentToolBubble = node;
@@ -3326,15 +3355,17 @@ import { wireArrowUpRecall, getUserMessagesFromChatHistory } from './composerArr
                   }
                   // For file edits the "command" is the raw JSON args — redundant
                   // next to the diff, so hide it when we have a diff to show.
-                  const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
                   // Preserve the user's .open choice across the innerHTML
                   // rewrite \u2014 otherwise expanding a running tool collapses
                   // it as soon as the result lands, forcing the user to
                   // click again. Click handling is delegated (see init at
                   // bottom of file) so no per-node listener needed.
-                  const _wasOpen = currentToolBubble.classList.contains('open');
-                  currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_wasOpen ? ' open' : '');
-                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(json.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${cmdHtml2}${outHtml}${diffHtml}</div>`;
+                  currentToolBubble = replaceProcessToolNode(currentToolBubble, {
+                    label: json.tool,
+                    command: (cmd && !(json.diff && json.diff.text)) ? cmd : '',
+                    ok,
+                    contentHtml: `${outHtml}${diffHtml}`,
+                  });
                   // Reset so thinking spinner between tools says "Thinking" not the old tool's label
                   _lastToolName = '';
                   uiModule.scrollHistory();

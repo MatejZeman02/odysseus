@@ -10,6 +10,7 @@ import settingsModule from './settings.js';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
+import { appendProcessCommentary, compactProcessLabel, createProcessThread, createProcessToolNode } from './processTimeline.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 const REPORT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
@@ -922,55 +923,48 @@ function _qwenElapsed(seconds) {
   return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
-function _qwenCommandPreview(command, tool) {
-  const text = String(command || '').slice(0, 2100);
-  if (text.length <= 112) return text;
-  // Read/search targets are useful at the end. Shell commands are useful
-  // from the start, so their preview only clips the right edge.
-  return tool === 'shell'
-    ? `${text.slice(0, 111)}✂`
-    : `${text.slice(0, 36)}✂${text.slice(-(112 - 37))}`;
-}
-
 /** Rebuild the compact, sanitized Qwen tool trace saved with its reply. */
 export function buildQwenProcessCard(process) {
   if (!process || typeof process !== 'object') return null;
   const events = Array.isArray(process.events) ? process.events : [];
   const card = document.createElement('details');
-  card.className = 'qwen-process-card complete';
+  const outcome = String(process.outcome || 'worked');
+  card.className = `qwen-process-card complete qwen-process-${outcome}`;
   const summary = document.createElement('summary');
   const title = document.createElement('span');
   title.className = 'qwen-process-title';
-  title.textContent = `Process · worked for ${_qwenElapsed(process.elapsed_seconds)}`;
+  title.textContent = `Process · ${outcome} for ${_qwenElapsed(process.elapsed_seconds)}`;
   summary.appendChild(title);
   const detail = document.createElement('div');
   detail.className = 'qwen-process-detail';
-  const tools = document.createElement('ul');
-  tools.className = 'qwen-process-tools';
+  const tools = createProcessThread();
+  tools.classList.add('qwen-process-timeline');
 
   for (const rawEvent of events.slice(0, 100)) {
     if (!rawEvent || typeof rawEvent !== 'object') continue;
-    const tool = String(rawEvent.tool || 'inspect_workspace').slice(0, 80);
+    if (rawEvent.kind === 'commentary') {
+      const text = String(rawEvent.text || '').trim().slice(0, 800);
+      if (!text) continue;
+      appendProcessCommentary(tools, text);
+      continue;
+    }
     const path = String(rawEvent.path || '').slice(0, 180);
+    const tool = String(rawEvent.tool || 'inspect_workspace').slice(0, 80);
     const command = String(rawEvent.command || `${tool} ${path || '.'}`).slice(0, 2100);
-    const row = document.createElement('li');
-    row.dataset.status = String(rawEvent.status || 'completed').slice(0, 20);
-    const step = document.createElement('details');
-    step.className = 'qwen-process-tool';
-    const stepSummary = document.createElement('summary');
-    stepSummary.className = 'qwen-process-tool-label';
-    stepSummary.textContent = _qwenCommandPreview(command, tool);
-    const stepDetail = document.createElement('div');
-    stepDetail.className = 'qwen-process-tool-detail';
-    const fullCommand = document.createElement('code');
-    fullCommand.className = 'qwen-process-command';
-    fullCommand.textContent = command;
-    stepDetail.appendChild(fullCommand);
-    step.append(stepSummary, stepDetail);
-    row.appendChild(step);
-    tools.appendChild(row);
+    const ok = String(rawEvent.status || 'completed') !== 'failed';
+    tools.appendChild(createProcessToolNode({
+      label: compactProcessLabel(command, { preserveEnd: tool !== 'shell' }),
+      command,
+      ok,
+    }));
   }
   detail.appendChild(tools);
+  if (process.failure_code) {
+    const failure = document.createElement('p');
+    failure.className = 'qwen-process-failure';
+    failure.textContent = `Turn failed · ${String(process.failure_code).replaceAll('_', ' ')}`;
+    detail.appendChild(failure);
+  }
   card.append(summary, detail);
   return card;
 }
@@ -2485,8 +2479,7 @@ export function addMessage(role, content, modelName, metadata) {
           if (!txt && lastWrap && lastWrap.classList.contains('agent-thread')) {
             threadWrap = lastWrap;
           } else {
-            threadWrap = document.createElement('div');
-            threadWrap.className = 'agent-thread';
+            threadWrap = createProcessThread();
             // Extend line up if there's a chat bubble above
             if (txt) threadWrap.classList.add('has-top');
             box.appendChild(threadWrap);
@@ -2524,11 +2517,13 @@ export function addMessage(role, content, modelName, metadata) {
               }).join('');  // spans are display:block \u2014 a literal \n would double-space
               evDiffHtml = `<details class="agent-tool-output agent-tool-diff"><summary><span class="diff-file">${esc(d.file || 'diff')}</span> <span class="diff-summary-stats">${stat}</span></summary><pre class="diff-pre">${rows}</pre></details>`;
             }
-            const node = document.createElement('div');
-            node.className = 'agent-thread-node' + (ok ? '' : ' error');
             // Hide the raw JSON command when a diff says it better (same as live).
-            const evCmdHtml = (ev.command && !(ev.diff && ev.diff.text)) ? `<pre class="agent-thread-cmd">${esc(ev.command)}</pre>` : '';
-            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(ev.tool)}</span><span class="agent-thread-status">${ok ? 'done' : 'failed'}</span><span class="agent-thread-chevron">\u25B6</span></div><div class="agent-thread-content">${evCmdHtml}${outHtml}${evDiffHtml}</div>`;
+            const node = createProcessToolNode({
+              label: ev.tool,
+              command: (ev.command && !(ev.diff && ev.diff.text)) ? ev.command : '',
+              ok,
+              contentHtml: `${outHtml}${evDiffHtml}`,
+            });
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
           }
@@ -2665,14 +2660,21 @@ export function addMessage(role, content, modelName, metadata) {
       findingsSuffix += buildRagSourcesBox(metadata.rag_sources);
     }
     // If thinking is stored in metadata (not in text), reconstruct the full display
-    if (role === 'assistant' && metadata?.thinking) {
+	    if (role === 'assistant' && metadata?.thinking) {
       const thinkTime = metadata.thinking_time || null;
       const thinkHtml = markdownModule.processWithThinking(
         '<think' + (thinkTime ? ` time="${thinkTime}"` : '') + '>' + metadata.thinking + '</think>\n\n' + text
       );
-      b.innerHTML = sourcesPrefix + thinkHtml + findingsSuffix;
+	      b.innerHTML = sourcesPrefix + thinkHtml + findingsSuffix;
 	    } else {
-	      b.innerHTML = sourcesPrefix + markdownModule.processWithThinking(text) + findingsSuffix;
+	      // Plain user prose can legitimately begin with phrases such as
+	      // “We need …” or “Let me …”. Those are heuristic thinking prefixes
+	      // only for model output; applying the heuristic to user messages
+	      // incorrectly hides the prompt inside a thinking disclosure.
+	      const renderedText = role === 'assistant'
+	        ? markdownModule.processWithThinking(text)
+	        : markdownModule.mdToHtml(text);
+	      b.innerHTML = sourcesPrefix + renderedText + findingsSuffix;
 	    }
 	    b.dataset.raw = text;
 
@@ -2704,7 +2706,7 @@ export function addMessage(role, content, modelName, metadata) {
         // Extract instruction text (after "Instruction: ")
         const instrMatch = b.textContent.match(/Instruction:\s*([\s\S]*)$/);
         const instrText = instrMatch ? instrMatch[1].trim() : '';
-        b.innerHTML = '<span class="doc-edit-tag">Doc edit: ' + lineRef + '</span> ' + markdownModule.processWithThinking(instrText);
+        b.innerHTML = '<span class="doc-edit-tag">Doc edit: ' + lineRef + '</span> ' + markdownModule.mdToHtml(instrText);
       }
 
       // Render attachment cards
@@ -2874,6 +2876,10 @@ export function addMessage(role, content, modelName, metadata) {
       if (processCard) box.appendChild(processCard);
     }
     box.appendChild(wrap);
+    if (role === 'user' && metadata?.qwen_process) {
+      const processCard = buildQwenProcessCard(metadata.qwen_process);
+      if (processCard) box.appendChild(processCard);
+    }
 
     // TTS is now part of the msg-actions system
     if (role === 'assistant' && markdownModule.renderMermaid) {

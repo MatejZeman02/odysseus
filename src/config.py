@@ -130,7 +130,23 @@ class AppConfig(BaseSettings):
     # Application settings
     debug: bool = Field(default=False, description="Enable debug mode")
     log_level: str = Field(default="INFO", description="Logging level")
-    
+
+    @field_validator("debug", mode="before")
+    def normalize_debug_mode(cls, value):
+        """Accept conventional deployment labels without loosening booleans.
+
+        Older local setups used ``DEBUG=release`` as a shorthand for the
+        production-safe setting.  Treat only the established labels as aliases;
+        other invalid values still fail fast instead of silently enabling debug.
+        """
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "production", "prod"}:
+                return False
+            if normalized in {"development", "dev"}:
+                return True
+        return value
+
     @field_validator("data", mode="before")
     def set_data_paths(cls, v, info):
         """Set data paths relative to base_dir."""
