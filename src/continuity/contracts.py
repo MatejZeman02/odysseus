@@ -139,6 +139,51 @@ class ProjectBriefV1:
 
 
 @dataclass(frozen=True)
+class PersonalBriefV1:
+    """Inspectable, owner-scoped Personal Advisor home memory.
+
+    This deliberately contains only owner-approved/derived compact state.  It
+    is not a second copy of the Personal transcript and it is never used as a
+    cross-project index.
+    """
+    owner_id: str
+    summary: str = ""
+    preferences: list[str] = field(default_factory=list)
+    ongoing_goals: list[str] = field(default_factory=list)
+    commitments: list[str] = field(default_factory=list)
+    recurring_themes: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
+    source_refs: list[str] = field(default_factory=list)
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported PersonalBrief schema_version")
+        if not self.owner_id:
+            raise ContractError("personal brief requires owner_id")
+
+    def to_payload(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "PersonalBriefV1":
+        data = _mapping(payload, "personal brief payload")
+        return cls(
+            owner_id=str(data.get("owner_id") or ""),
+            summary=str(data.get("summary") or ""),
+            preferences=_text_list(data.get("preferences"), "preferences"),
+            ongoing_goals=_text_list(data.get("ongoing_goals"), "ongoing_goals"),
+            commitments=_text_list(data.get("commitments"), "commitments"),
+            recurring_themes=_text_list(data.get("recurring_themes"), "recurring_themes"),
+            open_questions=_text_list(data.get("open_questions"), "open_questions"),
+            artifact_refs=_text_list(data.get("artifact_refs"), "artifact_refs"),
+            source_refs=_text_list(data.get("source_refs"), "source_refs"),
+            schema_version=data.get("schema_version", 1),
+        )
+
+
+@dataclass(frozen=True)
 class ContextBundle:
     """Deterministic input set shared by native and worker harnesses."""
     companion_profile: str
@@ -147,6 +192,9 @@ class ContextBundle:
     thread_checkpoint: Optional[ThreadCheckpointV1] = None
     primary_project_brief: Optional[ProjectBriefV1] = None
     related_project_briefs: tuple[ProjectBriefV1, ...] = ()
+    personal_brief: Optional[PersonalBriefV1] = None
+    working_artifacts: tuple[dict[str, Any], ...] = ()
+    context_grants: tuple[dict[str, Any], ...] = ()
     episodic_hits: tuple[dict[str, Any], ...] = ()
     transcript_tail: tuple[dict[str, Any], ...] = ()
     manifest: dict[str, Any] = field(default_factory=dict)

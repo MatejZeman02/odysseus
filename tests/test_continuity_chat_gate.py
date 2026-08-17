@@ -11,6 +11,15 @@ def test_continuity_gate_is_default_off_and_opt_in(monkeypatch):
     assert _continuity_context_enabled() is True
 
 
+def test_companion_project_and_personal_scopes_are_durably_enabled(monkeypatch):
+    from types import SimpleNamespace
+    from routes.chat_helpers import _continuity_enabled_for_session
+    monkeypatch.delenv("ODYSSEUS_CONTINUITY_CONTEXT", raising=False)
+    assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="project")) is True
+    assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="personal")) is True
+    assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="general")) is False
+
+
 def test_continuity_prompt_marks_derived_context_without_raw_transcript():
     checkpoint = ThreadCheckpointV1(session_id="s", source_hash="hash", source_message_ids=["m1"], source_through_message_id="m1")
     bundle = ContextBundle("", ResolvedScope("alice", "s", "general"), "continue", checkpoint, transcript_tail=({"role": "user", "content": "raw secret"},))

@@ -1334,7 +1334,7 @@ body.bg-pattern-sparkles {
        which we don't want here — the manage button should fade until the
        user actually hovers the section). */
     #sessions-section .chats-manage-btn {
-      opacity: 0 !important;
+      opacity: 0.58 !important;
       transition: opacity 0.12s, background 0.08s;
     }
     #sessions-section .section-header-flex:hover .chats-manage-btn,
@@ -9007,6 +9007,33 @@ button.hamburger {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.companion-scope-action {
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, var(--fg));
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.companion-scope-action + .companion-scope-action { margin-left: -3px; }
+.companion-scope-action:hover { color: var(--fg); border-color: var(--accent); }
+.companion-memory-modal { max-width: 720px; }
+.companion-memory-tabs { display: flex; gap: 8px; padding: 0 20px 10px; }
+.companion-memory-tabs button, .companion-memory-panel button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+.companion-memory-panel { padding: 0 20px 22px; max-height: 58vh; overflow: auto; }
+.companion-memory-panel h5 { margin: 12px 0 4px; font-size: 13px; color: var(--muted, var(--fg)); }
+.companion-memory-panel p { white-space: pre-wrap; }
+.companion-memory-help { color: var(--muted, var(--fg)); font-size: 13px; }
+.companion-artifact-list { display: grid; gap: 8px; margin: 10px 0; }
+.companion-artifact-row { text-align: left; display: grid; gap: 3px; width: 100%; }
+.companion-artifact-row span { color: var(--muted, var(--fg)); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.companion-artifact-editor, .companion-artifact-create textarea, .companion-brief-editor textarea { width: 100%; min-height: 220px; box-sizing: border-box; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 9px; font: inherit; }
+.companion-artifact-create, .companion-brief-editor { display: grid; gap: 8px; margin-top: 10px; }
+.companion-artifact-create input, .companion-grant-purpose, .companion-grant-project { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px; font: inherit; }
+.companion-memory-panel label { display: grid; gap: 4px; margin: 10px 0; }
 @media (max-width: 560px) {
   .companion-scope-banner { font-size: 12px; }
 }
@@ -9485,13 +9512,6 @@ body.fullwidth-chat .chat-history {
 @media (max-width: 700px) {
   .qwen-process-card { margin-left: 8px; width: calc(100% - 16px); max-width: none; }
 }
-.qwen-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; color: var(--muted, var(--fg)); font-size: .86em; }
-.qwen-feedback-prompt { margin-right: 2px; }
-.qwen-feedback-choices { display: inline-flex; gap: 3px; }
-.qwen-feedback-choice, .qwen-feedback-save { border: 1px solid var(--border); border-radius: 999px; background: transparent; color: inherit; padding: 3px 8px; cursor: pointer; font: inherit; }
-.qwen-feedback-choice:hover, .qwen-feedback-save:hover, .qwen-feedback-choice.active { color: var(--fg); border-color: var(--accent, var(--red)); background: color-mix(in srgb, var(--accent, var(--red)) 10%, transparent); }
-.qwen-feedback-note { min-width: 150px; flex: 1 1 220px; max-width: 420px; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, #000 8%, transparent); color: var(--fg); padding: 4px 9px; font: inherit; }
-.qwen-feedback-status { min-width: 38px; opacity: .72; }
 .project-patch-toggle { width: auto; gap: 5px; padding-inline: 8px; }
 .project-patch-toggle span { font-size: 11px; }
 .project-patch-card {

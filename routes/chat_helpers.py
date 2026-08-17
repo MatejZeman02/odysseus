@@ -68,8 +68,8 @@ def _continuity_context_enabled() -> bool:
 
 
 def _continuity_enabled_for_session(sess) -> bool:
-    """Project scope opts in durably; the flag only gates legacy chats."""
-    return _continuity_context_enabled() or getattr(sess, "scope_kind", "general") == "project"
+    """Companion home scopes opt in durably; legacy chats remain flag-gated."""
+    return _continuity_context_enabled() or getattr(sess, "scope_kind", "general") in {"project", "personal"}
 
 
 def _continuity_prompt_message(bundle) -> dict:
@@ -85,8 +85,14 @@ def _continuity_prompt_message(bundle) -> dict:
         sections.append({"thread_checkpoint": bundle.thread_checkpoint.to_payload()})
     if bundle.primary_project_brief:
         sections.append({"project_brief": bundle.primary_project_brief.to_payload()})
+    if bundle.personal_brief:
+        sections.append({"personal_brief": bundle.personal_brief.to_payload()})
     if bundle.related_project_briefs:
         sections.append({"related_project_briefs": [brief.to_payload() for brief in bundle.related_project_briefs]})
+    if bundle.working_artifacts:
+        sections.append({"working_artifacts": list(bundle.working_artifacts)})
+    if bundle.context_grants:
+        sections.append({"approved_context_grants": list(bundle.context_grants)})
     sections.append({"continuity_manifest": bundle.manifest})
     return {
         "role": "user",

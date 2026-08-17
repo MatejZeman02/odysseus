@@ -1,0 +1,171 @@
+"""G2C APIs for scoped Companion memory and working artifacts."""
+from __future__ import annotations
+
+import hashlib
+import json
+
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
+
+from core.database import Project, Session as DbSession, SessionLocal
+from routes.g1_continuity_routes import _owner
+from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
+from src.continuity.contracts import PersonalBriefV1
+from src.continuity.store import ContinuityStore
+
+
+class PersonalArtifactWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+    path: str = Field(min_length=1, max_length=240)
+    content: str = Field(max_length=512 * 1024)
+    expected_revision: int | None = Field(default=None, ge=1)
+    source_message_id: str | None = Field(default=None, max_length=128)
+
+
+class ArtifactUndo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+
+
+class GrantCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    personal_session_id: str = Field(min_length=1, max_length=128)
+    project_id: str = Field(min_length=1, max_length=128)
+    purpose: str = Field(min_length=1, max_length=1000)
+    artifact_paths: list[str] = Field(default_factory=list, max_length=20)
+    request_message_id: str | None = Field(default=None, max_length=128)
+
+
+class GrantDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    allow: bool
+
+
+class PersonalBriefWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+    summary: str = Field(default="", max_length=4000)
+    preferences: list[str] = Field(default_factory=list, max_length=30)
+    ongoing_goals: list[str] = Field(default_factory=list, max_length=30)
+    commitments: list[str] = Field(default_factory=list, max_length=30)
+    recurring_themes: list[str] = Field(default_factory=list, max_length=30)
+    open_questions: list[str] = Field(default_factory=list, max_length=30)
+    artifact_refs: list[str] = Field(default_factory=list, max_length=30)
+
+
+def _error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ArtifactConflict):
+        return HTTPException(409, str(exc))
+    return HTTPException(400, str(exc))
+
+
+def _scope(owner: str, session_id: str) -> tuple[str, str | None]:
+    db = SessionLocal()
+    try:
+        row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
+        if not row:
+            raise HTTPException(404, "Companion session was not found")
+        return row.scope_kind or "general", row.project_id
+    finally:
+        db.close()
+
+
+def setup_companion_memory_routes() -> APIRouter:
+    router = APIRouter(prefix="/api/companion", tags=["companion-memory"])
+    memory = CompanionMemoryStore()
+
+    @router.get("/memory/sessions/{session_id}")
+    def memory_context(session_id: str, request: Request):
+        owner = _owner(request); scope_kind, project_id = _scope(owner, session_id)
+        if scope_kind not in {"personal", "project"}:
+            raise HTTPException(409, "Memory context is available only for Companion homes")
+        store = ContinuityStore()
+        checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
+        project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
+        personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
+        return {
+            "scope_kind": scope_kind, "project_id": project_id,
+            "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
+            "project_brief": project_brief.to_payload() if project_brief else None,
+            "personal_brief": personal_brief.to_payload() if personal_brief else None,
+            "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
+            "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
+            "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
+            "project_catalog": store.project_catalog(owner=owner) if scope_kind == "personal" else [],
+        }
+
+    @router.post("/artefacts/personal", include_in_schema=False)
+    @router.post("/artifacts/personal")
+    def write_personal_artifact(payload: PersonalArtifactWrite, request: Request):
+        try:
+            return memory.write_personal_artifact(owner=_owner(request), **payload.model_dump())
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+
+    @router.get("/artefacts/personal/{artifact_id}", include_in_schema=False)
+    @router.get("/artifacts/personal/{artifact_id}")
+    def read_personal_artifact(artifact_id: str, request: Request):
+        try:
+            return memory.get_personal_artifact(owner=_owner(request), artifact_id=artifact_id)
+        except MemoryScopeError as exc:
+            raise _error(exc) from exc
+
+    @router.post("/artefacts/personal/{artifact_id}/undo", include_in_schema=False)
+    @router.post("/artifacts/personal/{artifact_id}/undo")
+    def undo_personal_artifact(artifact_id: str, payload: ArtifactUndo, request: Request):
+        try:
+            return memory.undo_personal_artifact(owner=_owner(request), artifact_id=artifact_id,
+                                                  expected_revision=payload.expected_revision)
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+
+    @router.post("/artefacts/personal/{artifact_id}/delete", include_in_schema=False)
+    @router.post("/artifacts/personal/{artifact_id}/delete")
+    def delete_personal_artifact(artifact_id: str, payload: ArtifactUndo, request: Request):
+        try:
+            return memory.delete_personal_artifact(owner=_owner(request), artifact_id=artifact_id,
+                                                   expected_revision=payload.expected_revision)
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+
+    @router.post("/artefacts/personal/{artifact_id}/restore", include_in_schema=False)
+    @router.post("/artifacts/personal/{artifact_id}/restore")
+    def restore_personal_artifact(artifact_id: str, payload: ArtifactUndo, request: Request):
+        try:
+            return memory.restore_personal_artifact(owner=_owner(request), artifact_id=artifact_id,
+                                                    expected_revision=payload.expected_revision)
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+
+    @router.post("/context-grants")
+    def create_grant(payload: GrantCreate, request: Request):
+        try:
+            return memory.create_grant_request(owner=_owner(request), **payload.model_dump())
+        except MemoryScopeError as exc:
+            raise _error(exc) from exc
+
+    @router.post("/context-grants/{grant_id}/decision")
+    def decide_grant(grant_id: str, payload: GrantDecision, request: Request):
+        try:
+            return memory.decide_grant(owner=_owner(request), grant_id=grant_id, allow=payload.allow)
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+
+    @router.post("/personal-brief")
+    def write_personal_brief(payload: PersonalBriefWrite, request: Request):
+        owner = _owner(request)
+        scope_kind, _project_id = _scope(owner, payload.session_id)
+        if scope_kind != "personal":
+            raise HTTPException(409, "Personal brief requires a Personal Advisor session")
+        values = payload.model_dump()
+        session_id = values.pop("session_id")
+        brief = PersonalBriefV1(owner_id=owner, **values)
+        source_hash = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
+        try:
+            result = ContinuityStore().write_personal_brief(owner=owner, session_id=session_id, brief=brief, source_hash=source_hash)
+        except Exception as exc:
+            raise _error(exc) from exc
+        return {"revision": result.revision, "brief": brief.to_payload()}
+
+    return router

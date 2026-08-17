@@ -56,5 +56,5 @@ def test_failed_process_replays_its_actionable_safe_detail():
 def test_patch_build_id_invalidates_existing_service_worker_cache():
     index = (ROOT / "static/index.html").read_text()
     worker = (ROOT / "static/sw.js").read_text()
-    assert "20260817upstreammerge1" in index
-    assert "20260817upstreammerge1" in worker
+    assert "20260817g2c1" in index
+    assert "20260817g2c1" in worker

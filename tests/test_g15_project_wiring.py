@@ -283,23 +283,35 @@ def test_project_creation_uses_folder_browser_modal_not_window_prompts():
     assert "name=\"workspace_root\"" in creation
 
 
-def test_project_sidebar_exposes_fresh_thread_and_feedback_export():
+def test_project_sidebar_exposes_fresh_thread_without_feedback_export_clutter():
     source = open("static/js/sessions.js", encoding="utf-8").read()
 
     assert "/api/g1/projects/${encodeURIComponent(project.id)}/fork" in source
-    assert "/api/g1/projects/${encodeURIComponent(project.id)}/evaluation" in source
     assert "New project thread · shared brief, fresh transcript" in source
+    assert "Export Qwen feedback" not in source
 
 
-def test_qwen_answers_expose_all_feedback_ratings_and_optional_note():
+def test_chats_header_has_a_stable_regular_chat_action_and_project_creation_stays_in_projects():
+    index = open("static/index.html", encoding="utf-8").read()
+    app = open("static/app.js", encoding="utf-8").read()
+    sessions = open("static/js/sessions.js", encoding="utf-8").read()
+    styles = open("static/style.css", encoding="utf-8").read()
+
+    assert 'id="chats-new-chat-btn"' in index
+    assert 'id="companion-new-project-btn"' not in index
+    assert "[sidebarNewChatBtn, chatsNewChatBtn]" in app
+    assert "await _handleNewChatAction()" in app
+    assert "newProject.textContent = '+ New project'" in sessions
+    assert "window.__odysseusCreateCompanionProject?.()" in sessions
+    assert ".section-header-flex:hover .chats-manage-btn .list-item-plus-label" in styles
+    assert "opacity: 0.58 !important" in styles
+
+
+def test_qwen_feedback_api_is_not_rendered_as_persistent_message_clutter():
     renderer = open("static/js/chatRenderer.js", encoding="utf-8").read()
-    feedback = renderer[renderer.index("function appendQwenFeedback"):renderer.index("export function createMsgFooter")]
 
-    assert "['helpful', 'Helpful']" in feedback
-    assert "['wrong', 'Wrong']" in feedback
-    assert "['unsafe', 'Unsafe']" in feedback
-    assert "Optional note" in feedback
-    assert "fetch('/api/g1/feedback'" in feedback
+    assert "function appendQwenFeedback" not in renderer
+    assert "qwen-feedback" not in renderer
 
 
 def test_message_fork_uses_fresh_project_thread_for_project_scopes():

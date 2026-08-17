@@ -2067,8 +2067,6 @@ function initializeEventListeners() {
     nameInput.focus();
   };
   window.__odysseusCreateCompanionProject = createCompanionProject;
-  const newProjectBtn = el('companion-new-project-btn');
-  if (newProjectBtn) newProjectBtn.addEventListener('click', createCompanionProject);
   try { workspaceModule.initWorkspace(); } catch (_) {}
 
   // Document editor toggle (special: uses module panel, not a checkbox)
@@ -3473,12 +3471,14 @@ function initializeEventListeners() {
   }
 
   const sidebarNewChatBtn = el('sidebar-new-chat-btn');
-  if (sidebarNewChatBtn) {
-    sidebarNewChatBtn.addEventListener('click', async (e) => {
+  const chatsNewChatBtn = el('chats-new-chat-btn');
+  [sidebarNewChatBtn, chatsNewChatBtn].forEach(newChatBtn => {
+    if (!newChatBtn) return;
+    newChatBtn.addEventListener('click', async (e) => {
       if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
       await _handleNewChatAction();
     });
-  }
+  });
 
   // Delete session button on icon rail
   const railDelete = el('rail-delete-session');

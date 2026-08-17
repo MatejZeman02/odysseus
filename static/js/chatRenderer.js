@@ -1912,45 +1912,6 @@ function _trackAction(id) {
   localStorage.setItem(_ACTION_RECENTS_KEY, JSON.stringify(recent));
 }
 
-function appendQwenFeedback(msgElement, metadata) {
-  if (!metadata || (metadata.harness !== 'qwen' && !metadata.qwen_read_only)) return;
-  const panel = document.createElement('div'); panel.className = 'qwen-feedback';
-  panel.setAttribute('aria-label', 'Rate this Qwen answer');
-  const prompt = document.createElement('span'); prompt.className = 'qwen-feedback-prompt'; prompt.textContent = 'Was this answer';
-  const choices = document.createElement('span'); choices.className = 'qwen-feedback-choices';
-  const note = document.createElement('input');
-  note.type = 'text'; note.className = 'qwen-feedback-note'; note.maxLength = 2000;
-  note.name = `qwen_feedback_note_${msgElement.dataset.dbId || 'pending'}`;
-  note.setAttribute('aria-label', 'Optional feedback note'); note.placeholder = 'Optional note';
-  note.value = metadata.g1_feedback?.note || '';
-  const status = document.createElement('span'); status.className = 'qwen-feedback-status'; status.setAttribute('aria-live', 'polite');
-  let selected = metadata.g1_feedback?.rating || '';
-  const buttons = new Map();
-  const paint = () => buttons.forEach((button, rating) => {
-    button.classList.toggle('active', rating === selected);
-    button.setAttribute('aria-pressed', String(rating === selected));
-  });
-  const save = async (rating) => {
-    const messageId = msgElement.dataset.dbId;
-    if (!messageId) { status.textContent = 'Reload once before rating'; return; }
-    selected = rating || selected; paint(); status.textContent = 'Saving…';
-    try {
-      const response = await fetch('/api/g1/feedback', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message_id: messageId, rating: selected, note: note.value.trim() }) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || 'Feedback could not be saved');
-      status.textContent = 'Saved';
-    } catch (error) { status.textContent = error.message || 'Save failed'; }
-  };
-  for (const [rating, label] of [['helpful', 'Helpful'], ['wrong', 'Wrong'], ['unsafe', 'Unsafe']]) {
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'qwen-feedback-choice';
-    button.textContent = label; button.addEventListener('click', () => save(rating)); buttons.set(rating, button); choices.appendChild(button);
-  }
-  const noteSave = document.createElement('button'); noteSave.type = 'button'; noteSave.className = 'qwen-feedback-save'; noteSave.textContent = 'Save note';
-  noteSave.addEventListener('click', () => selected ? save(selected) : (status.textContent = 'Choose a rating first'));
-  paint(); panel.append(prompt, choices, note, noteSave, status); msgElement.appendChild(panel);
-}
-
 /**
  * Create a footer row for an AI message with timestamp and action buttons.
  */
@@ -3255,7 +3216,6 @@ export function addMessage(role, content, modelName, metadata) {
       // history reloads need this assignment).
       if (metadata?.memories_used?.length) wrap._memoriesUsed = metadata.memories_used;
       wrap.appendChild(createMsgFooter(wrap));
-      appendQwenFeedback(wrap, metadata);
       if (metadata) displayMetrics(wrap, metadata);
     } else {
       // Add timestamp to user header (like AI messages)

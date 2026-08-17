@@ -40,12 +40,16 @@ function _syncCompanionScopeBanner(meta) {
   const banner = document.getElementById('companion-scope-banner');
   const title = document.getElementById('companion-scope-title');
   const detail = document.getElementById('companion-scope-detail');
+  const contextButton = document.getElementById('companion-context-btn');
+  const artifactsButton = document.getElementById('companion-artifacts-btn');
   if (!banner || !title || !detail) return;
   const scope = meta?.scope_kind;
   if (!['project', 'personal', 'computer'].includes(scope)) {
     banner.hidden = true;
     title.textContent = '';
     detail.textContent = '';
+    if (contextButton) contextButton.hidden = true;
+    if (artifactsButton) artifactsButton.hidden = true;
     return;
   }
   if (scope === 'project') {
@@ -64,6 +68,77 @@ function _syncCompanionScopeBanner(meta) {
     detail.textContent = 'Native · Qwen coming next';
   }
   banner.hidden = false;
+  const supportsMemory = scope !== 'computer';
+  if (contextButton) {
+    contextButton.hidden = !supportsMemory;
+    contextButton.onclick = () => openCompanionMemory(meta, 'context');
+  }
+  if (artifactsButton) {
+    artifactsButton.hidden = !supportsMemory;
+    artifactsButton.onclick = () => openCompanionMemory(meta, 'artifacts');
+  }
+}
+
+async function openCompanionMemory(meta, initialTab = 'context') {
+  if (!meta?.id) return;
+  let payload;
+  try {
+    const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}`, {credentials: 'same-origin', cache: 'no-store'});
+    payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || 'Could not load Companion memory');
+  } catch (error) { uiModule.showToast?.(error.message || 'Could not load Companion memory', 2600); return; }
+  document.getElementById('companion-memory-modal')?.remove();
+  const esc = uiModule.esc || ((text) => String(text));
+  const modal = document.createElement('div'); modal.id = 'companion-memory-modal'; modal.className = 'modal';
+  const brief = payload.personal_brief || payload.project_brief || {};
+  const checkpoint = payload.thread_checkpoint || {};
+  const artifacts = payload.artifacts || [];
+  modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
+    <div class="modal-header"><h4 id="companion-memory-title">${esc(payload.scope_kind === 'personal' ? 'Personal memory' : 'Project memory')}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
+    <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button><button type="button" data-tab="artifacts">Artifacts</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
+    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
+    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${payload.scope_kind === 'personal' ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat.' : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.'}</p><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-new-artifact">New Markdown artifact</button>' : ''}</section>
+    ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
+  </div>`;
+  const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
+  const show = (tab) => modal.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.panel !== tab));
+  modal.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => show(button.dataset.tab)); show(initialTab);
+  modal.querySelectorAll('.companion-artifact-row').forEach(button => button.onclick = async () => {
+    const response = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(button.dataset.id)}`, {credentials: 'same-origin'});
+    const item = await response.json(); if (!response.ok) { uiModule.showToast?.(item.detail || 'Could not open artifact'); return; }
+    const editor = document.createElement('textarea'); editor.className = 'companion-artifact-editor'; editor.value = item.content || '';
+    const save = document.createElement('button'); save.textContent = 'Save revision';
+    button.replaceWith(editor, save); save.onclick = async () => {
+      const result = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: item.path, content: editor.value, expected_revision: item.revision})});
+      if (!result.ok) { const err = await result.json(); uiModule.showToast?.(err.detail || 'Could not save artifact'); return; }
+      close(); openCompanionMemory(meta, 'artifacts');
+    };
+  });
+  modal.querySelector('.companion-new-artifact')?.addEventListener('click', () => {
+    const row = document.createElement('div'); row.className = 'companion-artifact-create'; row.innerHTML = '<input placeholder="drafts/love-letter.md"><textarea placeholder="Write the Markdown draft…"></textarea><button type="button">Save</button>';
+    modal.querySelector('.companion-artifact-list').appendChild(row); row.querySelector('button').onclick = async () => {
+      const [path, content] = row.querySelectorAll('input, textarea'); const response = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
+      if (!response.ok) { const err = await response.json(); uiModule.showToast?.(err.detail || 'Could not save artifact'); return; } close(); openCompanionMemory(meta, 'artifacts');
+    };
+  });
+  modal.querySelector('.companion-request-grant')?.addEventListener('click', async () => {
+    const project = modal.querySelector('.companion-grant-project')?.value; const purpose = modal.querySelector('.companion-grant-purpose')?.value;
+    const response = await fetch('/api/companion/context-grants', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({personal_session_id: meta.id, project_id: project, purpose})});
+    const result = await response.json(); uiModule.showToast?.(response.ok ? 'Project access request created — allow it once when prompted.' : (result.detail || 'Could not request access'), 3200);
+    if (response.ok) { close(); openCompanionMemory(meta, 'projects'); }
+  });
+  modal.querySelectorAll('.companion-grant-card button').forEach(button => button.addEventListener('click', async () => {
+    const card = button.closest('[data-grant]'); const response = await fetch(`/api/companion/context-grants/${encodeURIComponent(card.dataset.grant)}/decision`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({allow: button.dataset.decision === 'allow'})});
+    const result = await response.json(); if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not decide project access'); return; }
+    close(); openCompanionMemory(meta, 'projects');
+  }));
+  modal.querySelector('.companion-edit-brief')?.addEventListener('click', () => {
+    const current = payload.personal_brief || {}; const row = document.createElement('div'); row.className = 'companion-brief-editor'; row.innerHTML = `<textarea>${esc(current.summary || '')}</textarea><button type="button">Save Personal brief</button>`; modal.querySelector('[data-panel="context"]').appendChild(row); row.querySelector('button').onclick = async () => {
+      const response = await fetch('/api/companion/personal-brief', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, summary: row.querySelector('textarea').value})});
+      if (!response.ok) { const err = await response.json(); uiModule.showToast?.(err.detail || 'Could not save Personal brief'); return; } close(); openCompanionMemory(meta, 'context');
+    };
+  });
+  modal.addEventListener('click', event => { if (event.target === modal) close(); }); document.body.appendChild(modal);
 }
 
 function _shouldPreserveStartupComposer(msgInput) {
@@ -1252,17 +1327,6 @@ function _renderSessionListImpl() {
       await loadSessions(); await selectSession(result.id);
       uiModule.showToast?.('New project thread · shared brief, fresh transcript', 2600);
     };
-    const exportProjectFeedback = async (project) => {
-      const response = await fetch(`${API_BASE}/api/g1/projects/${encodeURIComponent(project.id)}/evaluation`, { credentials: 'same-origin' });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) { uiModule.showToast?.(result.detail || 'Could not export feedback', 2600); return; }
-      const blob = new Blob([JSON.stringify(result, null, 2) + '\n'], { type: 'application/json' });
-      const url = URL.createObjectURL(blob); const link = document.createElement('a');
-      link.href = url; link.download = `${String(project.name || 'project').replace(/[^a-z0-9._-]+/gi, '-')}-qwen-feedback.json`;
-      link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-      const counts = result.counts || {};
-      uiModule.showToast?.(`Feedback exported · ${counts.helpful || 0} helpful, ${counts.wrong || 0} wrong, ${counts.unsafe || 0} unsafe`, 3200);
-    };
     const personal = companion.find(s => s.scope_kind === 'personal' && s.is_scope_primary);
     const computer = companion.find(s => s.scope_kind === 'computer' && s.is_scope_primary);
     if (personal) appendHome(personal, 'Personal Advisor');
@@ -1312,13 +1376,10 @@ function _renderSessionListImpl() {
       const thread = document.createElement('button'); thread.type = 'button'; thread.className = 'msg-action-btn';
       thread.title = 'New project thread'; thread.setAttribute('aria-label', `New thread in ${project.name}`); thread.textContent = '+';
       thread.addEventListener('click', (event) => { event.stopPropagation(); createProjectThread(project, home); });
-      const evaluation = document.createElement('button'); evaluation.type = 'button'; evaluation.className = 'msg-action-btn';
-      evaluation.title = 'Export Qwen feedback'; evaluation.setAttribute('aria-label', `Export feedback for ${project.name}`); evaluation.textContent = '⇩';
-      evaluation.addEventListener('click', (event) => { event.stopPropagation(); exportProjectFeedback(project); });
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'msg-action-btn';
       remove.title = 'Delete project'; remove.setAttribute('aria-label', `Delete project ${project.name}`); remove.textContent = '×';
       remove.addEventListener('click', (event) => { event.stopPropagation(); deleteProject(project); });
-      row.append(open, thread, evaluation, remove); _frag.appendChild(row);
+      row.append(open, thread, remove); _frag.appendChild(row);
     });
     orderedSessions = orderedSessions.filter(s => !['personal', 'computer'].includes(s.scope_kind) && !(s.scope_kind === 'project' && s.is_scope_primary));
   }

@@ -9,7 +9,7 @@ from typing import Iterable, Optional
 
 from core.database import ContinuityArtifact, Project, Session as DbSession, SessionLocal
 
-from .contracts import ProjectBriefV1, ResolvedScope, SCOPES, ThreadCheckpointV1
+from .contracts import PersonalBriefV1, ProjectBriefV1, ResolvedScope, SCOPES, ThreadCheckpointV1
 
 
 class ContinuityError(RuntimeError):
@@ -184,6 +184,25 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def write_personal_brief(
+        self, *, owner: str, session_id: str, brief: PersonalBriefV1, source_hash: str,
+        source_through_message_id: Optional[str] = None,
+    ) -> ArtifactWrite:
+        if not source_hash or brief.owner_id != owner:
+            raise ValueError("personal brief requires its owner and a source hash")
+        db = SessionLocal()
+        try:
+            session = self._session(db, owner, session_id)
+            if (session.scope_kind or "general") != "personal":
+                raise ScopeConflictError("personal brief requires a Personal Advisor session")
+            return self._write(db, owner=owner, kind="personal_brief_v1", session_id=session_id,
+                               project_id=None, payload=brief.to_payload(),
+                               source_through_message_id=source_through_message_id, source_hash=source_hash)
+        except Exception:
+            db.rollback(); raise
+        finally:
+            db.close()
+
     def latest_thread_checkpoint(self, *, owner: str, session_id: str) -> Optional[ThreadCheckpointV1]:
         artifact = self._latest(owner=owner, kind="thread_checkpoint_v1", session_id=session_id)
         return ThreadCheckpointV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
@@ -191,6 +210,17 @@ class ContinuityStore:
     def latest_project_brief(self, *, owner: str, project_id: str) -> Optional[ProjectBriefV1]:
         artifact = self._latest(owner=owner, kind="project_brief_v1", project_id=project_id)
         return ProjectBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
+
+    def latest_personal_brief(self, *, owner: str, session_id: str) -> Optional[PersonalBriefV1]:
+        artifact = self._latest(owner=owner, kind="personal_brief_v1", session_id=session_id)
+        return PersonalBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
+
+    def project_catalog(self, *, owner: str) -> list[dict[str, str]]:
+        db = SessionLocal()
+        try:
+            return [{"id": row.id, "name": row.name} for row in db.query(Project).filter(Project.owner == owner).order_by(Project.name.asc())]
+        finally:
+            db.close()
 
     def related_project_brief(self, *, owner: str, home_project_id: str, requested_project_id: str) -> Optional[ProjectBriefV1]:
         db = SessionLocal()

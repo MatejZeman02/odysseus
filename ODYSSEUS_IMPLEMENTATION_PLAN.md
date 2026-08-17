@@ -22,6 +22,9 @@ semantic continuity closure and normal-use stabilization active
 **G2B reviewed-patch implementation:**
 [`ODYSSEUS_G2B_EXECUTION_PLAN.md`](ODYSSEUS_G2B_EXECUTION_PLAN.md)
 
+**G2C scoped-memory and working-artifact plan:**
+[`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md)
+
 **Deferred architecture backlog:**
 [`ODYSSEUS_ARCHITECTURE_BACKLOG.md`](ODYSSEUS_ARCHITECTURE_BACKLOG.md)
 
@@ -50,7 +53,7 @@ Progress labels are deliberately non-temporal:
 | G1.5 Companion homes and Qwen UI trial | **Complete** | Deterministic homes, projects/forks, Qwen streaming/Stop/Process/feedback, native comparison, desktop/mobile audit |
 | Semantic checkpoint and project-brief derivation | **Active** | Production turns currently write cursor-only checkpoints; no production path derives and writes `ProjectBriefV1` |
 | Normal-use stabilization | **Active** | Use real project conversations, record incorrect/unsafe answers and UI failures, fix regressions without broadening authority |
-| AgentMemory provider switch | **Deferred** | No real memory store has been inventoried, migrated, or assigned as the writer |
+| G2C scoped chat memory and working artifacts | **Planned** | Private chat checkpoints, project/personal home memory, permissioned Personal-to-project recall, and revisioned `.artifacts`; provider inventory must precede any writer switch |
 | Computer Help read-only diagnostics | **Deferred** | UI destination exists; Qwen diagnostics and host-read tooling do not |
 | G2A sandboxed project inspection | **Blocked by qualification** | Qwen 0.21.3 Podman shares model/Shell authority and mounts the workspace writable; `project_read` remains enforced pending a separate broker design |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
@@ -430,6 +433,13 @@ Safety rules for the existing AgentMemory installation:
   load without it.
 - [ ] Inventory and back up the owner's existing AgentMemory/native data before
   changing the real writer.
+
+G2C is broader than an AgentMemory provider switch. It must preserve private
+per-chat checkpoints, add a distinct Personal home brief, permit Personal
+Advisor to request narrowly scoped project-memory grants, and add revisioned
+Markdown `.artifacts` for substantial working content. AgentMemory remains a
+rebuildable retrieval index behind those Odysseus-owned records. The detailed
+contract is in [`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md).
 
 ## Qwen Serve adapter
 

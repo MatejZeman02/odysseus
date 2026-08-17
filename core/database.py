@@ -309,6 +309,89 @@ class ContinuityArtifact(TimestampMixin, Base):
         Index("ix_continuity_artifacts_source", "session_id", "kind", "source_through_message_id", "source_hash"),
     )
 
+
+class WorkingArtifact(TimestampMixin, Base):
+    """Revisioned Markdown working content for one Companion scope.
+
+    Personal artifacts are stored in Odysseus private data; project artifacts
+    are metadata mirrors for the project's ``.artifacts`` namespace and are
+    only mutated through the reviewed patch boundary.
+    """
+    __tablename__ = "working_artifacts"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    scope_kind = Column(String, nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
+    path = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=False, default="")
+    content = Column(EncryptedText, nullable=False)
+    content_hash = Column(String, nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default="active", index=True)
+    source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index("ix_working_artifacts_owner_scope_path", "owner", "scope_kind", "project_id", "path"),
+    )
+
+
+class WorkingArtifactRevision(Base):
+    """Immutable prior bytes for diff/history/Undo."""
+    __tablename__ = "working_artifact_revisions"
+
+    id = Column(String, primary_key=True, index=True)
+    artifact_id = Column(String, ForeignKey("working_artifacts.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision = Column(Integer, nullable=False)
+    content = Column(EncryptedText, nullable=False)
+    content_hash = Column(String, nullable=False)
+    source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String, nullable=False, default="write")
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False)
+
+    __table_args__ = (Index("ix_working_artifact_revisions_artifact_revision", "artifact_id", "revision", unique=True),)
+
+
+class ContextGrant(TimestampMixin, Base):
+    """Explicit, auditable Personal-to-project context authorization."""
+    __tablename__ = "context_grants"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    personal_session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    purpose = Column(Text, nullable=False)
+    information_classes_json = Column(Text, nullable=False, default="[]")
+    artifact_paths_json = Column(Text, nullable=False, default="[]")
+    request_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String, nullable=False, default="pending", index=True)
+    expires_at = Column(DateTime, nullable=True)
+    used_at = Column(DateTime, nullable=True)
+    decision_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (Index("ix_context_grants_owner_personal_status", "owner", "personal_session_id", "status"),)
+
+
+class ScopedMemoryRecord(TimestampMixin, Base):
+    """Rebuildable, provider-neutral episodic retrieval record.
+
+    It indexes only validated compact artifacts, never raw transcripts or a
+    provider's free-form ``remember`` input.
+    """
+    __tablename__ = "scoped_memory_records"
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    scope_kind = Column(String, nullable=False, index=True)
+    project_id = Column(String, nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)
+    source_kind = Column(String, nullable=False)
+    source_id = Column(String, nullable=False)
+    content = Column(EncryptedText, nullable=False)
+    sensitivity = Column(String, nullable=False, default="normal")
+    expires_at = Column(DateTime, nullable=True)
+    __table_args__ = (Index("ix_scoped_memory_scope_source", "owner", "scope_kind", "project_id", "source_kind", "source_id", unique=True),)
+
 class ChatMessage(Base):
     """
     SQLAlchemy model for ChatMessage table.
@@ -2146,6 +2229,31 @@ def _migrate_seed_email_account():
             db.close()
 
 
+# Preserve the initial G2C pre-release table spelling if a user exercised it
+# before the public terminology was corrected from British ``artefact`` to
+# American ``artifact``. This is a data-preserving SQLite rename, not a reset.
+def _migrate_artifact_table_spelling():
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "working_artefacts" in tables and "working_artifacts" not in tables:
+            conn.execute("ALTER TABLE working_artefacts RENAME TO working_artifacts")
+        if "working_artefact_revisions" in tables and "working_artifact_revisions" not in tables:
+            conn.execute("ALTER TABLE working_artefact_revisions RENAME TO working_artifact_revisions")
+        conn.commit()
+    except Exception as e:
+        logger.warning("artifact table spelling migration failed: %s", e)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
@@ -2156,6 +2264,7 @@ def init_db():
     Should be called when starting the application.
     """
     _migrate_model_endpoints()
+    _migrate_artifact_table_spelling()
     Base.metadata.create_all(bind=engine)
     _migrate_add_continuity_session_columns()
     _migrate_add_g15_session_columns()

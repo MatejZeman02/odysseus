@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
-from .contracts import ContextBundle, ProjectBriefV1, ThreadCheckpointV1
+from .contracts import ContextBundle, PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
 from .store import ContinuityStore
 
 
@@ -31,6 +32,27 @@ def transcript_fingerprint(messages: Iterable[Any]) -> str:
     normalized = [_message_dict(message) for message in messages]
     encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def derive_checkpoint_fields(source: tuple[dict[str, Any], ...]) -> Mapping[str, Any]:
+    """Conservative local semantic checkpoint derivation.
+
+    This intentionally does not call a provider while a user is waiting for a
+    chat answer.  It produces a useful objective/question/action seed from
+    durable messages; richer approval remains an explicit future writer.
+    """
+    users = [str(item.get("content") or "").strip() for item in source if item.get("role") == "user"]
+    assistants = [str(item.get("content") or "").strip() for item in source if item.get("role") == "assistant"]
+    objective = users[-1][:500] if users else ""
+    questions = [text[:300] for text in users[-3:] if "?" in text][-3:]
+    actions = [text[:300] for text in users[-3:] if any(word in text.lower() for word in ("please", "create", "plan", "write", "review", "fix"))][-3:]
+    decisions = [text[:300] for text in assistants[-2:] if text][:2]
+    return {
+        "objective": objective,
+        "open_questions": questions,
+        "next_actions": actions,
+        "accepted_decisions": decisions,
+    }
 
 
 def _tail_start(messages: list[dict[str, Any]], tail_count: int) -> int:
@@ -77,7 +99,7 @@ class CheckpointCompactor:
         source_ids = [str(item["metadata"].get("_db_id") or "") for item in source]
         if not all(source_ids):
             raise ValueError("checkpoint source messages require durable _db_id metadata")
-        values = dict(derive(tuple(source)) if derive else {})
+        values = dict(derive(tuple(source)) if derive else derive_checkpoint_fields(tuple(source)))
         scope = self.store.resolve_scope(owner=owner, session_id=session_id)
         checkpoint = ThreadCheckpointV1(
             session_id=session_id,
@@ -95,6 +117,42 @@ class CheckpointCompactor:
             source_hash=transcript_fingerprint(source),
         )
         self.store.write_thread_checkpoint(owner=owner, checkpoint=checkpoint)
+        try:
+            from src.scoped_memory import ScopedMemoryIndex
+            ScopedMemoryIndex().index(owner=owner, scope_kind=scope.scope_kind, project_id=scope.project_id,
+                                      session_id=session_id, source_kind="thread_checkpoint",
+                                      source_id=checkpoint.source_hash,
+                                      content="\n".join([checkpoint.objective, *checkpoint.accepted_decisions, *checkpoint.open_questions, *checkpoint.next_actions]))
+        except Exception:
+            pass
+        # Home briefs are compact shared state, never transcript replacement.
+        # Projects can safely refresh their shared brief from a checkpoint;
+        # Personal briefs are seeded once and remain owner-inspectable/editable
+        # rather than silently overwriting an owner-curated summary.
+        if scope.project_id:
+            self.store.write_project_brief(
+                owner=owner,
+                brief=ProjectBriefV1(
+                    project_id=scope.project_id, summary=checkpoint.objective,
+                    derived_working_state=checkpoint.derived_working_state,
+                    accepted_decisions=checkpoint.accepted_decisions,
+                    proposals=checkpoint.proposals, open_questions=checkpoint.open_questions,
+                    current_plans=checkpoint.next_actions, source_refs=checkpoint.artifact_refs,
+                    source_session_ids=[session_id],
+                ), source_hash=checkpoint.source_hash,
+                source_through_message_id=checkpoint.source_through_message_id,
+            )
+        elif scope.scope_kind == "personal" and not self.store.latest_personal_brief(owner=owner, session_id=session_id):
+            self.store.write_personal_brief(
+                owner=owner, session_id=session_id,
+                brief=PersonalBriefV1(owner_id=owner, summary=checkpoint.objective,
+                                      ongoing_goals=checkpoint.next_actions,
+                                      open_questions=checkpoint.open_questions,
+                                      artifact_refs=checkpoint.artifact_refs,
+                                      source_refs=checkpoint.source_message_ids),
+                source_hash=checkpoint.source_hash,
+                source_through_message_id=checkpoint.source_through_message_id,
+            )
         return checkpoint
 
 
@@ -121,6 +179,7 @@ class ContextCompiler:
         tail = tuple(messages[_tail_start(messages, self.tail_count):])
         checkpoint = self.store.latest_thread_checkpoint(owner=owner, session_id=session_id)
         primary = self.store.latest_project_brief(owner=owner, project_id=scope.project_id) if scope.project_id else None
+        personal = self.store.latest_personal_brief(owner=owner, session_id=session_id) if scope.scope_kind == "personal" else None
         related: list[ProjectBriefV1] = []
         if scope.project_id:
             for project_id in dict.fromkeys(related_project_ids):
@@ -130,12 +189,75 @@ class ContextCompiler:
                 if brief:
                     related.append(brief)
         hits = tuple(dict(hit) for hit in episodic_hits)
+        if not hits and scope.scope_kind in {"personal", "project"}:
+            try:
+                from src.scoped_memory import ScopedMemoryIndex
+                hits = tuple(ScopedMemoryIndex().recall(owner=owner, scope_kind=scope.scope_kind,
+                                                        project_id=scope.project_id, query=request))
+            except Exception:
+                hits = ()
+        working_artifacts: tuple[dict[str, Any], ...] = ()
+        context_grants: tuple[dict[str, Any], ...] = ()
+        if scope.scope_kind in {"personal", "project"}:
+            # This service is DB-only and failure is non-fatal: exact
+            # transcript/checkpoint continuity remains available.
+            try:
+                from src.companion_memory import CompanionMemoryStore
+                memory = CompanionMemoryStore()
+                working_artifacts = tuple(memory.list_artifacts(
+                    owner=owner, scope_kind=scope.scope_kind, project_id=scope.project_id,
+                ))
+                if scope.scope_kind == "personal":
+                    context_grants = tuple(memory.approved_grants(owner=owner, personal_session_id=session_id))
+                    # An approved grant exposes only a project brief and its
+                    # explicitly selected artifact identities, never raw chat.
+                    for grant in context_grants:
+                        brief = self.store.latest_project_brief(owner=owner, project_id=grant["project_id"])
+                        if brief:
+                            related.append(brief)
+                        requested_paths = set(grant.get("artifact_paths") or [])
+                        if requested_paths:
+                            allowed = memory.list_artifacts(owner=owner, scope_kind="project", project_id=grant["project_id"])
+                            working_artifacts += tuple(item for item in allowed if item.get("path") in requested_paths)
+                    # A direct owner instruction such as "check Dust project
+                    # memory" is itself approval for this request.  Match a
+                    # project name only when the request explicitly asks for
+                    # memory/brief/artifacts; casual mention never mounts it.
+                    lowered = request.casefold()
+                    for project in self.store.project_catalog(owner=owner):
+                        name = project["name"].casefold()
+                        direct = (name in lowered and re.search(r"\b(memory|brief|artifacts?|context)\b", lowered)
+                                  and re.search(r"\b(check|consult|read|look|use|show)\b", lowered))
+                        if direct and project["id"] not in {brief.project_id for brief in related}:
+                            brief = self.store.latest_project_brief(owner=owner, project_id=project["id"])
+                            if brief:
+                                related.append(brief)
+                                context_grants += ({"id": "direct-owner-request", "project_id": project["id"], "purpose": "Direct owner request for this turn"},)
+                    # Approval is deliberately for one compiled request. The
+                    # manifest keeps the audit reference for this turn even
+                    # though the following Personal turn receives no mount.
+                    memory.consume_grants(
+                        owner=owner, personal_session_id=session_id,
+                        grant_ids=[grant["id"] for grant in context_grants],
+                    )
+            except Exception:
+                working_artifacts, context_grants = (), ()
         manifest = {
             "scope": {"kind": scope.scope_kind, "project_id": scope.project_id},
             "thread_checkpoint": bool(checkpoint),
             "primary_project_brief": bool(primary),
+            "personal_brief": bool(personal),
             "related_project_ids": [brief.project_id for brief in related],
             "episodic_hit_count": len(hits),
+            "working_artifacts": [{"id": item["id"], "path": item["path"], "revision": item["revision"]} for item in working_artifacts],
+            "context_grants": [{"id": item["id"], "project_id": item["project_id"]} for item in context_grants],
+            "project_catalog": self.store.project_catalog(owner=owner) if scope.scope_kind == "personal" else [],
             "transcript_tail_message_ids": [item["metadata"].get("_db_id") for item in tail],
         }
-        return ContextBundle(companion_profile, scope, request, checkpoint, primary, tuple(related), hits, tail, manifest)
+        return ContextBundle(
+            companion_profile=companion_profile, scope=scope, request=request,
+            thread_checkpoint=checkpoint, primary_project_brief=primary,
+            related_project_briefs=tuple(related), personal_brief=personal,
+            working_artifacts=working_artifacts, context_grants=context_grants,
+            episodic_hits=hits, transcript_tail=tail, manifest=manifest,
+        )

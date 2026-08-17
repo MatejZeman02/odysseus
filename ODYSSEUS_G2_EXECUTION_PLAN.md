@@ -19,9 +19,10 @@ every capability:
   efficient read-only shell inspection for project Qwen.
 - **G2B — Reviewed Project Patches:** propose, review, approve, apply, verify,
   and roll back project changes.
-- **G2C — AgentMemory Scoped Recall:** inventory and introduce durable memory
-  with explicit owner, home, project, and thread boundaries.
-	- Maybe add fork and merge conversations and Artefacts.
+- **G2C — Scoped Chat Memory and Working Artifacts:** preserve private chat
+  memory, add home-scoped recall, permissioned Personal-to-project context,
+  and revisioned Markdown `.artifacts`; see
+  [`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md).
 - **G2D — Computer Help Diagnostics:** read-only host diagnostics under a
   separately designed authority and approval model.
 

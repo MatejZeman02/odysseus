@@ -3,6 +3,7 @@
 from .contracts import (
     ContextBundle,
     ProjectBriefV1,
+    PersonalBriefV1,
     ResolvedScope,
     ThreadCheckpointV1,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "ContextBundle",
     "ContinuityStore",
     "ProjectBriefV1",
+    "PersonalBriefV1",
     "ResolvedScope",
     "ScopeConflictError",
     "ThreadCheckpointV1",

@@ -246,9 +246,9 @@
        real request is discarded and the font fetched a second time. -->
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-Regular.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
-  <meta name="odysseus-build" content="20260817upstreammerge1">
-  <link rel="stylesheet" href="/static/style.css?v=20260817upstreammerge1">
-  <link rel="modulepreload" href="/static/app.js?v=20260817upstreammerge1">
+  <meta name="odysseus-build" content="20260817g2c1">
+  <link rel="stylesheet" href="/static/style.css?v=20260817g2c1">
+  <link rel="modulepreload" href="/static/app.js?v=20260817g2c1">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -776,9 +776,8 @@
         <div class="section-header-flex">
           <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
           <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
-            <button type="button" class="section-header-btn" id="companion-new-project-btn" title="New Companion project">+</button>
             <button type="button" class="section-header-btn list-item-plus-btn chats-manage-btn" id="chats-library-btn" title="Manage Chats (Library)">
-              <span aria-hidden="true" style="display:inline-block;width:13px;height:13px;"></span>
+              <svg class="list-item-plus-icon" aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               <span class="list-item-plus-label">manage</span>
             </button>
             <button type="button" class="section-header-btn" id="session-sort-btn" title="Sort sessions">
@@ -791,6 +790,7 @@
                 <path d="M12 2a10 10 0 0 1 10 10" />
               </svg>
             </button>
+            <button type="button" class="section-header-btn chats-new-chat-btn" id="chats-new-chat-btn" title="New chat" aria-label="New chat">+</button>
             <div id="session-sort-dropdown" class="dropdown sort-dropdown" style="display:none;">
               <div class="dropdown-item sort-option sort-dropdown-item" data-sort="active">Last Active</div>
               <div class="dropdown-item sort-option sort-dropdown-item" data-sort="newest">Newest First</div>
@@ -1039,6 +1039,8 @@
     <div id="companion-scope-banner" class="companion-scope-banner" role="status" aria-live="polite" hidden>
       <strong id="companion-scope-title"></strong>
       <span id="companion-scope-detail"></span>
+      <button type="button" id="companion-context-btn" class="companion-scope-action" hidden>Context</button>
+      <button type="button" id="companion-artifacts-btn" class="companion-scope-action" hidden>Artifacts</button>
     </div>
 
     <!-- Unified chat input bar -->
@@ -2591,11 +2593,11 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260815approvalsave1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260817upstreammerge1"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260817g2c1"></script>  <!-- app.js must be LAST -->
   <script type="module" src="/static/js/init.js?v=20260715freshroot3"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">
-window.__ODYSSEUS_BUILD_ID='20260817upstreammerge1';
+window.__ODYSSEUS_BUILD_ID='20260817g2c1';
 document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
@@ -2613,7 +2615,7 @@ if('serviceWorker' in navigator){
     button.addEventListener('click',()=>location.reload());
     banner.append(text,button);document.body.appendChild(banner);
   });
-  navigator.serviceWorker.register('/static/sw.js?v=20260817upstreammerge1',{updateViaCache:'none'})
+  navigator.serviceWorker.register('/static/sw.js?v=20260817g2c1',{updateViaCache:'none'})
     .then(reg=>reg.update()).catch(()=>{});
 }
 </script>

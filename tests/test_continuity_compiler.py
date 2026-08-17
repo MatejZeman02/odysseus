@@ -126,7 +126,11 @@ def test_project_fork_receives_shared_brief_but_not_primary_raw_tail_or_checkpoi
     assert "Dust final crystal" not in str(fork.transcript_tail)
     assert personal.primary_project_brief is None
     assert personal.related_project_briefs == ()
-    assert "Dust" not in str(personal.manifest)
+    # G2C exposes only an owner-scoped project *catalog* (name/ID) so the
+    # Personal Advisor can ask for access. No project brief or transcript is
+    # mounted without a grant.
+    assert personal.manifest["project_catalog"] == [{"id": project, "name": "Dust"}]
+    assert "Dust conflict" not in str(personal.manifest)
     assert computer.primary_project_brief is None
     assert computer.related_project_briefs == ()
     assert "Dust" not in str(computer.manifest)
