@@ -199,6 +199,12 @@ class QwenSupervisor:
         pending_message_parts: list[str] = []
         terminal: Optional[dict] = None
         seen_event_ids: set[str] = set()
+        # ACP sends the arguments on the initial tool_call, then commonly
+        # sends a terminal tool_call_update containing only toolCallId and
+        # status.  Preserve the safe call envelope here so completion updates
+        # describe the same visible operation instead of creating an empty,
+        # unmatched row that is later rendered as a failure.
+        tool_calls_by_id: dict[str, dict] = {}
 
         async def flush_commentary() -> None:
             if not pending_message_parts:
@@ -232,6 +238,7 @@ class QwenSupervisor:
                             update_kind = update.get("sessionUpdate")
                             if update_kind in {"tool_call", "tool_call_update"}:
                                 await flush_commentary()
+                                update = self._coalesce_tool_update(update, tool_calls_by_id)
                             progress = self._sanitize_progress_update(update)
                             if progress:
                                 await self._emit_progress(progress_callback, progress)
@@ -312,6 +319,32 @@ class QwenSupervisor:
         text = re.sub(r"\bBearer\s+[A-Za-z0-9._~-]{8,}", "Bearer [redacted]", text, flags=re.I)
         text = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}", "[redacted key]", text)
         return text if len(text) <= 800 else f"{text[:799]}✂"
+
+    @staticmethod
+    def _coalesce_tool_update(update: dict, calls_by_id: dict[str, dict]) -> dict:
+        """Join sparse ACP call updates without exposing the opaque call ID."""
+        if not isinstance(update, dict):
+            return update
+        call_id = str(update.get("toolCallId") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", call_id):
+            return update
+
+        previous = calls_by_id.get(call_id, {})
+        merged = dict(previous)
+        merged.update(update)
+        previous_meta = previous.get("_meta") if isinstance(previous.get("_meta"), dict) else {}
+        current_meta = update.get("_meta") if isinstance(update.get("_meta"), dict) else {}
+        if previous_meta or current_meta:
+            merged["_meta"] = {**previous_meta, **current_meta}
+        # An absent or skeletal rawInput in an update must not erase the
+        # arguments that gave the operation its path/query identity.
+        current_input = update.get("rawInput")
+        if not isinstance(current_input, dict) or not current_input:
+            previous_input = previous.get("rawInput")
+            if isinstance(previous_input, dict):
+                merged["rawInput"] = previous_input
+        calls_by_id[call_id] = merged
+        return merged
 
     @staticmethod
     def _sanitize_progress_update(update: dict) -> Optional[dict]:

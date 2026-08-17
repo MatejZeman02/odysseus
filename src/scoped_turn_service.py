@@ -40,7 +40,10 @@ QWEN_TURN_ERROR_CODES = frozenset({
 
 
 _SAFE_TURN_FAILURE_DETAILS = {
-    "turn_timeout": "Qwen did not finish within the turn limit. No project files were changed; try a smaller request.",
+    "turn_timeout": (
+        "Qwen kept inspecting but did not produce a final answer before the turn limit. "
+        "The request was not necessarily too large, and no project files were changed."
+    ),
     "workspace_changed": (
         "Project files changed while Qwen was inspecting them, so the result was discarded and no patch was applied. "
         "Wait for editors or Git tasks to finish, then try again."
@@ -138,6 +141,14 @@ def render_context_bundle(bundle: ContextBundle) -> str:
         "answer and end the turn; do not invoke another tool after drafting the final answer. Do not modify files, run "
         "shell commands, or invent missing evidence."
     )
+    parts.append(
+        "# Efficient bounded inspection\n"
+        "For a focused factual question, begin with one broad case-insensitive regex search that combines obvious terms "
+        "and language or word-stem variants, then read only the most relevant matching files. A no-match is useful evidence: "
+        "do not retry a sequence of tiny spelling, translation, plural, or wildcard variations. Once you have found and read "
+        "a directly relevant source, answer from it unless one additional source is genuinely needed to resolve a conflict. "
+        "Prefer completing a useful answer over exhaustive inspection."
+    )
     return "\n\n".join(parts)
 
 
@@ -230,7 +241,7 @@ class ReadOnlyScopedTurnService:
                         await result
                 return
             safe_event = {
-                key: str(event.get(key, ""))[:2100]
+                key: ("" if event.get(key) is None else str(event.get(key)))[:2100]
                 for key in ("operation", "tool", "path", "label", "command", "status")
             }
             # Qwen commonly emits a call and a later call-update.  They are

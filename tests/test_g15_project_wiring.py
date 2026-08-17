@@ -786,7 +786,10 @@ def test_qwen_timeout_error_is_specific_and_safe():
     )
     assert payload == {
         "code": "turn_timeout",
-        "detail": "Qwen did not finish within the turn limit. No project files were changed; try a smaller request.",
+        "detail": (
+            "Qwen kept inspecting but did not produce a final answer before the turn limit. "
+            "The request was not necessarily too large, and no project files were changed."
+        ),
     }
     assert "provider-secret" not in repr(payload)
 

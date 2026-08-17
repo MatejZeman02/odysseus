@@ -26,6 +26,14 @@ def test_g2a_failure_codes_are_stable_even_while_inspection_is_unavailable():
     assert classify_turn_failure(RuntimeError("command_output_limited: private output")) == "command_output_limited"
 
 
+def test_timeout_message_does_not_blame_an_already_small_request():
+    from src.scoped_turn_service import safe_turn_failure_detail
+
+    detail = safe_turn_failure_detail("turn_timeout")
+    assert "kept inspecting" in detail
+    assert "smaller request" not in detail
+
+
 def test_context_bundle_render_order_is_stable():
     scope = ResolvedScope("alice", "s", "project", "p", "/project")
     checkpoint = ThreadCheckpointV1(session_id="s", project_id="p", source_hash="h")
@@ -40,6 +48,8 @@ def test_context_bundle_render_order_is_stable():
     assert [rendered.index(heading) for heading in headings] == sorted(rendered.index(heading) for heading in headings)
     assert "use the supplied conversation and project context first" in rendered
     assert "do not invoke another tool after drafting the final answer" in rendered
+    assert "one broad case-insensitive regex search" in rendered
+    assert "do not retry a sequence of tiny spelling" in rendered
 
 
 @pytest.mark.asyncio

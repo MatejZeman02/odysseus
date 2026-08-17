@@ -366,6 +366,34 @@ def test_supervisor_sanitizes_qwen_tool_updates_for_the_browser():
     assert QwenSupervisor._sanitize_shell_command('cat /etc/shadow') == ""
 
 
+def test_supervisor_coalesces_sparse_acp_tool_completion_by_call_id():
+    calls = {}
+    initial = QwenSupervisor._coalesce_tool_update({
+        "sessionUpdate": "tool_call", "toolCallId": "call-17",
+        "name": "grep_search", "status": "in_progress",
+        "rawInput": {"path": "/workspace/documents/Enemies.md", "pattern": "fish|ryb"},
+        "_meta": {"toolName": "grep_search"},
+    }, calls)
+    terminal = QwenSupervisor._coalesce_tool_update({
+        "sessionUpdate": "tool_call_update", "toolCallId": "call-17",
+        "status": "completed",
+    }, calls)
+
+    initial_safe = QwenSupervisor._sanitize_progress_update(initial)
+    terminal_safe = QwenSupervisor._sanitize_progress_update(terminal)
+    assert initial_safe["command"] == "Search: 'fish|ryb' documents/Enemies.md"
+    assert terminal_safe["command"] == initial_safe["command"]
+    assert terminal_safe["path"] == initial_safe["path"]
+    assert terminal_safe["status"] == "completed"
+
+
+def test_supervisor_does_not_correlate_invalid_acp_call_ids():
+    calls = {}
+    update = {"sessionUpdate": "tool_call", "toolCallId": "secret/id", "name": "read_file"}
+    assert QwenSupervisor._coalesce_tool_update(update, calls) is update
+    assert calls == {}
+
+
 @pytest.mark.asyncio
 async def test_supervisor_reconnects_from_cursor_without_duplicate_chunks(tmp_path):
     cursors = []
