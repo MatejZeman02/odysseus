@@ -57,6 +57,13 @@ def test_g2c_pre_release_artifact_column_is_renamed(monkeypatch, tmp_path):
     conn.execute(
         "INSERT INTO context_grants (id, artefact_paths_json) VALUES ('grant', '[\"notes.md\"]')"
     )
+    conn.execute(
+        "CREATE TABLE working_artifact_revisions ("
+        "id TEXT PRIMARY KEY, artefact_id TEXT NOT NULL, revision INTEGER NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO working_artifact_revisions (id, artefact_id, revision) VALUES ('revision', 'artifact', 1)"
+    )
     conn.commit()
     conn.close()
 
@@ -66,7 +73,12 @@ def test_g2c_pre_release_artifact_column_is_renamed(monkeypatch, tmp_path):
     conn = sqlite3.connect(path)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(context_grants)")}
     value = conn.execute("SELECT artifact_paths_json FROM context_grants WHERE id = 'grant'").fetchone()[0]
+    revision_columns = {row[1] for row in conn.execute("PRAGMA table_info(working_artifact_revisions)")}
+    revision_value = conn.execute("SELECT artifact_id FROM working_artifact_revisions WHERE id = 'revision'").fetchone()[0]
     conn.close()
     assert "artifact_paths_json" in columns
     assert "artefact_paths_json" not in columns
     assert value == '["notes.md"]'
+    assert "artifact_id" in revision_columns
+    assert "artefact_id" not in revision_columns
+    assert revision_value == "artifact"

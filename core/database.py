@@ -2246,6 +2246,15 @@ def _migrate_artifact_table_spelling():
             conn.execute("ALTER TABLE working_artefacts RENAME TO working_artifacts")
         if "working_artefact_revisions" in tables and "working_artifact_revisions" not in tables:
             conn.execute("ALTER TABLE working_artefact_revisions RENAME TO working_artifact_revisions")
+        if "working_artifact_revisions" in tables:
+            revision_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(working_artifact_revisions)")
+            }
+            if "artefact_id" in revision_columns and "artifact_id" not in revision_columns:
+                conn.execute(
+                    "ALTER TABLE working_artifact_revisions "
+                    "RENAME COLUMN artefact_id TO artifact_id"
+                )
         # The first private beta also used the old spelling for the optional
         # artifact-path allowlist on grants. ``create_all`` never alters an
         # existing table, so leave its data intact and rename the column here.

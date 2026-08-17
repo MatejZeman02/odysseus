@@ -122,6 +122,12 @@ def setup_companion_memory_routes() -> APIRouter:
             return memory.write_personal_artifact(owner=_owner(request), **payload.model_dump())
         except (MemoryScopeError, ArtifactConflict) as exc:
             raise _error(exc) from exc
+        except SQLAlchemyError as exc:
+            logger.exception("Companion artifact storage failed for session %s", payload.session_id)
+            raise HTTPException(
+                503,
+                "Artifact storage needs a one-time update. Restart Odysseus, then try again.",
+            ) from exc
 
     @router.get("/artefacts/personal/{artifact_id}", include_in_schema=False)
     @router.get("/artifacts/personal/{artifact_id}")
