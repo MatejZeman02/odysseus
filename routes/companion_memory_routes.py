@@ -3,15 +3,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from core.database import Project, Session as DbSession, SessionLocal
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.continuity.contracts import PersonalBriefV1
 from src.continuity.store import ContinuityStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class PersonalArtifactWrite(BaseModel):
@@ -77,23 +82,38 @@ def setup_companion_memory_routes() -> APIRouter:
 
     @router.get("/memory/sessions/{session_id}")
     def memory_context(session_id: str, request: Request):
-        owner = _owner(request); scope_kind, project_id = _scope(owner, session_id)
-        if scope_kind not in {"personal", "project"}:
-            raise HTTPException(409, "Memory context is available only for Companion homes")
-        store = ContinuityStore()
-        checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
-        project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
-        personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
-        return {
-            "scope_kind": scope_kind, "project_id": project_id,
-            "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
-            "project_brief": project_brief.to_payload() if project_brief else None,
-            "personal_brief": personal_brief.to_payload() if personal_brief else None,
-            "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
-            "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
-            "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
-            "project_catalog": store.project_catalog(owner=owner) if scope_kind == "personal" else [],
-        }
+        try:
+            owner = _owner(request); scope_kind, project_id = _scope(owner, session_id)
+            if scope_kind not in {"personal", "project"}:
+                raise HTTPException(409, "Memory context is available only for Companion homes")
+            store = ContinuityStore()
+            checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
+            project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
+            personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
+            return {
+                "scope_kind": scope_kind, "project_id": project_id,
+                "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
+                "project_brief": project_brief.to_payload() if project_brief else None,
+                "personal_brief": personal_brief.to_payload() if personal_brief else None,
+                "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
+                "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
+                "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
+                "project_catalog": store.project_catalog(owner=owner) if scope_kind == "personal" else [],
+            }
+        except HTTPException:
+            raise
+        except SQLAlchemyError as exc:
+            logger.exception("Companion memory storage failed for session %s", session_id)
+            raise HTTPException(
+                503,
+                "Companion memory storage needs a one-time update. Restart Odysseus, then try again.",
+            ) from exc
+        except Exception as exc:
+            logger.exception("Companion memory could not load for session %s", session_id)
+            raise HTTPException(
+                500,
+                "Companion memory could not be loaded. Check the server log for details.",
+            ) from exc
 
     @router.post("/artefacts/personal", include_in_schema=False)
     @router.post("/artifacts/personal")

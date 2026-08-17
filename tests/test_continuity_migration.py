@@ -45,3 +45,28 @@ def test_legacy_sessions_gain_safe_project_capability_default(monkeypatch, tmp_p
     ).fetchone()
     conn.close()
     assert row == ("project_read", "native", 0)
+
+
+def test_g2c_pre_release_artifact_column_is_renamed(monkeypatch, tmp_path):
+    path = tmp_path / "g2c-pre-release.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE context_grants ("
+        "id TEXT PRIMARY KEY, artefact_paths_json TEXT NOT NULL DEFAULT '[]')"
+    )
+    conn.execute(
+        "INSERT INTO context_grants (id, artefact_paths_json) VALUES ('grant', '[\"notes.md\"]')"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{path}")
+    database._migrate_artifact_table_spelling()
+
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(context_grants)")}
+    value = conn.execute("SELECT artifact_paths_json FROM context_grants WHERE id = 'grant'").fetchone()[0]
+    conn.close()
+    assert "artifact_paths_json" in columns
+    assert "artefact_paths_json" not in columns
+    assert value == '["notes.md"]'

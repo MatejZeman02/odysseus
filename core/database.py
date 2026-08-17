@@ -2229,9 +2229,9 @@ def _migrate_seed_email_account():
             db.close()
 
 
-# Preserve the initial G2C pre-release table spelling if a user exercised it
-# before the public terminology was corrected from British ``artefact`` to
-# American ``artifact``. This is a data-preserving SQLite rename, not a reset.
+# Preserve the initial G2C pre-release schema if a user exercised it before
+# the public terminology was corrected from British ``artefact`` to American
+# ``artifact``. These are data-preserving SQLite renames, not a reset.
 def _migrate_artifact_table_spelling():
     if not DATABASE_URL.startswith("sqlite:///"):
         return
@@ -2246,6 +2246,21 @@ def _migrate_artifact_table_spelling():
             conn.execute("ALTER TABLE working_artefacts RENAME TO working_artifacts")
         if "working_artefact_revisions" in tables and "working_artifact_revisions" not in tables:
             conn.execute("ALTER TABLE working_artefact_revisions RENAME TO working_artifact_revisions")
+        # The first private beta also used the old spelling for the optional
+        # artifact-path allowlist on grants. ``create_all`` never alters an
+        # existing table, so leave its data intact and rename the column here.
+        if "context_grants" in tables:
+            grant_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(context_grants)")
+            }
+            if (
+                "artefact_paths_json" in grant_columns
+                and "artifact_paths_json" not in grant_columns
+            ):
+                conn.execute(
+                    "ALTER TABLE context_grants "
+                    "RENAME COLUMN artefact_paths_json TO artifact_paths_json"
+                )
         conn.commit()
     except Exception as e:
         logger.warning("artifact table spelling migration failed: %s", e)

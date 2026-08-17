@@ -84,7 +84,13 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   let payload;
   try {
     const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}`, {credentials: 'same-origin', cache: 'no-store'});
-    payload = await response.json();
+    const body = await response.text();
+    try { payload = body ? JSON.parse(body) : {}; }
+    catch (_error) {
+      throw new Error(response.ok
+        ? 'Companion memory returned an unreadable response.'
+        : `Could not load Companion memory (server error ${response.status}).`);
+    }
     if (!response.ok) throw new Error(payload.detail || 'Could not load Companion memory');
   } catch (error) { uiModule.showToast?.(error.message || 'Could not load Companion memory', 2600); return; }
   document.getElementById('companion-memory-modal')?.remove();
