@@ -9007,19 +9007,6 @@ button.hamburger {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.companion-scope-action {
-  margin-left: auto;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted, var(--fg));
-  font: inherit;
-  font-size: 12px;
-  padding: 2px 7px;
-  cursor: pointer;
-}
-.companion-scope-action + .companion-scope-action { margin-left: -3px; }
-.companion-scope-action:hover { color: var(--fg); border-color: var(--accent); }
 .companion-memory-modal { max-width: 720px; }
 .companion-memory-tabs { display: flex; gap: 8px; padding: 0 20px 10px; }
 .companion-memory-tabs button, .companion-memory-panel button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; cursor: pointer; }

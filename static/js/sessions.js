@@ -40,10 +40,11 @@ function _syncCompanionScopeBanner(meta) {
   const banner = document.getElementById('companion-scope-banner');
   const title = document.getElementById('companion-scope-title');
   const detail = document.getElementById('companion-scope-detail');
-  const contextButton = document.getElementById('companion-context-btn');
-  const artifactsButton = document.getElementById('companion-artifacts-btn');
+  const contextButton = document.getElementById('overflow-companion-context-btn');
+  const artifactsButton = document.getElementById('overflow-companion-artifacts-btn');
   if (!banner || !title || !detail) return;
   const scope = meta?.scope_kind;
+  const closeMoreTools = () => document.getElementById('overflow-menu')?.classList.add('hidden');
   if (!['project', 'personal', 'computer'].includes(scope)) {
     banner.hidden = true;
     title.textContent = '';
@@ -71,11 +72,17 @@ function _syncCompanionScopeBanner(meta) {
   const supportsMemory = scope !== 'computer';
   if (contextButton) {
     contextButton.hidden = !supportsMemory;
-    contextButton.onclick = () => openCompanionMemory(meta, 'context');
+    contextButton.onclick = () => {
+      closeMoreTools();
+      openCompanionMemory(meta, 'context');
+    };
   }
   if (artifactsButton) {
     artifactsButton.hidden = !supportsMemory;
-    artifactsButton.onclick = () => openCompanionMemory(meta, 'artifacts');
+    artifactsButton.onclick = () => {
+      closeMoreTools();
+      openCompanionMemory(meta, 'artifacts');
+    };
   }
 }
 

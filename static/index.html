@@ -246,9 +246,9 @@
        real request is discarded and the font fetched a second time. -->
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-Regular.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
-  <meta name="odysseus-build" content="20260817artifactstudio1">
-  <link rel="stylesheet" href="/static/style.css?v=20260817artifactstudio1">
-  <link rel="modulepreload" href="/static/app.js?v=20260817artifactstudio1">
+  <meta name="odysseus-build" content="20260817companionmenu1">
+  <link rel="stylesheet" href="/static/style.css?v=20260817companionmenu1">
+  <link rel="modulepreload" href="/static/app.js?v=20260817companionmenu1">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -1039,8 +1039,6 @@
     <div id="companion-scope-banner" class="companion-scope-banner" role="status" aria-live="polite" hidden>
       <strong id="companion-scope-title"></strong>
       <span id="companion-scope-detail"></span>
-      <button type="button" id="companion-context-btn" class="companion-scope-action" hidden>Context</button>
-      <button type="button" id="companion-artifacts-btn" class="companion-scope-action" hidden>Artifacts</button>
     </div>
 
     <!-- Unified chat input bar -->
@@ -1132,6 +1130,18 @@
                 </svg>
                 <span>Workspace</span>
                 <span class="overflow-active-dot"></span>
+              </button>
+              <button type="button" class="overflow-menu-item" id="overflow-companion-context-btn" hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M8.5 15c1.2 1 2.35 1.5 3.5 1.5s2.3-.5 3.5-1.5"/>
+                </svg>
+                <span>Companion context</span>
+              </button>
+              <button type="button" class="overflow-menu-item" id="overflow-companion-artifacts-btn" hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2-2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h6"/>
+                </svg>
+                <span>Working artifacts</span>
               </button>
               <!-- Inline "deep research mode" toggle removed (superseded by the
                    Deep Research sidebar / trigger_research). The hidden
@@ -2593,11 +2603,11 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260815approvalsave1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260817artifactstudio1"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260817companionmenu1"></script>  <!-- app.js must be LAST -->
   <script type="module" src="/static/js/init.js?v=20260715freshroot3"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">
-window.__ODYSSEUS_BUILD_ID='20260817artifactstudio1';
+window.__ODYSSEUS_BUILD_ID='20260817companionmenu1';
 document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
@@ -2615,7 +2625,7 @@ if('serviceWorker' in navigator){
     button.addEventListener('click',()=>location.reload());
     banner.append(text,button);document.body.appendChild(banner);
   });
-  navigator.serviceWorker.register('/static/sw.js?v=20260817artifactstudio1',{updateViaCache:'none'})
+  navigator.serviceWorker.register('/static/sw.js?v=20260817companionmenu1',{updateViaCache:'none'})
     .then(reg=>reg.update()).catch(()=>{});
 }
 </script>

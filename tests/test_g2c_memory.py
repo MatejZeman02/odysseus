@@ -114,7 +114,9 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     page = open("static/index.html", encoding="utf-8").read()
     assert "/context-grants" in routes
     assert "/artifacts/personal" in routes
-    assert "companion-context-btn" in page
-    assert "companion-artifacts-btn" in page
+    assert "overflow-companion-context-btn" in page
+    assert "overflow-companion-artifacts-btn" in page
+    assert 'id="companion-context-btn"' not in page
+    assert 'id="companion-artifacts-btn"' not in page
     assert "Allow once" in ui
     assert "project material is never searched automatically" in ui.lower()
