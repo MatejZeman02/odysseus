@@ -93,6 +93,19 @@ def _continuity_prompt_message(bundle) -> dict:
         sections.append({"working_artifacts": list(bundle.working_artifacts)})
     if bundle.context_grants:
         sections.append({"approved_context_grants": list(bundle.context_grants)})
+    selected_artifacts = list(bundle.manifest.get("selected_working_artifact_paths") or [])
+    if selected_artifacts:
+        sections.append({
+            "artifact_revision_protocol": {
+                "selected_paths": selected_artifacts,
+                "instruction": (
+                    "If the owner asks to revise one selected artifact, put the complete replacement Markdown "
+                    "inside <odysseus-artifact-revision path=\"relative/path.md\">…</odysseus-artifact-revision>. "
+                    "Use the exact selected path. Keep any explanation outside that tag. The owner must explicitly "
+                    "press Apply to save it, so never claim it was already written."
+                ),
+            },
+        })
     sections.append({
         "working_artifact_policy": (
             "Working artifacts normally include metadata only. An artifact "

@@ -103,29 +103,84 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     <div class="modal-header"><h4 id="companion-memory-title">${esc(payload.scope_kind === 'personal' ? 'Personal memory' : 'Project memory')}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button><button type="button" data-tab="artifacts">Artifacts</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
     <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
-    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${payload.scope_kind === 'personal' ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat.' : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.'}</p><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-new-artifact">New Markdown artifact</button>' : ''}</section>
+    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${payload.scope_kind === 'personal' ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat. Select one to edit it or use it in chat.' : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.'}</p><div class="companion-artifact-workspace"><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div>${payload.scope_kind === 'personal' ? '<section class="companion-artifact-editor-pane"><p>Select an artifact to edit it.</p></section>' : ''}</div>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-new-artifact">New Markdown artifact</button>' : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
   const show = (tab) => modal.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.panel !== tab));
   modal.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => show(button.dataset.tab)); show(initialTab);
-  modal.querySelectorAll('.companion-artifact-row').forEach(button => button.onclick = async () => {
-    const response = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(button.dataset.id)}`, {credentials: 'same-origin'});
-    const item = await response.json(); if (!response.ok) { uiModule.showToast?.(item.detail || 'Could not open artifact'); return; }
-    const editor = document.createElement('textarea'); editor.className = 'companion-artifact-editor'; editor.value = item.content || '';
-    const save = document.createElement('button'); save.textContent = 'Save revision';
-    button.replaceWith(editor, save); save.onclick = async () => {
-      const result = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: item.path, content: editor.value, expected_revision: item.revision})});
-      if (!result.ok) { const err = await result.json(); uiModule.showToast?.(err.detail || 'Could not save artifact'); return; }
-      close(); openCompanionMemory(meta, 'artifacts');
-    };
-  });
+  const artifactPane = modal.querySelector('.companion-artifact-editor-pane');
+  const readResponse = async (response, fallback) => {
+    const raw = await response.text(); let result = {};
+    try { result = raw ? JSON.parse(raw) : {}; } catch (_) {
+      throw new Error(response.ok ? fallback : `${fallback} (server error ${response.status})`);
+    }
+    if (!response.ok) throw new Error(result.detail || fallback);
+    return result;
+  };
+  const useArtifactInChat = (item) => {
+    const input = document.getElementById('message');
+    if (!input) { uiModule.showToast?.('The message composer is unavailable'); return; }
+    input.value = `Work with my Personal artifact \`${item.path}\`. Read its supplied content first. `;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    close(); input.focus();
+    uiModule.showToast?.('Artifact selected for the next Personal Advisor message.', 2400);
+  };
+  const showArtifactEditor = async (artifactId) => {
+    if (!artifactPane) return;
+    artifactPane.textContent = 'Loading artifact…';
+    try {
+      const response = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(artifactId)}`, {credentials: 'same-origin'});
+      const item = await readResponse(response, 'Could not open artifact');
+      artifactPane.replaceChildren();
+      const title = document.createElement('strong'); title.className = 'companion-artifact-editor-title'; title.textContent = item.path;
+      const revision = document.createElement('span'); revision.className = 'companion-artifact-revision'; revision.textContent = `Revision ${item.revision}`;
+      const editor = document.createElement('textarea'); editor.className = 'companion-artifact-editor'; editor.value = item.content || ''; editor.setAttribute('aria-label', `Edit ${item.path}`);
+      const status = document.createElement('p'); status.className = 'companion-artifact-status'; status.setAttribute('role', 'status');
+      const actions = document.createElement('div'); actions.className = 'companion-artifact-editor-actions';
+      const save = document.createElement('button'); save.type = 'button'; save.className = 'companion-artifact-save'; save.textContent = 'Save revision';
+      const useInChat = document.createElement('button'); useInChat.type = 'button'; useInChat.className = 'companion-artifact-use-chat'; useInChat.textContent = 'Use in chat';
+      useInChat.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); useArtifactInChat(item); });
+      save.addEventListener('click', async (event) => {
+        event.preventDefault(); event.stopPropagation();
+        save.disabled = true; useInChat.disabled = true; save.textContent = 'Saving…'; status.textContent = '';
+        try {
+          const result = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: item.path, content: editor.value, expected_revision: item.revision})});
+          await readResponse(result, 'Could not save artifact');
+          status.textContent = 'Saved as a new revision.'; status.classList.remove('error');
+          uiModule.showToast?.('Artifact revision saved', 1800);
+          setTimeout(() => { close(); openCompanionMemory(meta, 'artifacts'); }, 250);
+        } catch (error) {
+          status.textContent = error.message || 'Could not save artifact'; status.classList.add('error');
+          uiModule.showError?.(status.textContent);
+          save.disabled = false; useInChat.disabled = false; save.textContent = 'Save revision';
+        }
+      });
+      actions.append(save, useInChat); artifactPane.append(title, revision, editor, actions, status);
+    } catch (error) {
+      artifactPane.textContent = error.message || 'Could not open artifact';
+    }
+  };
+  modal.querySelectorAll('.companion-artifact-row').forEach(button => button.addEventListener('click', () => showArtifactEditor(button.dataset.id)));
   modal.querySelector('.companion-new-artifact')?.addEventListener('click', () => {
-    const row = document.createElement('div'); row.className = 'companion-artifact-create'; row.innerHTML = '<input placeholder="drafts/love-letter.md"><textarea placeholder="Write the Markdown draft…"></textarea><button type="button">Save</button>';
-    modal.querySelector('.companion-artifact-list').appendChild(row); row.querySelector('button').onclick = async () => {
-      const [path, content] = row.querySelectorAll('input, textarea'); const response = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
-      if (!response.ok) { const err = await response.json(); uiModule.showToast?.(err.detail || 'Could not save artifact'); return; } close(); openCompanionMemory(meta, 'artifacts');
-    };
+    if (!artifactPane) return;
+    artifactPane.replaceChildren();
+    const path = document.createElement('input'); path.placeholder = 'drafts/love-letter.md'; path.setAttribute('aria-label', 'Artifact path');
+    const content = document.createElement('textarea'); content.className = 'companion-artifact-editor'; content.placeholder = 'Write the Markdown draft…'; content.setAttribute('aria-label', 'Artifact Markdown content');
+    const save = document.createElement('button'); save.type = 'button'; save.className = 'companion-artifact-save'; save.textContent = 'Create artifact';
+    const status = document.createElement('p'); status.className = 'companion-artifact-status'; status.setAttribute('role', 'status');
+    save.addEventListener('click', async (event) => {
+      event.preventDefault(); save.disabled = true; save.textContent = 'Creating…'; status.textContent = '';
+      try {
+        const response = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
+        await readResponse(response, 'Could not create artifact');
+        status.textContent = 'Artifact created.'; uiModule.showToast?.('Artifact created', 1800);
+        setTimeout(() => { close(); openCompanionMemory(meta, 'artifacts'); }, 250);
+      } catch (error) {
+        status.textContent = error.message || 'Could not create artifact'; status.classList.add('error'); save.disabled = false; save.textContent = 'Create artifact';
+      }
+    });
+    artifactPane.append(path, content, save, status); path.focus();
   });
   modal.querySelector('.companion-request-grant')?.addEventListener('click', async () => {
     const project = modal.querySelector('.companion-grant-project')?.value; const purpose = modal.querySelector('.companion-grant-purpose')?.value;

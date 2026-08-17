@@ -29,3 +29,15 @@ def test_continuity_prompt_marks_derived_context_without_raw_transcript():
     assert message["metadata"]["continuity_artifact"] is True
     assert "raw secret" not in message["content"]
     assert payload[0]["thread_checkpoint"]["source_hash"] == "hash"
+
+
+def test_named_personal_artifact_adds_reviewed_revision_protocol():
+    bundle = ContextBundle(
+        "", ResolvedScope("alice", "s", "personal"), "improve my love letter",
+        manifest={"selected_working_artifact_paths": ["drafts/love-letter.md"]},
+    )
+    message = _continuity_prompt_message(bundle)
+    payload = json.loads(message["content"].split("\n", 1)[1])
+    protocol = next(item["artifact_revision_protocol"] for item in payload if "artifact_revision_protocol" in item)
+    assert protocol["selected_paths"] == ["drafts/love-letter.md"]
+    assert "odysseus-artifact-revision" in protocol["instruction"]
