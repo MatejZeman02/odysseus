@@ -168,7 +168,26 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       artifactPane.textContent = error.message || 'Could not open artifact';
     }
   };
-  modal.querySelectorAll('.companion-artifact-row').forEach(button => button.addEventListener('click', () => showArtifactEditor(button.dataset.id)));
+  modal.querySelectorAll('.companion-artifact-row').forEach(button => button.addEventListener('click', async () => {
+    if (payload.scope_kind !== 'personal') {
+      uiModule.showToast?.('Project artifacts stay in the project workspace and are changed through Patch proposals.', 3200);
+      return;
+    }
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(button.dataset.id)}/document`, {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: meta.id}),
+      });
+      const documentRecord = await readResponse(response, 'Could not open artifact in Documents');
+      if (!window.documentModule?.loadDocument) throw new Error('Document editor is not ready yet. Try again in a moment.');
+      close();
+      await window.documentModule.loadDocument(documentRecord.id);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not open artifact in Documents');
+      button.disabled = false;
+    }
+  }));
   modal.querySelector('.companion-new-artifact')?.addEventListener('click', () => {
     if (!artifactPane) return;
     artifactPane.replaceChildren();
@@ -180,9 +199,16 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       event.preventDefault(); save.disabled = true; save.textContent = 'Creating…'; status.textContent = '';
       try {
         const response = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
-        await readResponse(response, 'Could not create artifact');
-        status.textContent = 'Artifact created.'; uiModule.showToast?.('Artifact created', 1800);
-        setTimeout(() => { close(); openCompanionMemory(meta, 'artifacts'); }, 250);
+        const artifact = await readResponse(response, 'Could not create artifact');
+        const documentResponse = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(artifact.id)}/document`, {
+          method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({session_id: meta.id}),
+        });
+        const documentRecord = await readResponse(documentResponse, 'Artifact was created but could not open it in Documents');
+        if (!window.documentModule?.loadDocument) throw new Error('Artifact was created. The Document editor is not ready yet; select it again in a moment.');
+        close();
+        await window.documentModule.loadDocument(documentRecord.id);
+        uiModule.showToast?.('Artifact created in Documents', 1800);
       } catch (error) {
         status.textContent = error.message || 'Could not create artifact'; status.classList.add('error'); save.disabled = false; save.textContent = 'Create artifact';
       }

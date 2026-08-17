@@ -331,6 +331,11 @@ class WorkingArtifact(TimestampMixin, Base):
     revision = Column(Integer, nullable=False, default=1)
     status = Column(String, nullable=False, default="active", index=True)
     source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+    # Personal artifacts can be edited in the established Documents pane.
+    # This is a bridge identifier rather than a foreign key so an owner may
+    # delete a document independently; opening the artifact then makes a new
+    # editor document without losing the private artifact itself.
+    document_id = Column(String, nullable=True, index=True)
 
     __table_args__ = (
         Index("ix_working_artifacts_owner_scope_path", "owner", "scope_kind", "project_id", "path"),
@@ -2278,6 +2283,34 @@ def _migrate_artifact_table_spelling():
             conn.close()
 
 
+def _migrate_add_working_artifact_document_id():
+    """Link existing Personal artifacts to Documents lazily and safely."""
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "working_artifacts" not in tables:
+            return
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(working_artifacts)")}
+        if "document_id" not in columns:
+            conn.execute("ALTER TABLE working_artifacts ADD COLUMN document_id VARCHAR")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_working_artifacts_document_id "
+            "ON working_artifacts (document_id)"
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("working artifact document bridge migration failed: %s", exc)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
@@ -2290,6 +2323,7 @@ def init_db():
     _migrate_model_endpoints()
     _migrate_artifact_table_spelling()
     Base.metadata.create_all(bind=engine)
+    _migrate_add_working_artifact_document_id()
     _migrate_add_continuity_session_columns()
     _migrate_add_g15_session_columns()
     # Lock the DB file (and any SQLite sidecars) to 0o600 — it holds bearer-token

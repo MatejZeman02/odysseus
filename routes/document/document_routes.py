@@ -683,8 +683,30 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 db.add(ver)
 
             doc.current_content = incoming_content
+            # A Personal working artifact may be opened in this native editor.
+            # Keep its scoped source of truth in the same transaction, so a
+            # successful document save can never leave stale prompt content.
+            artifact = None
+            try:
+                from src.companion_memory import CompanionMemoryStore
+                artifact = CompanionMemoryStore.sync_personal_artifact_from_document(
+                    db, owner=doc.owner or user, document_id=doc.id, content=incoming_content,
+                )
+            except Exception:
+                logger.exception("Could not stage linked working artifact for document %s", doc.id)
+                raise
             db.commit()
             db.refresh(doc)
+            if artifact and doc.session_id:
+                try:
+                    from src.scoped_memory import ScopedMemoryIndex
+                    ScopedMemoryIndex().index(
+                        owner=doc.owner or user, scope_kind="personal", project_id=None,
+                        session_id=doc.session_id, source_kind="working_artifact",
+                        source_id=artifact.id, content=f"{artifact.path}\n{artifact.summary}",
+                    )
+                except Exception:
+                    logger.debug("linked working artifact index refresh failed", exc_info=True)
             return _doc_to_dict(doc)
         except HTTPException:
             raise

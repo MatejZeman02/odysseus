@@ -33,6 +33,11 @@ class ArtifactUndo(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class ArtifactDocumentOpen(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+
+
 class GrantCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     personal_session_id: str = Field(min_length=1, max_length=128)
@@ -136,6 +141,18 @@ def setup_companion_memory_routes() -> APIRouter:
             return memory.get_personal_artifact(owner=_owner(request), artifact_id=artifact_id)
         except MemoryScopeError as exc:
             raise _error(exc) from exc
+
+    @router.post("/artifacts/personal/{artifact_id}/document")
+    def open_personal_artifact_document(artifact_id: str, payload: ArtifactDocumentOpen, request: Request):
+        try:
+            return memory.open_personal_artifact_document(
+                owner=_owner(request), session_id=payload.session_id, artifact_id=artifact_id,
+            )
+        except MemoryScopeError as exc:
+            raise _error(exc) from exc
+        except SQLAlchemyError as exc:
+            logger.exception("Companion artifact document bridge failed for %s", artifact_id)
+            raise HTTPException(503, "Artifact editor is temporarily unavailable. Restart Odysseus, then try again.") from exc
 
     @router.post("/artefacts/personal/{artifact_id}/undo", include_in_schema=False)
     @router.post("/artifacts/personal/{artifact_id}/undo")

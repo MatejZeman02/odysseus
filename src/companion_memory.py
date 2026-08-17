@@ -16,7 +16,7 @@ from typing import Iterable
 
 from core.database import (
     ContextGrant, Project, Session as DbSession, SessionLocal, WorkingArtifact,
-    WorkingArtifactRevision, utcnow_naive,
+    WorkingArtifactRevision, Document, DocumentVersion, utcnow_naive,
 )
 
 
@@ -80,6 +80,113 @@ class CompanionMemoryStore:
         if not row:
             raise MemoryScopeError("Project was not found")
         return row
+
+    @staticmethod
+    def _document_payload(document: Document) -> dict:
+        return {
+            "id": document.id,
+            "session_id": document.session_id,
+            "title": document.title,
+            "language": document.language,
+            "current_content": document.current_content,
+            "version_count": document.version_count,
+        }
+
+    @staticmethod
+    def _sync_document_from_artifact(db, artifact: WorkingArtifact, session_id: str) -> None:
+        """Make an already-open native document reflect an artifact revision."""
+        if not artifact.document_id:
+            return
+        document = db.query(Document).filter(
+            Document.id == artifact.document_id,
+            Document.owner == artifact.owner,
+        ).first()
+        if not document:
+            artifact.document_id = None
+            return
+        if document.current_content == artifact.content:
+            return
+        document.version_count = max(int(document.version_count or 1), 1) + 1
+        document.current_content = artifact.content
+        document.session_id = session_id
+        db.add(DocumentVersion(
+            id=str(uuid.uuid4()), document_id=document.id,
+            version_number=document.version_count, content=artifact.content,
+            summary=f"Synced artifact revision {artifact.revision}", source="system",
+        ))
+
+    def open_personal_artifact_document(self, *, owner: str, session_id: str, artifact_id: str) -> dict:
+        """Open a Personal artifact through the standard, split-pane editor.
+
+        The artifact remains authoritative for scope and prompt inclusion.  The
+        linked native Document is the editor surface and receives the same
+        content and version history.
+        """
+        db = SessionLocal()
+        try:
+            self._personal(db, owner, session_id)
+            artifact = db.query(WorkingArtifact).filter(
+                WorkingArtifact.id == artifact_id,
+                WorkingArtifact.owner == owner,
+                WorkingArtifact.scope_kind == "personal",
+                WorkingArtifact.project_id == None,
+                WorkingArtifact.status == "active",
+            ).first()
+            if not artifact:
+                raise MemoryScopeError("Artifact was not found")
+            document = None
+            if artifact.document_id:
+                document = db.query(Document).filter(
+                    Document.id == artifact.document_id,
+                    Document.owner == owner,
+                ).first()
+            if not document:
+                document = Document(
+                    id=str(uuid.uuid4()), session_id=session_id,
+                    title=f"Artifact · {artifact.path}", language="markdown",
+                    current_content=artifact.content, version_count=1,
+                    is_active=True, owner=owner,
+                )
+                artifact.document_id = document.id
+                db.add(document)
+                db.add(DocumentVersion(
+                    id=str(uuid.uuid4()), document_id=document.id,
+                    version_number=1, content=artifact.content,
+                    summary=f"Opened working artifact: {artifact.path}", source="system",
+                ))
+            else:
+                self._sync_document_from_artifact(db, artifact, session_id)
+            db.commit()
+            db.refresh(document)
+            return self._document_payload(document)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    @staticmethod
+    def sync_personal_artifact_from_document(db, *, owner: str, document_id: str, content: str) -> WorkingArtifact | None:
+        """Stage a native editor save into its scoped artifact transaction."""
+        artifact = db.query(WorkingArtifact).filter(
+            WorkingArtifact.document_id == document_id,
+            WorkingArtifact.owner == owner,
+            WorkingArtifact.scope_kind == "personal",
+            WorkingArtifact.project_id == None,
+            WorkingArtifact.status == "active",
+        ).first()
+        if not artifact or artifact.content == content:
+            return artifact
+        db.add(WorkingArtifactRevision(
+            id=uuid.uuid4().hex, artifact_id=artifact.id, revision=artifact.revision,
+            content=artifact.content, content_hash=artifact.content_hash,
+            source_message_id=artifact.source_message_id, action="document_edit",
+        ))
+        artifact.content = content
+        artifact.content_hash = _hash(content)
+        artifact.summary = _summary(content)
+        artifact.revision += 1
+        return artifact
 
     def list_artifacts(self, *, owner: str, scope_kind: str, project_id: str | None = None) -> list[dict]:
         if scope_kind == "project":
@@ -171,6 +278,7 @@ class CompanionMemoryStore:
                     content=content, content_hash=digest, revision=1, source_message_id=source_message_id,
                 )
                 db.add(row)
+            self._sync_document_from_artifact(db, row, session_id)
             db.commit(); db.refresh(row)
             result = self.serialise_artifact(row, include_content=True)
             try:

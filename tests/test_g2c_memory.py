@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, Project, Session as DbSession
+from core.database import Base, Document, Project, Session as DbSession
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.continuity.compiler import ContextCompiler
 from src.continuity.contracts import PersonalBriefV1, ProjectBriefV1
@@ -51,6 +51,26 @@ def test_personal_artifact_is_revisioned_and_owner_scoped(store):
     deleted = memory.delete_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=3)
     assert deleted["deleted"] is True
     assert memory.restore_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=4)["content"].endswith("hello")
+
+
+def test_personal_artifact_opens_in_native_document_and_editor_save_stays_scoped(store):
+    _continuity, memory = store
+    artifact = memory.write_personal_artifact(
+        owner="alice", session_id="personal", path="drafts/love-letter.md", content="# Dear you\nhello",
+    )
+    document = memory.open_personal_artifact_document(owner="alice", session_id="personal", artifact_id=artifact["id"])
+    assert document["title"] == "Artifact · drafts/love-letter.md"
+    db = memory_module.SessionLocal()
+    try:
+        assert db.query(Document).filter(Document.id == document["id"]).one().current_content.endswith("hello")
+        updated = CompanionMemoryStore.sync_personal_artifact_from_document(
+            db, owner="alice", document_id=document["id"], content="# Dear you\nupdated",
+        )
+        db.commit()
+        assert updated and updated.revision == 2
+    finally:
+        db.close()
+    assert memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])["content"].endswith("updated")
 
 
 def test_personal_advisor_gets_only_an_explicitly_named_artifact_body(store):
@@ -114,6 +134,7 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     page = open("static/index.html", encoding="utf-8").read()
     assert "/context-grants" in routes
     assert "/artifacts/personal" in routes
+    assert "/artifacts/personal/{artifact_id}/document" in routes
     assert "overflow-companion-context-btn" in page
     assert "overflow-companion-artifacts-btn" in page
     assert 'id="companion-context-btn"' not in page
