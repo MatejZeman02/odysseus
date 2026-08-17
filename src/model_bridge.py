@@ -88,6 +88,15 @@ class ModelBridge:
         if resolved_model != route.model:
             raise HTTPException(409, "configured model changed")
         body["model"] = route.model
+        # The worker may not choose provider routing or cache identity.  Add
+        # llama.cpp/LM Studio slot-affinity hints only after the server has
+        # resolved the owner-owned upstream endpoint.  ``run_id`` is the
+        # stable Odysseus session id for Companion turns, so separate Qwen
+        # workers still reach the same upstream KV-cache slot.
+        from src.llm_core import _apply_local_cache_affinity
+        body.pop("session_id", None)
+        body.pop("cache_prompt", None)
+        _apply_local_cache_affinity(body, url, route.run_id)
         # Never forward arbitrary worker headers, credentials, or an alternate URL.
         client = self._client_factory(timeout=90.0)
         try:

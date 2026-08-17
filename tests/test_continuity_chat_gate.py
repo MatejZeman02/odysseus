@@ -16,7 +16,7 @@ def test_continuity_prompt_marks_derived_context_without_raw_transcript():
     bundle = ContextBundle("", ResolvedScope("alice", "s", "general"), "continue", checkpoint, transcript_tail=({"role": "user", "content": "raw secret"},))
     message = _continuity_prompt_message(bundle)
     payload = json.loads(message["content"].split("\n", 1)[1])
-    assert message["role"] == "system"
+    assert message["role"] == "user"
     assert message["metadata"]["continuity_artifact"] is True
     assert "raw secret" not in message["content"]
     assert payload[0]["thread_checkpoint"]["source_hash"] == "hash"

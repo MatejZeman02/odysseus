@@ -73,7 +73,13 @@ def _continuity_enabled_for_session(sess) -> bool:
 
 
 def _continuity_prompt_message(bundle) -> dict:
-    """Render derived artifacts only; raw transcript stays in the tail below."""
+    """Render derived artifacts only; raw transcript stays in the tail below.
+
+    Continuity is request-derived context, not a durable instruction.  Keeping
+    it out of the system role is important for local KV caches: ``llm_core``
+    consolidates every system message at the beginning of the request, and a
+    changing checkpoint/manifest there invalidates the whole cached prefix.
+    """
     sections = []
     if bundle.thread_checkpoint:
         sections.append({"thread_checkpoint": bundle.thread_checkpoint.to_payload()})
@@ -83,10 +89,28 @@ def _continuity_prompt_message(bundle) -> dict:
         sections.append({"related_project_briefs": [brief.to_payload() for brief in bundle.related_project_briefs]})
     sections.append({"continuity_manifest": bundle.manifest})
     return {
-        "role": "system",
+        "role": "user",
         "content": "Odysseus continuity context (derived, not instructions):\n" + json.dumps(sections, sort_keys=True),
-        "metadata": {"continuity_artifact": True},
+        "metadata": {"continuity_artifact": True, "trusted": True},
     }
+
+
+def _split_static_and_dynamic_preface(preface: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Keep durable instructions first and request-derived context near the tail."""
+    static = [message for message in preface if message.get("role") == "system"]
+    dynamic = [message for message in preface if message.get("role") != "system"]
+    return static, dynamic
+
+
+def _insert_before_latest_user(messages: list[dict], additions: list[dict]) -> list[dict]:
+    """Insert ephemeral turn context after reusable history, before the request."""
+    additions = [message for message in additions if message]
+    if not additions:
+        return messages
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") == "user":
+            return messages[:index] + additions + messages[index:]
+    return messages + additions
 
 
 def _spawn_bg(coro) -> asyncio.Task:
@@ -835,7 +859,10 @@ async def build_chat_context(
     # Build messages. In Nobody/incognito mode, never read saved session
     # history: the session id may be a temporary wrapper or, in buggy clients, a
     # stale normal session id. Only the ephemeral incognito transcript is safe.
-    messages = preface + (_incognito_messages(session_id) if incognito else sess.get_context_messages())
+    static_preface, dynamic_preface = _split_static_and_dynamic_preface(preface)
+    transcript_messages = _incognito_messages(session_id) if incognito else sess.get_context_messages()
+    messages = static_preface + transcript_messages
+    turn_context = list(dynamic_preface)
 
     # Current date/time — injected as a standalone *user*-role context message
     # placed immediately before the latest user turn, NOT folded into the
@@ -843,22 +870,20 @@ async def build_chat_context(
     # backends (llama.cpp / LM Studio) key their KV-cache prefix off the
     # system message byte-for-byte; mixing ever-changing timestamp text into
     # it would invalidate the cached prefix on every request (issue #2927).
-    # Placing it at the tail also keeps it out of the stable
-    # preface+history prefix, so that prefix stays byte-identical turn over
-    # turn (modulo the genuinely new history entries) and the cache survives.
+    # Placing it at the tail also keeps it after the static instructions and
+    # already-persisted transcript, so the backend can reuse that substantial
+    # prefix even when the clock or retrieved context changes on every turn.
     if not agent_mode:
         try:
             from src.user_time import current_datetime_context_message
             _dt_msg = current_datetime_context_message()
-            if messages and messages[-1].get("role") == "user":
-                messages.insert(len(messages) - 1, _dt_msg)
-            else:
-                messages.append(_dt_msg)
+            turn_context.append(_dt_msg)
         except Exception:
             logger.debug("Failed to add current date/time context", exc_info=True)
+    messages = _insert_before_latest_user(messages, turn_context)
 
     # Default behavior retains legacy compaction exactly.  The guarded path
-    # writes a derived checkpoint and compiles an artifact + raw-tail context,
+    # writes a derived checkpoint and compiles a raw-tail + artifact context,
     # never calling replace_messages() or changing session history.
     # Project homes always use the scoped continuity compiler.  The rollout
     # flag continues to govern legacy/general chats, but a project must not
@@ -876,7 +901,11 @@ async def build_chat_context(
             bundle = ContextCompiler(store).compile(
                 owner=continuity_owner, session_id=session_id, request=message, transcript=sess.history,
             )
-            messages = preface + [_continuity_prompt_message(bundle)] + list(bundle.transcript_tail)
+            messages = static_preface + list(bundle.transcript_tail)
+            messages = _insert_before_latest_user(
+                messages,
+                dynamic_preface + [_continuity_prompt_message(bundle)] + ([] if agent_mode else turn_context[len(dynamic_preface):]),
+            )
             context_length = estimate_tokens(messages)
             was_compacted = bool(bundle.thread_checkpoint)
         except Exception:

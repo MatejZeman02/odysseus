@@ -39,6 +39,62 @@ async def test_bridge_uses_exact_owner_route_and_hides_provider_credentials():
 
 
 @pytest.mark.asyncio
+async def test_bridge_adds_server_owned_cache_affinity_for_local_upstream():
+    seen = {}
+
+    def upstream(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={"choices": []})
+
+    bridge = ModelBridge(
+        resolver=lambda endpoint_id, model, owner: (
+            "http://127.0.0.1:8080/v1/chat/completions", model, {}
+        ),
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs),
+    )
+    route = bridge.issue_route(
+        owner="alice", endpoint_id="endpoint-a", model="fixed-model", run_id="session-a"
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bridge.app), base_url="http://bridge") as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {route.token}"},
+            json={"messages": [{"role": "user", "content": "hello"}], "session_id": "worker-choice"},
+        )
+
+    assert response.status_code == 200
+    assert seen["session_id"] == "session-a"
+    assert seen["cache_prompt"] is True
+
+
+@pytest.mark.asyncio
+async def test_bridge_strips_worker_cache_fields_for_cloud_upstream():
+    seen = {}
+
+    def upstream(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={"choices": []})
+
+    bridge = ModelBridge(
+        resolver=lambda endpoint_id, model, owner: (
+            "https://provider.test/v1/chat/completions", model, {}
+        ),
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs),
+    )
+    route = bridge.issue_route(owner="alice", endpoint_id="endpoint-a", model="fixed-model", run_id="session-a")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=bridge.app), base_url="http://bridge") as client:
+        response = await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {route.token}"},
+            json={"messages": [], "session_id": "worker-choice", "cache_prompt": True},
+        )
+
+    assert response.status_code == 200
+    assert "session_id" not in seen
+    assert "cache_prompt" not in seen
+
+
+@pytest.mark.asyncio
 async def test_bridge_refuses_expired_or_model_drift_routes():
     bridge = ModelBridge(resolver=lambda *args, **kwargs: None)
     expired = bridge.issue_route(owner="alice", endpoint_id="endpoint-a", model="fixed-model", ttl_seconds=1)

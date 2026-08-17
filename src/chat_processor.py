@@ -446,7 +446,11 @@ class ChatProcessor:
                     preface.append(untrusted_context_message("web search results", web_context))
             except Exception as e:
                 logger.error(f"Web search failed: {e}")
-                preface.append({"role": "system", "content": "Web search encountered an error and could not retrieve results."})
+                preface.append({
+                    "role": "user",
+                    "content": "[Context — web search status]\nWeb search encountered an error and could not retrieve results.",
+                    "metadata": {"context_message": True},
+                })
 
         # Process non-YouTube URLs in message (YouTube handled by preprocess_message)
         # Skip auto-fetch for long pastes (the user already pasted the content —

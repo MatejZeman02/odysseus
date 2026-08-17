@@ -103,6 +103,26 @@ def test_usage_on_empty_choices_chunk_still_captured(monkeypatch):
     assert usage and usage[-1] == {"input_tokens": 4, "output_tokens": 2}
 
 
+def test_cached_prompt_tokens_are_surfaced(monkeypatch):
+    lines = [
+        'data: ' + json.dumps({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 2,
+                "prompt_tokens_details": {"cached_tokens": 72},
+            },
+        }),
+        'data: [DONE]',
+    ]
+    usage = _usage_events(_drive(monkeypatch, lines))
+    assert usage[-1] == {
+        "input_tokens": 100,
+        "output_tokens": 2,
+        "cached_input_tokens": 72,
+    }
+
+
 def test_null_choice_chunk_does_not_crash(monkeypatch):
     # Some providers emit {"choices": [null]} as a heartbeat/keepalive chunk.
     # The parser must silently skip it rather than crashing on None.get("delta").

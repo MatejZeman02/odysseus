@@ -217,6 +217,58 @@ async def test_changed_instructions_do_change_the_system_prefix(monkeypatch):
     assert "NEW INSTRUCTION" in sys2 and "NEW INSTRUCTION" not in sys1
 
 
+@pytest.mark.asyncio
+async def test_dynamic_retrieval_context_follows_reusable_history(monkeypatch):
+    """Changing retrieval must not sit between static policy and old chat."""
+    chat_helpers = _install_chat_helpers_stubs(monkeypatch)
+    import src.user_time as user_time
+    user_time.clear_user_time_context()
+
+    history = [
+        {"role": "user", "content": "old question"},
+        {"role": "assistant", "content": "old answer"},
+    ]
+    sess, request, chat_handler, chat_processor = _build_context_harness(
+        monkeypatch, chat_helpers, history=history
+    )
+
+    def dynamic_preface(**kwargs):
+        return (
+            [
+                {"role": "system", "content": "stable policy"},
+                {"role": "user", "content": "retrieved context for this request"},
+            ],
+            [],
+            [],
+        )
+
+    chat_processor.build_context_preface = dynamic_preface
+    monkeypatch.setattr(
+        user_time,
+        "current_datetime_context_message",
+        lambda now_utc=None: {"role": "user", "content": "dynamic clock"},
+        raising=False,
+    )
+
+    ctx = await chat_helpers.build_chat_context(
+        sess=sess,
+        request=request,
+        chat_handler=chat_handler,
+        chat_processor=chat_processor,
+        message="new question",
+        session_id="session-dynamic",
+    )
+
+    assert [message["content"] for message in ctx.messages] == [
+        "stable policy",
+        "old question",
+        "old answer",
+        "retrieved context for this request",
+        "dynamic clock",
+        "new question",
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # 2. current_datetime_context_message returns a user-role message
 # --------------------------------------------------------------------------- #

@@ -2396,6 +2396,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
     if provider == "anthropic":
         _anth_input_tokens = 0
         _anth_output_tokens = 0
+        _anth_cache_read_tokens = 0
+        _anth_cache_creation_tokens = 0
         # Track tool_use blocks: {index: {id, name, arguments_json}}
         _anth_tool_blocks: Dict[int, Dict] = {}
         _anth_block_idx = -1
@@ -2453,12 +2455,12 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                             _anth_input_tokens = _u.get("input_tokens", 0)
                             # Surface prompt-cache effectiveness: cache_read > 0 means the
                             # stable system+tools prefix was served from cache this round.
-                            _c_read = _u.get("cache_read_input_tokens", 0)
-                            _c_write = _u.get("cache_creation_input_tokens", 0)
-                            if _c_read or _c_write:
+                            _anth_cache_read_tokens = _u.get("cache_read_input_tokens", 0)
+                            _anth_cache_creation_tokens = _u.get("cache_creation_input_tokens", 0)
+                            if _anth_cache_read_tokens or _anth_cache_creation_tokens:
                                 logger.info(
                                     "[anthropic-cache] read=%s write=%s fresh_input=%s",
-                                    _c_read, _c_write, _anth_input_tokens,
+                                    _anth_cache_read_tokens, _anth_cache_creation_tokens, _anth_input_tokens,
                                 )
                         elif evt == "message_delta":
                             _anth_output_tokens = j.get("usage", {}).get("output_tokens", 0)
@@ -2475,7 +2477,15 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                     })
                                 yield f'data: {json.dumps({"type": "tool_calls", "calls": calls})}\n\n'
                             if _anth_input_tokens or _anth_output_tokens:
-                                yield f'data: {json.dumps({"type": "usage", "data": {"input_tokens": _anth_input_tokens, "output_tokens": _anth_output_tokens}})}\n\n'
+                                _anth_usage = {
+                                    "input_tokens": _anth_input_tokens,
+                                    "output_tokens": _anth_output_tokens,
+                                }
+                                if _anth_cache_read_tokens:
+                                    _anth_usage["cached_input_tokens"] = _anth_cache_read_tokens
+                                if _anth_cache_creation_tokens:
+                                    _anth_usage["cache_creation_input_tokens"] = _anth_cache_creation_tokens
+                                yield f'data: {json.dumps({"type": "usage", "data": _anth_usage})}\n\n'
                             yield "data: [DONE]\n\n"
                             return
                         elif evt == "error":
@@ -2598,6 +2608,22 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                 if "usage" in j and not _delta_has_output:
                                     u = j["usage"] or {}
                                     _usage_data = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0)}
+                                    _prompt_details = u.get("prompt_tokens_details") or {}
+                                    _cached_input = (
+                                        _prompt_details.get("cached_tokens")
+                                        or u.get("prompt_cache_hit_tokens")
+                                        or u.get("cache_read_input_tokens")
+                                        or 0
+                                    )
+                                    _cache_write = (
+                                        u.get("prompt_cache_miss_tokens")
+                                        or u.get("cache_creation_input_tokens")
+                                        or 0
+                                    )
+                                    if _cached_input:
+                                        _usage_data["cached_input_tokens"] = _cached_input
+                                    if _cache_write:
+                                        _usage_data["cache_creation_input_tokens"] = _cache_write
                                     # llama.cpp puts a `timings` block alongside `usage` with the
                                     # TRUE generation speed (predicted_per_second) — pure decode,
                                     # excluding prefill/network. Pass it through so the UI shows the
