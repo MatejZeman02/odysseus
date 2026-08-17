@@ -199,6 +199,29 @@ class CompanionMemoryStore:
         finally:
             db.close()
 
+    def get_personal_artifact_by_path(self, *, owner: str, path: str) -> dict:
+        """Return one active Personal artifact's exact content by safe path.
+
+        This is deliberately separate from ``list_artifacts``. The latter is
+        the normal metadata-only index; callers must make an explicit
+        selection before a draft's body enters a model prompt.
+        """
+        path = normalise_artifact_path(path)
+        db = SessionLocal()
+        try:
+            row = db.query(WorkingArtifact).filter(
+                WorkingArtifact.owner == owner,
+                WorkingArtifact.scope_kind == "personal",
+                WorkingArtifact.project_id == None,
+                WorkingArtifact.path == path,
+                WorkingArtifact.status == "active",
+            ).first()
+            if not row:
+                raise MemoryScopeError("Artifact was not found")
+            return self.serialise_artifact(row, include_content=True)
+        finally:
+            db.close()
+
     def undo_personal_artifact(self, *, owner: str, artifact_id: str, expected_revision: int) -> dict:
         db = SessionLocal()
         try:

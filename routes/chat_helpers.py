@@ -93,6 +93,14 @@ def _continuity_prompt_message(bundle) -> dict:
         sections.append({"working_artifacts": list(bundle.working_artifacts)})
     if bundle.context_grants:
         sections.append({"approved_context_grants": list(bundle.context_grants)})
+    sections.append({
+        "working_artifact_policy": (
+            "Working artifacts normally include metadata only. An artifact "
+            "with a content field was explicitly named by the owner in this "
+            "turn; read and discuss that exact draft rather than claiming it "
+            "is unavailable."
+        ),
+    })
     sections.append({"continuity_manifest": bundle.manifest})
     return {
         "role": "user",

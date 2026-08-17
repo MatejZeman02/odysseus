@@ -53,6 +53,27 @@ def test_personal_artifact_is_revisioned_and_owner_scoped(store):
     assert memory.restore_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=4)["content"].endswith("hello")
 
 
+def test_personal_advisor_gets_only_an_explicitly_named_artifact_body(store):
+    continuity, memory = store
+    memory.write_personal_artifact(
+        owner="alice", session_id="personal", path="drafts/love-letter.md",
+        content="# Love letter\nThe actual private draft.",
+    )
+    memory.write_personal_artifact(
+        owner="alice", session_id="personal", path="notes/private-plan.md",
+        content="# Private plan\nThis must stay metadata-only.",
+    )
+
+    bundle = ContextCompiler(continuity).compile(
+        owner="alice", session_id="personal",
+        request="Please improve my love letter without changing its meaning.", transcript=[],
+    )
+    indexed = {item["path"]: item for item in bundle.working_artifacts}
+    assert indexed["drafts/love-letter.md"]["content"] == "# Love letter\nThe actual private draft."
+    assert "content" not in indexed["notes/private-plan.md"]
+    assert bundle.manifest["selected_working_artifact_paths"] == ["drafts/love-letter.md"]
+
+
 def test_project_memory_needs_grant_or_explicit_owner_request(store):
     continuity, memory = store
     continuity.write_project_brief(owner="alice", brief=ProjectBriefV1(project_id="dust", summary="Dust private brief"), source_hash="dust")
