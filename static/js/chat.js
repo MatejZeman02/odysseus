@@ -2323,9 +2323,12 @@ import { loadPanel } from './panels.js';
           errText = 'Qwen Companion stayed enabled; a duplicate native Agent request was blocked. Please send once more.';
           try { await sessionModule.loadSessions(); } catch (_) {}
         }
-        // Auto-switch to chat mode for tool-related errors
-        if (errText.includes('tool') || errText.includes('auto')) {
-          errText = 'This model doesn\'t support agent tools — switched to Chat mode. Try again.';
+        // Only switch modes for an explicit capability rejection.  The old
+        // broad `tool` / `auto` keyword check also swallowed real document
+        // and approval failures, turning them into a misleading model error.
+        const toolCapabilityRejected = /(?:model|endpoint|provider)[^\n]{0,100}(?:does not|doesn't|cannot|can't|not)\s+(?:support|accept|handle)[^\n]{0,40}\btools?\b|\btool(?:[- ]?calls?)?\s+(?:are\s+)?not supported\b/i.test(errText);
+        if (toolCapabilityRejected) {
+          errText = 'This model does not support Agent tools. Select a tool-capable model, then try again.';
           const _ab = document.getElementById('mode-agent-btn');
           const _cb = document.getElementById('mode-chat-btn');
           if (_ab && _cb) {

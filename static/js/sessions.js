@@ -180,9 +180,17 @@ async function openCompanionMemory(meta, initialTab = 'context') {
         body: JSON.stringify({session_id: meta.id}),
       });
       const documentRecord = await readResponse(response, 'Could not open artifact in Documents');
-      if (!window.documentModule?.loadDocument) throw new Error('Document editor is not ready yet. Try again in a moment.');
+      const documentApi = window.documentModule;
+      if (!documentApi?.loadDocument) throw new Error('Document editor is not ready yet. Try again in a moment.');
       close();
-      await window.documentModule.loadDocument(documentRecord.id);
+      // The bridge already returns the authoritative document payload. Use it
+      // directly instead of racing a second GET against the session restore
+      // loader, which could replace an artifact with an empty Untitled tab.
+      if (typeof documentApi.injectFreshDoc === 'function') {
+        documentApi.injectFreshDoc(documentRecord);
+      } else {
+        await documentApi.loadDocument(documentRecord.id);
+      }
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not open artifact in Documents');
       button.disabled = false;
@@ -205,9 +213,14 @@ async function openCompanionMemory(meta, initialTab = 'context') {
           body: JSON.stringify({session_id: meta.id}),
         });
         const documentRecord = await readResponse(documentResponse, 'Artifact was created but could not open it in Documents');
-        if (!window.documentModule?.loadDocument) throw new Error('Artifact was created. The Document editor is not ready yet; select it again in a moment.');
+        const documentApi = window.documentModule;
+        if (!documentApi?.loadDocument) throw new Error('Artifact was created. The Document editor is not ready yet; select it again in a moment.');
         close();
-        await window.documentModule.loadDocument(documentRecord.id);
+        if (typeof documentApi.injectFreshDoc === 'function') {
+          documentApi.injectFreshDoc(documentRecord);
+        } else {
+          await documentApi.loadDocument(documentRecord.id);
+        }
         uiModule.showToast?.('Artifact created in Documents', 1800);
       } catch (error) {
         status.textContent = error.message || 'Could not create artifact'; status.classList.add('error'); save.disabled = false; save.textContent = 'Create artifact';

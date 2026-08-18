@@ -280,6 +280,12 @@ def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store,
     assert opened["current_content"].endswith("First version")
 
 
+def test_personal_artifact_ui_uses_bridge_payload_without_a_second_load_race():
+    sessions_js = open("static/js/sessions.js", encoding="utf-8").read()
+    assert "documentApi.injectFreshDoc(documentRecord)" in sessions_js
+    assert "racing a second GET" in sessions_js
+
+
 def test_personal_artifact_editor_has_a_document_only_agent_path():
     from src.agent_loop import (
         _is_personal_artifact_document_obj,
