@@ -145,8 +145,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   /** Switch chat to agent mode if not already */
   function _ensureAgentMode() {
     const ab = document.getElementById('mode-agent-btn');
-    const cb = document.getElementById('mode-chat-btn');
-    if (ab && !ab.classList.contains('active')) {
+    if (typeof window.__odysseusSetChatMode === 'function') {
+      window.__odysseusSetChatMode('agent');
+    } else if (ab && !ab.classList.contains('active')) {
+      // During very early startup the app-level mode helper is not mounted
+      // yet; retain the button fallback for that short window.
       ab.click();
     }
   }
@@ -3855,6 +3858,14 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
       if (uiModule) uiModule.showToast('Already sending');
       return;
     }
+    const activeDocument = docs.get(activeDocId);
+    // A stale keyboard/listener event must never try to send an ordinary
+    // Markdown artifact as email. The previous generic validation below
+    // surfaced the misleading "To and body are required" message instead.
+    if (!activeDocument || activeDocument.language !== 'email') {
+      if (uiModule) uiModule.showError('Only an email draft can be sent. This document is saved with Save.');
+      return;
+    }
     if (uiModule) uiModule.showToast('Preparing send', { duration: 1200 });
     const sendDocId = activeDocId;
     const to = document.getElementById('doc-email-to')?.value?.trim();
@@ -4307,6 +4318,11 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
   }
 
   async function _scheduleSend(anchorEl = null) {
+    const activeDocument = docs.get(activeDocId);
+    if (!activeDocument || activeDocument.language !== 'email') {
+      if (uiModule) uiModule.showError('Only an email draft can be scheduled. This document is saved with Save.');
+      return;
+    }
     const to = document.getElementById('doc-email-to')?.value?.trim();
     const cc = document.getElementById('doc-email-cc')?.value?.trim() || '';
     const bcc = document.getElementById('doc-email-bcc')?.value?.trim() || '';

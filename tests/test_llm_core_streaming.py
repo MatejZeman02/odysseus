@@ -77,6 +77,31 @@ def _sse(delta):
     return "data: " + json.dumps({"choices": [{"delta": delta}]})
 
 
+def test_stream_llm_forwards_explicit_tool_choice(monkeypatch):
+    """Selected editor actions can require a native document tool call."""
+    captured = {}
+
+    class _CaptureClient(_FakeClient):
+        def stream(self, method, url, **kwargs):
+            captured.update(kwargs)
+            return super().stream(method, url, **kwargs)
+
+    monkeypatch.setattr(llm_core, "_get_http_client", lambda: _CaptureClient(["data: [DONE]"]))
+    monkeypatch.setattr(llm_core, "_is_host_dead", lambda u: False)
+    monkeypatch.setattr(llm_core, "note_model_activity", lambda *a, **k: None)
+    monkeypatch.setattr(llm_core, "_clear_host_dead", lambda *a, **k: None)
+
+    async def run():
+        return [chunk async for chunk in llm_core.stream_llm(
+            "https://example.test/v1", "gpt-test", [{"role": "user", "content": "edit"}],
+            tools=[{"type": "function", "function": {"name": "update_document", "parameters": {}}}],
+            tool_choice="required",
+        )]
+
+    asyncio.run(run())
+    assert captured["json"]["tool_choice"] == "required"
+
+
 def test_parallel_calls_with_null_index_do_not_collide(monkeypatch):
     # Two parallel calls, each complete in one delta, both with index=None
     # (exactly what Gemini's OpenAI-compat layer emits). Only the first carries

@@ -1538,6 +1538,16 @@ def _turn_targets_active_document(intent: Dict[str, object], last_user: str, act
     ):
         return True
     if re.search(
+        r"\b(?:start|begin|continue|go ahead|please|can you)\s+(?:editing|working|writing|revising)\b",
+        text,
+    ):
+        return True
+    if re.search(
+        r"\b(?:edit|work on|write in|revise)\s+(?:it|this|the artifact|the document)\b",
+        text,
+    ):
+        return True
+    if re.search(
         r"\b(?:make it|make this|expand it|expand this|extend it|extend this|continue it|continue this)\b.*\b(?:longer|shorter|bigger|smaller|more detailed|more concise|expanded|extended)?\b",
         text,
     ):
@@ -1564,6 +1574,46 @@ def _is_email_document_obj(active_document) -> bool:
         or title_l in {"new email", "new mail", "new message"}
         or ("To:" in raw_doc[:400] and "Subject:" in raw_doc[:400] and "\n---\n" in raw_doc)
     )
+
+
+def _is_personal_artifact_document_obj(active_document) -> bool:
+    """Recognise the native editor surface created for a Personal artifact.
+
+    The title is server-authored by ``CompanionMemoryStore``. Treat this as a
+    dedicated document-edit surface so an agent does not perform an unrelated
+    private-memory search merely because the artifact is indexed for recall.
+    """
+    if active_document is None:
+        return False
+    title = str(getattr(active_document, "title", "") or "")
+    language = str(getattr(active_document, "language", "") or "").lower()
+    return title.startswith("Artifact · ") and language in {"markdown", "md"}
+
+
+def _turn_requests_active_document_edit(last_user: str) -> bool:
+    """Whether the owner is asking to change the visible document.
+
+    This is intentionally narrower than ``_turn_targets_active_document``.
+    Reading or discussing an open artifact must remain an ordinary answer;
+    phrases such as "start editing" or "rewrite it" require the document
+    action itself, rather than a draft pasted back into the chat.
+    """
+    text = str(last_user or "").strip().lower()
+    if not text:
+        return False
+    if re.search(
+        r"\b(?:start|begin|continue|go ahead|please|can you)\s+"
+        r"(?:editing|working|writing|revising)\b",
+        text,
+    ):
+        return True
+    return bool(re.search(
+        r"\b(?:edit|rewrite|rework|revise|change|update|fix|replace|"
+        r"write|add|append|insert|remove|delete|shorten|expand|improve)\b"
+        r"(?:.{0,100}\b(?:it|this|artifact|document|draft|text|poem|letter|"
+        r"paragraph|section|line|content)\b|$)",
+        text,
+    ))
 
 
 def _minimal_saved_memory_message(messages: List[Dict]) -> Optional[Dict]:
@@ -1836,6 +1886,12 @@ def _minimal_odysseus_doc_messages(messages: List[Dict], active_document, stream
                 f"{content_note}"
                 f"{content_for_prompt}"
             ),
+            # A Personal working artifact is owner-selected and the narrow
+            # route exposes only its sealed document-edit actions.  Its text
+            # stays untrusted data for the model, but it must not turn a
+            # direct owner request to revise that same artifact into a second
+            # approval prompt. Other documents retain the conservative gate.
+            arm_tool_gate=not _is_personal_artifact_document_obj(active_document),
         )
         active_document_message["_agent_injected"] = "context"
         out.append(active_document_message)
@@ -2421,6 +2477,14 @@ def _build_system_prompt(
                     f'text must match the document EXACTLY and must NOT include the leading line-number '
                     f'or tab (those are reference-only). To rewrite entirely: update_document.'
                 )
+                if _is_personal_artifact_document_obj(active_document):
+                    doc_ctx += (
+                        "\n\nPERSONAL WORKING ARTIFACT MODE: this open Markdown document is the exact "
+                        "artifact the owner asked to work on. Read or revise it directly with "
+                        "edit_document or update_document. Do NOT call manage_memory, search_chats, "
+                        "or any email/UI action to find or edit it. Do not ask the owner to approve a "
+                        "memory search: the visible document is the authoritative editing surface."
+                    )
                 if _document_writing_style:
                     doc_ctx += (
                         "\n\nDOCUMENT WRITING STYLE — use only for normal prose writing/revision in this "
@@ -2439,6 +2503,13 @@ def _build_system_prompt(
         _doc_message = untrusted_context_message(
             "active editor document",
             doc_ctx,
+            # Personal artifacts are selected by their owner and this route
+            # seals the target to the currently open document. Keep their
+            # contents untrusted data for the model, while allowing a direct
+            # request to edit that same artifact to use the narrow document
+            # write tool without an unrelated approval detour. Ordinary
+            # documents remain protected by the conservative tool gate.
+            arm_tool_gate=not _is_personal_artifact_document_obj(active_document),
         )
         _doc_message["_protected"] = True
 
@@ -3516,6 +3587,13 @@ async def stream_agent_loop(
     _existing_conversation = _user_turn_count(messages) > 1
     _active_document_relevant = _turn_targets_active_document(_intent, _last_user, active_document)
     _active_email_draft_relevant = _active_document_relevant and _is_email_document_obj(active_document)
+    _active_personal_artifact_document = (
+        _active_document_relevant and _is_personal_artifact_document_obj(active_document)
+    )
+    _active_personal_artifact_edit_requested = (
+        _active_personal_artifact_document
+        and _turn_requests_active_document_edit(_last_user)
+    )
     if _active_email_draft_relevant:
         disabled_tools.update({
             "list_email_accounts", "list_emails", "read_email", "scan_email_unsubscribes",
@@ -4100,6 +4178,16 @@ async def stream_agent_loop(
 
     def _route_relevant_tools(candidate_model: str):
         route_tools = None if _base_relevant_tools is None else set(_base_relevant_tools)
+        if _active_personal_artifact_document:
+            # A linked working artifact is already open and owner-selected.
+            # Keep the model on the narrow document path; broad memory and
+            # email tools caused the previous artifact edit to request the
+            # wrong approval and enter unrelated UI flows.
+            if _active_personal_artifact_edit_requested:
+                # The owner asked for a real revision, not commentary.  Do
+                # not let ``required`` resolve to suggest_document.
+                return {"edit_document", "update_document"}
+            return {"edit_document", "update_document", "suggest_document"}
         (
             _is_ody,
             doc_mode,
@@ -4335,6 +4423,11 @@ async def stream_agent_loop(
             "ody_doc_finetune_mode": doc_mode,
             "ody_notes_finetune_mode": notes_mode,
             "ody_doc_stream_create_mode": stream_create_mode,
+            # A selected Personal artifact plus an explicit edit request is a
+            # concrete action, not a request for a chat draft.  Require one of
+            # the narrowed document tools on OpenAI-compatible providers so a
+            # model cannot reason about editing and then merely paste its draft.
+            "require_document_tool": _active_personal_artifact_edit_requested,
             "compaction_state": compaction_state,
             "was_compacted": was_compacted,
         }
@@ -4767,6 +4860,7 @@ async def stream_agent_loop(
             "ody_doc_finetune_mode": _ody_doc_finetune_mode,
             "ody_notes_finetune_mode": _ody_notes_finetune_mode,
             "ody_doc_stream_create_mode": _ody_doc_stream_create_mode,
+            "require_document_tool": _active_personal_artifact_edit_requested,
             "compaction_state": (
                 _route_state.get("compaction_state", {}) if round_num == 1 else {}
             ),
@@ -4842,6 +4936,9 @@ async def stream_agent_loop(
                 "kwargs": {
                     "tools": candidate_tools or None,
                     "tool_choice_none": state["ody_doc_finetune_mode"],
+                    "tool_choice": (
+                        "required" if state.get("require_document_tool") and candidate_tools else None
+                    ),
                     "temperature": (
                         _ody_qwen_temperature_cap(_requested_temperature)
                         if _is_odysseus_qwen_model(candidate_model)
