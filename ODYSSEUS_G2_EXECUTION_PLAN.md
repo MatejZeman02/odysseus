@@ -23,8 +23,10 @@ every capability:
   memory, add home-scoped recall, permissioned Personal-to-project context,
   and revisioned Markdown `.artifacts`; see
   [`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md).
-- **G2D — Computer Help Diagnostics:** read-only host diagnostics under a
-  separately designed authority and approval model.
+- **G2D — Sandboxed Computer Help:** brokered host diagnostics, sandboxed
+  user-level execution, persistent incident plans, and a Codex-like automatic
+  approval mode; see
+  [`ODYSSEUS_G2D_EXECUTION_PLAN.md`](ODYSSEUS_G2D_EXECUTION_PLAN.md).
 
 The stages inside this document are named **Stage 1–5** so they cannot be
 confused with the G2A–G2D product milestones.

@@ -301,5 +301,7 @@ Actual project-state branch merging remains outside G2C.
 - Qwen auto-memory and direct Qwen writes;
 - background reflection, autonomous TODO execution, reminders, or engagement
   optimization;
-- Computer Help memory and diagnostics, which remain G2D;
+- Computer Help memory, diagnostics, and user-level sandboxed assistance,
+  which remain G2D; see
+  [`ODYSSEUS_G2D_EXECUTION_PLAN.md`](ODYSSEUS_G2D_EXECUTION_PLAN.md);
 - claim graphs, transitive project graphs, and the larger `_HUGE` architecture.
