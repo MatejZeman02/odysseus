@@ -7249,10 +7249,10 @@ import { bindMenuDismiss, dismissOrRemove } from './escMenuStack.js';
     }
   }
 
-  export async function loadDocument(docId) {
+  export async function loadDocument(docId, { refresh = false } = {}) {
     _closeNotesForDocumentOpen();
     // If already in tabs, just switch
-    if (docs.has(docId)) {
+    if (docs.has(docId) && !refresh) {
       _ensureDocPaneMounted();
       switchToDoc(docId);
       return;

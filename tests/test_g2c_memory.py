@@ -1,6 +1,7 @@
 """G2C scoped-memory/artifact regression coverage."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -85,6 +86,44 @@ def test_personal_artifact_opens_in_native_document_and_editor_save_stays_scoped
     finally:
         db.close()
     assert memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])["content"].endswith("updated")
+
+
+def test_agent_document_writes_keep_a_linked_personal_artifact_authoritative(store, monkeypatch):
+    """Agent tools and manual editor saves share the same artifact transaction."""
+    import src.database as agent_database
+    from src.agent_tools.document_tools import EditDocumentTool, UpdateDocumentTool
+
+    _continuity, memory = store
+    artifact = memory.write_personal_artifact(
+        owner="alice", session_id="personal", path="drafts/agent.md", content="# Draft\nplaceholder",
+    )
+    document = memory.open_personal_artifact_document(
+        owner="alice", session_id="personal", artifact_id=artifact["id"],
+    )
+    monkeypatch.setattr(agent_database, "SessionLocal", memory_module.SessionLocal)
+
+    edited = asyncio.run(EditDocumentTool().execute(
+        "<<<FIND>>>\nplaceholder\n<<<REPLACE>>>\nfirst agent revision\n<<<END>>>",
+        {"owner": "alice", "doc_id": document["id"]},
+    ))
+    assert edited["action"] == "edit"
+    first = memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])
+    assert first["revision"] == 2
+    assert first["content"].endswith("first agent revision")
+
+    updated = asyncio.run(UpdateDocumentTool().execute(
+        "# Draft\nsecond agent revision", {"owner": "alice", "doc_id": document["id"]},
+    ))
+    assert updated["action"] == "update"
+    second = memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])
+    assert second["revision"] == 3
+    assert second["content"].endswith("second agent revision")
+    db = memory_module.SessionLocal()
+    try:
+        recalled = db.query(ScopedMemoryRecord).filter(ScopedMemoryRecord.source_id == artifact["id"]).one()
+        assert "second agent revision" in recalled.content
+    finally:
+        db.close()
 
 
 def test_personal_artifact_and_document_link_survive_a_file_database_restart(tmp_path, monkeypatch):

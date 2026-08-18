@@ -72,6 +72,25 @@ def test_checkpoint_preserves_raw_transcript_and_keeps_tool_trace_atomic(monkeyp
     assert bundle.thread_checkpoint.objective == "only newly eligible messages"
 
 
+def test_checkpoint_recovers_when_prior_cursor_was_deleted(monkeypatch):
+    store = _store(monkeypatch)
+    project_id = store.create_project(owner="alice", name="P", workspace_root="/p")
+    store.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=project_id)
+    old = [_message("user", "old request", 1), _message("assistant", "old answer", 2)]
+    CheckpointCompactor(store, tail_count=1).checkpoint(owner="alice", session_id="session", messages=old)
+
+    # The previous cursor no longer occurs in the material retained by a cold
+    # client (or after an owner deletes earlier messages).  The new turn must
+    # still complete and establish a current checkpoint/project brief.
+    retained = [_message("user", "new request", 3), _message("assistant", "new answer", 4)]
+    checkpoint = CheckpointCompactor(store, tail_count=1).checkpoint(
+        owner="alice", session_id="session", messages=retained,
+        derive=lambda _: {"objective": "current objective"},
+    )
+    assert checkpoint.source_message_ids == ["m3"]
+    assert store.latest_project_brief(owner="alice", project_id=project_id).summary == "current objective"
+
+
 def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):
     store = _store(monkeypatch)
     home = store.create_project(owner="alice", name="Home", workspace_root="/home")

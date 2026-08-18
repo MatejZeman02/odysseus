@@ -3963,14 +3963,21 @@ import { loadPanel } from './panels.js';
                   && json.doc_id
                   && ['create_document', 'update_document', 'edit_document'].includes(json.tool)
                 ) {
-                  documentModule.handleDocUpdate({
-                    type: 'doc_update',
-                    doc_id: json.doc_id,
-                    title: json.document_title || '',
-                    language: json.document_language || '',
-                    version: json.document_version || 1,
-                    content: json.document_content || '',
-                  });
+                  // Older agent paths can emit document metadata without the
+                  // full body. Do not replace an open document with an empty
+                  // editor; reload the authoritative record in that case.
+                  if (typeof json.document_content === 'string' && json.document_content) {
+                    documentModule.handleDocUpdate({
+                      type: 'doc_update',
+                      doc_id: json.doc_id,
+                      title: json.document_title || '',
+                      language: json.document_language || '',
+                      version: json.document_version || 1,
+                      content: json.document_content,
+                    });
+                  } else {
+                    await documentModule.loadDocument(json.doc_id, { refresh: true });
+                  }
                 }
 
                 // Schedule a thinking spinner between tool rounds (short delay so

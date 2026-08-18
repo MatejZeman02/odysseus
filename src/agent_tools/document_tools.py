@@ -115,6 +115,23 @@ def _approved_document_version_error(doc: Any, ctx: dict) -> Optional[Dict]:
     }
 
 
+def _stage_linked_personal_artifact_update(db: Any, doc: Any, owner: Any, content: str):
+    """Keep a Personal artifact authoritative when an agent edits its Document.
+
+    Native editor saves already use this transaction boundary. Agent document
+    tools must use the same one: otherwise the visible document changes while
+    the artifact supplied to Personal Advisor and recall remains stale.
+    """
+    from src.companion_memory import CompanionMemoryStore
+
+    return CompanionMemoryStore.sync_personal_artifact_from_document(
+        db,
+        owner=str(getattr(doc, "owner", None) or owner or ""),
+        document_id=str(doc.id),
+        content=content,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Document tools — create/update/edit/suggest living documents
 # ---------------------------------------------------------------------------
@@ -541,6 +558,7 @@ class UpdateDocumentTool:
             doc.current_content = new_content
             doc.version_count = new_ver
             db.add(ver)
+            _stage_linked_personal_artifact_update(db, doc, owner, new_content)
             db.commit()
 
             return {
@@ -625,6 +643,7 @@ class EditDocumentTool:
                     doc.current_content = updated_content
                     doc.version_count = new_ver
                     db.add(ver)
+                    _stage_linked_personal_artifact_update(db, doc, owner, updated_content)
                     db.commit()
                     return {
                         "action": "edit",
@@ -693,6 +712,7 @@ class EditDocumentTool:
             doc.current_content = updated_content
             doc.version_count = new_ver
             db.add(ver)
+            _stage_linked_personal_artifact_update(db, doc, owner, updated_content)
             db.commit()
 
             return {

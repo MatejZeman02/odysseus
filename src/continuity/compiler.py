@@ -119,8 +119,14 @@ class CheckpointCompactor:
             ids = [str(item["metadata"].get("_db_id") or "") for item in transcript]
             try:
                 source_start = ids.index(previous.source_through_message_id) + 1
-            except ValueError as exc:
-                raise ValueError("prior checkpoint cursor is absent from the raw transcript") from exc
+            except ValueError:
+                # Histories may legitimately lose an older row when the owner
+                # deletes it, or when a cold session has only the persisted
+                # tail hydrated.  A checkpoint is an acceleration layer, not
+                # authority to reject an otherwise successful turn.  Rebuild
+                # from the currently available transcript in that case; the
+                # new checkpoint carries only durable IDs that actually exist.
+                source_start = 0
         source = transcript[source_start:start]
         if not source:
             return previous
