@@ -28,6 +28,12 @@ class PersonalArtifactWrite(BaseModel):
     source_message_id: str | None = Field(default=None, max_length=128)
 
 
+class LongPasteCapture(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+    content: str = Field(min_length=6000, max_length=512 * 1024)
+
+
 class ArtifactUndo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
@@ -133,6 +139,16 @@ def setup_companion_memory_routes() -> APIRouter:
                 503,
                 "Artifact storage needs a one-time update. Restart Odysseus, then try again.",
             ) from exc
+
+    @router.post("/artifacts/capture-paste")
+    def capture_long_paste(payload: LongPasteCapture, request: Request):
+        try:
+            return memory.capture_long_paste(owner=_owner(request), **payload.model_dump())
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+        except SQLAlchemyError as exc:
+            logger.exception("Long paste capture failed for session %s", payload.session_id)
+            raise HTTPException(503, "The pasted text could not be stored. It remains in the composer.") from exc
 
     @router.get("/artefacts/personal/{artifact_id}", include_in_schema=False)
     @router.get("/artifacts/personal/{artifact_id}")

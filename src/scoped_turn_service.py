@@ -126,6 +126,8 @@ def render_context_bundle(bundle: ContextBundle) -> str:
         parts.append("# Explicit direct-related project brief\n" + json.dumps(brief.to_payload(), sort_keys=True))
     if bundle.episodic_hits:
         parts.append("# Scope-verified episodic hits\n" + json.dumps(bundle.episodic_hits, sort_keys=True))
+    if bundle.working_artifacts:
+        parts.append("# Working artifacts\n" + json.dumps(bundle.working_artifacts, sort_keys=True))
     parts.append("# Recent raw transcript tail\n" + json.dumps(bundle.transcript_tail, sort_keys=True))
     parts.append("# Current request\n" + bundle.request)
     parts.append(

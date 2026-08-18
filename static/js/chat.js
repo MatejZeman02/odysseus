@@ -1456,6 +1456,52 @@ import { loadPanel } from './panels.js';
       }
     }
 
+    // Long user pastes in Companion homes are durable working material, not
+    // chat history. Store the exact text first, then send and display a short
+    // scoped artifact reference. If storage refuses the paste (including the
+    // credential scanner), leave the original text in the composer.
+    const LONG_PASTE_ARTIFACT_THRESHOLD = 6000;
+    let effectiveMsg = msg;
+    let longPasteDisplay = '';
+    if (!approvalForSend && !isIncognitoForSend && msg.length >= LONG_PASTE_ARTIFACT_THRESHOLD) {
+      const activeSession = sessionModule.getSessions().find(
+        session => session.id === sessionModule.getCurrentSessionId()
+      );
+      if (activeSession && ['personal', 'project'].includes(activeSession.scope_kind)) {
+        try {
+          const captureResponse = await fetch('/api/companion/artifacts/capture-paste', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              session_id: activeSession.id,
+              content: msg,
+            }),
+          });
+          const captureBody = await captureResponse.text();
+          let captured = {};
+          try { captured = captureBody ? JSON.parse(captureBody) : {}; }
+          catch (_) { throw new Error(`Could not save pasted text (server error ${captureResponse.status})`); }
+          if (!captureResponse.ok) throw new Error(captured.detail || 'Could not save pasted text');
+          effectiveMsg = [
+            `My complete pasted message is stored in the scoped artifact \`${captured.path}\`.`,
+            'Read its supplied content as the exact current request and source material, then respond to it.',
+          ].join(' ');
+          const preview = msg.replace(/\s+/g, ' ').trim().slice(0, 280);
+          longPasteDisplay = [
+            `Long paste saved as artifact \`${captured.path}\` (${captured.character_count.toLocaleString()} characters).`,
+            preview + (msg.length > 280 ? '…' : ''),
+          ].join('\n\n');
+          uiModule.showToast?.(`Long paste saved as ${captured.path}`, 2600);
+        } catch (error) {
+          uiModule.showError?.(error.message || 'Could not save pasted text. It remains in the composer.');
+          updateSubmitButton('idle', submitBtn);
+          _releaseSendFlag();
+          return;
+        }
+      }
+    }
+
 
     const messageInput = el('message');
     const originalBtnText = submitBtn ? submitBtn.innerHTML : '';
@@ -1500,7 +1546,7 @@ import { loadPanel } from './panels.js';
     if (_streamGenerations.get(streamSessionId) !== streamGeneration) return;
 
     _terminalSavedStreams.delete(streamSessionId);
-    const streamQuery = msg;
+    const streamQuery = effectiveMsg;
     _touchStreamActivity(streamSessionId);
 
     // Acquire Web Lock to hint browser not to discard this tab while streaming
@@ -1595,7 +1641,7 @@ import { loadPanel } from './panels.js';
         _displayOverride = `[Doc edit: ${lineRefs.join(', ')}] ${msg}`;
       }
 
-      const userDisplay = _displayOverride || msg;
+      const userDisplay = longPasteDisplay || _displayOverride || effectiveMsg;
       _displayOverride = null;
       const skipBubble = _hideUserBubble;
       _hideUserBubble = false;
@@ -1817,19 +1863,19 @@ import { loadPanel } from './panels.js';
       }
 
       // Inject document selection context if present
-      let finalMsg = msg;
+      let finalMsg = effectiveMsg;
       if (docSel) {
         const sels = Array.isArray(docSel) ? docSel : [docSel];
         if (sels.length === 1) {
           const s = sels[0];
           const lineRef = s.startLine === s.endLine ? `line ${s.startLine}` : `lines ${s.startLine}-${s.endLine}`;
-          finalMsg = `In the document, edit this specific text (${lineRef}):\n\`\`\`\n${s.text}\n\`\`\`\n\nInstruction: ${msg}`;
+          finalMsg = `In the document, edit this specific text (${lineRef}):\n\`\`\`\n${s.text}\n\`\`\`\n\nInstruction: ${effectiveMsg}`;
         } else {
           const parts = sels.map((s, i) => {
             const lineRef = s.startLine === s.endLine ? `line ${s.startLine}` : `lines ${s.startLine}-${s.endLine}`;
             return `Selection ${i + 1} (${lineRef}):\n\`\`\`\n${s.text}\n\`\`\``;
           });
-          finalMsg = `In the document, edit these specific sections:\n\n${parts.join('\n\n')}\n\nInstruction: ${msg}`;
+          finalMsg = `In the document, edit these specific sections:\n\n${parts.join('\n\n')}\n\nInstruction: ${effectiveMsg}`;
         }
       }
 

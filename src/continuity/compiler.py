@@ -12,8 +12,8 @@ from .contracts import ContextBundle, PersonalBriefV1, ProjectBriefV1, ThreadChe
 from .store import ContinuityStore
 
 
-_MAX_EXPLICIT_PERSONAL_ARTIFACTS = 2
-_MAX_EXPLICIT_PERSONAL_ARTIFACT_CHARS = 64 * 1024
+_MAX_EXPLICIT_ARTIFACTS = 2
+_MAX_EXPLICIT_ARTIFACT_CHARS = 64 * 1024
 
 
 def _message_dict(message: Any) -> dict[str, Any]:
@@ -32,8 +32,8 @@ def _message_dict(message: Any) -> dict[str, Any]:
     }
 
 
-def _explicit_personal_artifact_paths(request: str, artifacts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
-    """Select only personal drafts the owner explicitly named this turn.
+def _explicit_artifact_paths(request: str, artifacts: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
+    """Select only scoped artifacts the owner explicitly named this turn.
 
     A path, filename, or readable stem (``love letter`` for
     ``love-letter.md``) selects an artifact. Generic wording such as "my
@@ -51,7 +51,7 @@ def _explicit_personal_artifact_paths(request: str, artifacts: Iterable[Mapping[
         title = re.sub(r"[_-]+", " ", stem).strip()
         if normalized_path in requested or filename in requested or (title and title in requested):
             selected.append(path)
-        if len(selected) >= _MAX_EXPLICIT_PERSONAL_ARTIFACTS:
+        if len(selected) >= _MAX_EXPLICIT_ARTIFACTS:
             break
     return tuple(selected)
 
@@ -241,26 +241,31 @@ class ContextCompiler:
                 working_artifacts = tuple(memory.list_artifacts(
                     owner=owner, scope_kind=scope.scope_kind, project_id=scope.project_id,
                 ))
+                requested_paths = _explicit_artifact_paths(request, working_artifacts)
+                selected_bodies: dict[str, dict[str, Any]] = {}
+                for path in requested_paths:
+                    artifact = memory.get_scoped_artifact_by_path(
+                        owner=owner,
+                        scope_kind=scope.scope_kind,
+                        project_id=scope.project_id,
+                        path=path,
+                    )
+                    content = str(artifact.get("content") or "")
+                    if len(content) > _MAX_EXPLICIT_ARTIFACT_CHARS:
+                        artifact["content"] = content[:_MAX_EXPLICIT_ARTIFACT_CHARS]
+                        artifact["content_truncated"] = True
+                    selected_bodies[path] = artifact
+                if selected_bodies:
+                    working_artifacts = tuple(
+                        selected_bodies.get(str(item.get("path")), item)
+                        for item in working_artifacts
+                    )
                 if scope.scope_kind == "personal":
                     # The Personal Advisor gets an index of its own working
                     # drafts, but exact body text is mounted only when the
                     # owner names a draft in this request. This lets it revise
                     # a named letter without repeating that letter in every
                     # Personal turn or exposing unrelated drafts.
-                    requested_paths = _explicit_personal_artifact_paths(request, working_artifacts)
-                    selected_bodies: dict[str, dict[str, Any]] = {}
-                    for path in requested_paths:
-                        artifact = memory.get_personal_artifact_by_path(owner=owner, path=path)
-                        content = str(artifact.get("content") or "")
-                        if len(content) > _MAX_EXPLICIT_PERSONAL_ARTIFACT_CHARS:
-                            artifact["content"] = content[:_MAX_EXPLICIT_PERSONAL_ARTIFACT_CHARS]
-                            artifact["content_truncated"] = True
-                        selected_bodies[path] = artifact
-                    if selected_bodies:
-                        working_artifacts = tuple(
-                            selected_bodies.get(str(item.get("path")), item)
-                            for item in working_artifacts
-                        )
                     context_grants = tuple(memory.approved_grants(owner=owner, personal_session_id=session_id))
                     # An approved grant exposes only a project brief and its
                     # explicitly selected artifact identities, never raw chat.

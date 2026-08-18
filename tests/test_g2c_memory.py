@@ -185,6 +185,69 @@ def test_personal_advisor_gets_only_an_explicitly_named_artifact_body(store):
     assert bundle.manifest["selected_working_artifact_paths"] == ["drafts/love-letter.md"]
 
 
+def test_long_personal_paste_is_stored_once_and_mounted_by_reference(store):
+    continuity, memory = store
+    pasted = "Please summarize this log.\n" + ("diagnostic line\n" * 500)
+    artifact = memory.capture_long_paste(owner="alice", session_id="personal", content=pasted)
+
+    assert artifact["scope_kind"] == "personal"
+    assert artifact["path"].startswith("pastes/")
+    assert artifact["character_count"] == len(pasted)
+    request = f"Read the complete pasted request in `{artifact['path']}` and answer it."
+    bundle = ContextCompiler(continuity).compile(
+        owner="alice", session_id="personal", request=request, transcript=[],
+    )
+    selected = next(item for item in bundle.working_artifacts if item["id"] == artifact["id"])
+    assert selected["content"] == pasted
+    assert bundle.manifest["selected_working_artifact_paths"] == [artifact["path"]]
+
+
+def test_long_project_paste_stays_out_of_workspace_and_is_qwen_context(store, tmp_path):
+    continuity, memory = store
+    workspace = tmp_path / "dust"
+    workspace.mkdir()
+    db = memory_module.SessionLocal()
+    try:
+        db.query(Project).filter(Project.id == "dust").update({Project.workspace_root: str(workspace)})
+        db.commit()
+    finally:
+        db.close()
+    pasted = "Investigate this build output.\n" + ("compiler diagnostic\n" * 400)
+    artifact = memory.capture_long_paste(owner="alice", session_id="project", content=pasted)
+
+    assert artifact["scope_kind"] == "project"
+    assert artifact["project_id"] == "dust"
+    assert list(workspace.iterdir()) == []
+    indexed = memory.list_artifacts(owner="alice", scope_kind="project", project_id="dust")
+    assert [item["path"] for item in indexed] == [artifact["path"]]
+    bundle = ContextCompiler(continuity).compile(
+        owner="alice", session_id="project",
+        request=f"Use `{artifact['path']}` as my complete request.", transcript=[],
+    )
+    assert bundle.working_artifacts[0]["content"] == pasted
+    assert bundle.manifest["selected_working_artifact_paths"] == [artifact["path"]]
+
+
+def test_long_paste_capture_rejects_secrets_and_non_companion_sessions(store):
+    _continuity, memory = store
+    with pytest.raises(MemoryScopeError, match="credential-like"):
+        memory.capture_long_paste(
+            owner="alice", session_id="personal",
+            content=("ordinary log line\n" * 400) + "api_key=supersecretvalue",
+        )
+    db = memory_module.SessionLocal()
+    try:
+        db.add(DbSession(
+            id="general", owner="alice", name="General", endpoint_url="http://x", model="m",
+            scope_kind="general",
+        ))
+        db.commit()
+    finally:
+        db.close()
+    with pytest.raises(MemoryScopeError, match="Personal or project"):
+        memory.capture_long_paste(owner="alice", session_id="general", content="x" * 6000)
+
+
 def test_project_memory_needs_grant_or_explicit_owner_request(store):
     continuity, memory = store
     continuity.write_project_brief(owner="alice", brief=ProjectBriefV1(project_id="dust", summary="Dust private brief"), source_hash="dust")
@@ -287,12 +350,16 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "/context-grants" in routes
     assert "/artifacts/personal" in routes
     assert "/artifacts/personal/{artifact_id}/document" in routes
+    assert "/artifacts/capture-paste" in routes
     assert "overflow-companion-context-btn" in page
     assert "overflow-companion-artifacts-btn" in page
     assert 'id="companion-context-btn"' not in page
     assert 'id="companion-artifacts-btn"' not in page
     assert "Allow once" in ui
     assert "project material is never searched automatically" in ui.lower()
+    chat = open("static/js/chat.js", encoding="utf-8").read()
+    assert "LONG_PASTE_ARTIFACT_THRESHOLD = 6000" in chat
+    assert "Long paste saved as artifact" in chat
 
 
 def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store, monkeypatch):
@@ -317,6 +384,11 @@ def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store,
     assert context["artifacts"][0]["path"] == "drafts/route-test.md"
     assert opened["title"] == "Artifact · drafts/route-test.md"
     assert opened["current_content"].endswith("First version")
+    captured = endpoint("/api/companion/artifacts/capture-paste")(
+        routes.LongPasteCapture(session_id="personal", content="pasted line\n" * 600), request,
+    )
+    assert captured["path"].startswith("pastes/")
+    assert captured["character_count"] == len("pasted line\n" * 600)
 
 
 def test_personal_artifact_ui_uses_bridge_payload_without_a_second_load_race():

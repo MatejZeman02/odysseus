@@ -29,6 +29,10 @@ class ArtifactConflict(MemoryScopeError):
     pass
 
 
+LONG_PASTE_ARTIFACT_THRESHOLD = 6000
+MAX_ARTIFACT_BYTES = 512 * 1024
+
+
 _SECRET_RE = re.compile(
     r"(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:api[_-]?key|secret|token|password)\b\s*[:=]\s*[^\s]{8,})",
     re.IGNORECASE,
@@ -82,10 +86,14 @@ class CompanionMemoryStore:
         """
         query = db.query(ScopedMemoryRecord).filter(
             ScopedMemoryRecord.owner == artifact.owner,
-            ScopedMemoryRecord.scope_kind == "personal",
-            ScopedMemoryRecord.project_id == None,
+            ScopedMemoryRecord.scope_kind == artifact.scope_kind,
             ScopedMemoryRecord.source_kind == "working_artifact",
             ScopedMemoryRecord.source_id == artifact.id,
+        )
+        query = (
+            query.filter(ScopedMemoryRecord.project_id == artifact.project_id)
+            if artifact.project_id
+            else query.filter(ScopedMemoryRecord.project_id == None)
         )
         if artifact.status != "active":
             query.delete(synchronize_session=False)
@@ -100,8 +108,8 @@ class CompanionMemoryStore:
         db.add(ScopedMemoryRecord(
             id=uuid.uuid4().hex,
             owner=artifact.owner,
-            scope_kind="personal",
-            project_id=None,
+            scope_kind=artifact.scope_kind,
+            project_id=artifact.project_id,
             session_id=session_id,
             source_kind="working_artifact",
             source_id=artifact.id,
@@ -236,26 +244,41 @@ class CompanionMemoryStore:
         if scope_kind == "project":
             if not project_id:
                 return []
-            # Project artifacts are source-controlled workspace files.  Qwen
-            # never writes them directly; G2B's transaction can create them
-            # under .artifacts and this is a read-only index for G2C context.
             db = SessionLocal()
             try:
                 project = self._project(db, owner, project_id)
-                root = Path(project.workspace_root).resolve(strict=True)
-            except (OSError, RuntimeError, MemoryScopeError):
-                return []
+                captured = [
+                    self.serialise_artifact(row)
+                    for row in db.query(WorkingArtifact).filter(
+                        WorkingArtifact.owner == owner,
+                        WorkingArtifact.scope_kind == "project",
+                        WorkingArtifact.project_id == project_id,
+                        WorkingArtifact.status == "active",
+                    ).order_by(WorkingArtifact.path.asc()).all()
+                ]
+                workspace_root = project.workspace_root
             finally:
                 db.close()
+            # Project artifacts are source-controlled workspace files.  Qwen
+            # never writes them directly; G2B's transaction can create them
+            # under .artifacts. Captured user pastes remain in owner-private
+            # Odysseus storage and are merged into this read-only index.
+            try:
+                root = Path(workspace_root).resolve(strict=True)
+            except (OSError, RuntimeError):
+                return captured
             artifact_root = root / ".artifacts"
             if not artifact_root.is_dir() or artifact_root.is_symlink():
-                return []
-            records = []
+                return captured
+            records = list(captured)
+            captured_paths = {item["path"] for item in captured}
             try:
                 for candidate in sorted(artifact_root.rglob("*.md")):
                     if not candidate.is_file() or candidate.is_symlink():
                         continue
                     relative = candidate.relative_to(root).as_posix()
+                    if relative in captured_paths:
+                        continue
                     data = candidate.read_text(encoding="utf-8")
                     records.append({"id": f"project:{project_id}:{relative}", "scope_kind": "project", "project_id": project_id,
                                     "path": relative, "title": candidate.stem, "summary": _summary(data), "revision": 1,
@@ -290,7 +313,7 @@ class CompanionMemoryStore:
     def write_personal_artifact(self, *, owner: str, session_id: str, path: str, content: str,
                                 expected_revision: int | None = None, source_message_id: str | None = None) -> dict:
         path = normalise_artifact_path(path)
-        if not isinstance(content, str) or len(content.encode("utf-8")) > 512 * 1024:
+        if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
             raise MemoryScopeError("Artifact content must be UTF-8 Markdown up to 512 KiB")
         if _SECRET_RE.search(content):
             raise MemoryScopeError("Artifact contains credential-like material and was not saved")
@@ -332,6 +355,61 @@ class CompanionMemoryStore:
         finally:
             db.close()
 
+    def capture_long_paste(self, *, owner: str, session_id: str, content: str) -> dict:
+        """Persist one large user paste without adding it to the raw transcript.
+
+        The server chooses the path and scope. Project captures live in
+        Odysseus data rather than the checkout, so this does not weaken the
+        read-only Qwen workspace boundary.
+        """
+        if not isinstance(content, str) or len(content) < LONG_PASTE_ARTIFACT_THRESHOLD:
+            raise MemoryScopeError(
+                f"Automatic paste artifacts require at least {LONG_PASTE_ARTIFACT_THRESHOLD} characters"
+            )
+        if len(content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
+            raise MemoryScopeError("Pasted text must be UTF-8 and no larger than 512 KiB")
+        if _SECRET_RE.search(content):
+            raise MemoryScopeError("Pasted text contains credential-like material and was not saved or sent")
+        db = SessionLocal()
+        try:
+            session = db.query(DbSession).filter(
+                DbSession.id == session_id,
+                DbSession.owner == owner,
+            ).first()
+            if not session or session.scope_kind not in {"personal", "project"}:
+                raise MemoryScopeError("Automatic paste artifacts require a Personal or project home")
+            project_id = session.project_id if session.scope_kind == "project" else None
+            if session.scope_kind == "project":
+                if not project_id:
+                    raise MemoryScopeError("Project session is missing its project scope")
+                self._project(db, owner, project_id)
+            stamp = utcnow_naive().strftime("%Y-%m-%d-%H%M%S")
+            path = f"pastes/{stamp}-{uuid.uuid4().hex[:8]}.md"
+            row = WorkingArtifact(
+                id=uuid.uuid4().hex,
+                owner=owner,
+                scope_kind=session.scope_kind,
+                project_id=project_id,
+                path=path,
+                title=f"Pasted text {stamp}",
+                summary=_summary(content),
+                content=content,
+                content_hash=_hash(content),
+                revision=1,
+            )
+            db.add(row)
+            self._sync_artifact_recall(db, row, session_id=session_id)
+            db.commit()
+            db.refresh(row)
+            result = self.serialise_artifact(row)
+            result["character_count"] = len(content)
+            return result
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def get_personal_artifact(self, *, owner: str, artifact_id: str) -> dict:
         db = SessionLocal()
         try:
@@ -365,6 +443,50 @@ class CompanionMemoryStore:
             if not row:
                 raise MemoryScopeError("Artifact was not found")
             return self.serialise_artifact(row, include_content=True)
+        finally:
+            db.close()
+
+    def get_scoped_artifact_by_path(
+        self, *, owner: str, scope_kind: str, project_id: str | None, path: str,
+    ) -> dict:
+        """Read an explicitly named artifact after its scope was resolved."""
+        path = normalise_artifact_path(path)
+        db = SessionLocal()
+        try:
+            query = db.query(WorkingArtifact).filter(
+                WorkingArtifact.owner == owner,
+                WorkingArtifact.scope_kind == scope_kind,
+                WorkingArtifact.path == path,
+                WorkingArtifact.status == "active",
+            )
+            query = query.filter(WorkingArtifact.project_id == project_id) if project_id else query.filter(WorkingArtifact.project_id == None)
+            row = query.first()
+            if row:
+                return self.serialise_artifact(row, include_content=True)
+            if scope_kind != "project" or not project_id or not path.startswith(".artifacts/"):
+                raise MemoryScopeError("Artifact was not found")
+            project = self._project(db, owner, project_id)
+            root = Path(project.workspace_root).resolve(strict=True)
+            candidate = (root / path).resolve(strict=True)
+            artifact_root = (root / ".artifacts").resolve(strict=True)
+            if candidate.is_symlink() or not candidate.is_file() or not candidate.is_relative_to(artifact_root):
+                raise MemoryScopeError("Artifact was not found")
+            content = candidate.read_text(encoding="utf-8")
+            return {
+                "id": f"project:{project_id}:{path}",
+                "scope_kind": "project",
+                "project_id": project_id,
+                "path": path,
+                "title": candidate.stem,
+                "summary": _summary(content),
+                "revision": 1,
+                "content_hash": _hash(content),
+                "updated_at": None,
+                "source_message_id": None,
+                "content": content,
+            }
+        except (OSError, UnicodeDecodeError) as exc:
+            raise MemoryScopeError("Artifact was not found") from exc
         finally:
             db.close()
 
