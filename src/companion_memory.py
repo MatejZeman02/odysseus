@@ -16,7 +16,8 @@ from typing import Iterable
 
 from core.database import (
     ContextGrant, Project, Session as DbSession, SessionLocal, WorkingArtifact,
-    WorkingArtifactRevision, Document, DocumentVersion, utcnow_naive,
+    WorkingArtifactRevision, Document, DocumentVersion, ScopedMemoryRecord,
+    utcnow_naive,
 )
 
 
@@ -65,6 +66,48 @@ def _json_list(value: str) -> list[str]:
 
 class CompanionMemoryStore:
     """Small transaction boundary for G2C memory objects."""
+
+    @staticmethod
+    def _sync_artifact_recall(
+        db,
+        artifact: WorkingArtifact,
+        *,
+        session_id: str | None = None,
+    ) -> None:
+        """Keep the rebuildable recall record aligned with artifact lifecycle.
+
+        The working artifact remains the source of truth.  Its lightweight
+        recall entry must disappear when the artifact is deleted and must not
+        retain old text after a document save, Undo, or Restore.
+        """
+        query = db.query(ScopedMemoryRecord).filter(
+            ScopedMemoryRecord.owner == artifact.owner,
+            ScopedMemoryRecord.scope_kind == "personal",
+            ScopedMemoryRecord.project_id == None,
+            ScopedMemoryRecord.source_kind == "working_artifact",
+            ScopedMemoryRecord.source_id == artifact.id,
+        )
+        if artifact.status != "active":
+            query.delete(synchronize_session=False)
+            return
+        content = f"{artifact.path}\n{artifact.summary}"
+        record = query.first()
+        if record:
+            record.content = content
+            if session_id:
+                record.session_id = session_id
+            return
+        db.add(ScopedMemoryRecord(
+            id=uuid.uuid4().hex,
+            owner=artifact.owner,
+            scope_kind="personal",
+            project_id=None,
+            session_id=session_id,
+            source_kind="working_artifact",
+            source_id=artifact.id,
+            content=content,
+            sensitivity="normal",
+        ))
 
     def _personal(self, db, owner: str, session_id: str) -> DbSession:
         row = db.query(DbSession).filter(
@@ -186,6 +229,7 @@ class CompanionMemoryStore:
         artifact.content_hash = _hash(content)
         artifact.summary = _summary(content)
         artifact.revision += 1
+        CompanionMemoryStore._sync_artifact_recall(db, artifact)
         return artifact
 
     def list_artifacts(self, *, owner: str, scope_kind: str, project_id: str | None = None) -> list[dict]:
@@ -278,16 +322,10 @@ class CompanionMemoryStore:
                     content=content, content_hash=digest, revision=1, source_message_id=source_message_id,
                 )
                 db.add(row)
+            self._sync_artifact_recall(db, row, session_id=session_id)
             self._sync_document_from_artifact(db, row, session_id)
             db.commit(); db.refresh(row)
             result = self.serialise_artifact(row, include_content=True)
-            try:
-                from src.scoped_memory import ScopedMemoryIndex
-                ScopedMemoryIndex().index(owner=owner, scope_kind="personal", project_id=None, session_id=session_id,
-                                          source_kind="working_artifact", source_id=row.id,
-                                          content=f"{row.path}\n{row.summary}")
-            except Exception:
-                pass
             return result
         except Exception:
             db.rollback(); raise
@@ -346,6 +384,7 @@ class CompanionMemoryStore:
                                            content=row.content, content_hash=row.content_hash, action="undo"))
             row.content, row.content_hash, row.revision = prior.content, prior.content_hash, row.revision + 1
             row.summary = _summary(row.content)
+            self._sync_artifact_recall(db, row)
             db.commit(); db.refresh(row)
             return self.serialise_artifact(row, include_content=True)
         except Exception:
@@ -365,6 +404,7 @@ class CompanionMemoryStore:
             db.add(WorkingArtifactRevision(id=uuid.uuid4().hex, artifact_id=row.id, revision=row.revision,
                                            content=row.content, content_hash=row.content_hash, action="delete"))
             row.status, row.revision = "deleted", row.revision + 1
+            self._sync_artifact_recall(db, row)
             db.commit()
             return {"id": row.id, "deleted": True, "revision": row.revision}
         except Exception:
@@ -382,6 +422,7 @@ class CompanionMemoryStore:
             if row.revision != expected_revision:
                 raise ArtifactConflict("Artifact changed elsewhere; reload it before restoring")
             row.status, row.revision = "active", row.revision + 1
+            self._sync_artifact_recall(db, row)
             db.commit(); db.refresh(row)
             return self.serialise_artifact(row, include_content=True)
         except Exception:
