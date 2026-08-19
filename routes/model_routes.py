@@ -612,6 +612,7 @@ _NON_CHAT_PREFIXES = (
 )
 _NON_CHAT_CONTAINS = (
     "-realtime", "-transcribe", "-tts", "-codex",
+    ":batch",
     "codex-", "content-safety", "-safety", "-reward", "nvclip",
     "kosmos", "fuyu", "deplot", "vila", "neva",
     "gliner", "riva", "-parse", "-embedqa", "-nemoretriever",
@@ -876,6 +877,39 @@ def _is_google_api_base(base_url: str) -> bool:
         return False
 
 
+_OPENROUTER_PUBLIC_MODELS_URL = "https://openrouter.ai/api/v1/models"
+
+
+def _is_fal_openrouter_base(base_url: str) -> bool:
+    """Whether this is FAL's OpenRouter-compatible chat gateway.
+
+    FAL implements the OpenAI chat route below ``/openrouter/router/openai/v1``
+    but does not implement the sibling ``/models`` route.  Model inventory for
+    that gateway is OpenRouter's public catalog; the FAL credential must never
+    be forwarded to OpenRouter while reading it.
+    """
+    try:
+        path = (urlparse(base_url).path or "").rstrip("/")
+    except Exception:
+        return False
+    return (
+        (_host_match(base_url, "fal.run") or _host_match(base_url, "fal.ai"))
+        and path.endswith("/openrouter/router/openai/v1")
+    )
+
+
+def _probe_fal_openrouter_models(timeout: int = 5) -> List[str]:
+    """Read FAL gateway inventory from OpenRouter's unauthenticated catalog."""
+    response = httpx.get(
+        _OPENROUTER_PUBLIC_MODELS_URL,
+        headers={"Accept": "application/json"},
+        timeout=timeout,
+        verify=llm_verify(),
+    )
+    response.raise_for_status()
+    return [model_id for model_id in _openai_model_ids(response.json()) if _is_chat_model(model_id)]
+
+
 def _normalize_endpoint_refresh_mode(value: Any, endpoint_kind: str = "auto", base_url: str = "") -> str:
     if not str(value or "").strip() and _is_google_api_base(base_url):
         return "manual"
@@ -974,6 +1008,16 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
         if api_key:
             return fetch_available_models(api_key, timeout=timeout)
         return []
+    if _is_fal_openrouter_base(base):
+        try:
+            models = _probe_fal_openrouter_models(timeout=timeout)
+            if models:
+                return models
+        except Exception as exc:
+            logger.warning("FAL OpenRouter catalog refresh failed: %s", exc)
+        # Keep first-time setup useful while the public catalog is unavailable;
+        # existing endpoints retain their last successful cache in the caller.
+        return list(_PROVIDER_CURATED["fal"])
     if _is_google_api_base(base):
         try:
             models = _probe_google_models(base, api_key, timeout=timeout)

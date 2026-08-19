@@ -623,19 +623,40 @@ class TestSetupProbeSafety:
 
         assert _probe_endpoint("https://api.groq.com/openai/v1") == _PROVIDER_CURATED["groq"]
 
-    def test_fal_probe_uses_only_its_curated_fallback(self, monkeypatch):
+    def test_fal_probe_uses_public_openrouter_catalog_without_fal_key(self, monkeypatch):
         monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)
         monkeypatch.setattr(model_routes, "_normalize_base", lambda url: url.rstrip("/"))
         seen = []
 
         def fake_get(url, headers=None, timeout=None, verify=None, **kwargs):
-            seen.append(url)
+            seen.append((url, headers))
+            request = httpx.Request("GET", url)
+            return httpx.Response(200, request=request, json={"data": [
+                {"id": "z-ai/glm-5.3"},
+                {"id": "google/gemini-3.7-flash"},
+                {"id": "google/gemini-3.7-flash:batch"},
+                {"id": "openai/gpt-5.3-codex"},
+            ]})
+
+        monkeypatch.setattr(model_routes.httpx, "get", fake_get)
+
+        assert _probe_endpoint(
+            "https://fal.run/openrouter/router/openai/v1", "FAL_KEY=secret"
+        ) == ["z-ai/glm-5.3", "google/gemini-3.7-flash"]
+        assert seen == [(model_routes._OPENROUTER_PUBLIC_MODELS_URL, {"Accept": "application/json"})]
+
+    def test_fal_probe_uses_curated_fallback_when_public_catalog_is_offline(self, monkeypatch):
+        monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)
+        monkeypatch.setattr(model_routes, "_normalize_base", lambda url: url.rstrip("/"))
+
+        def fake_get(url, headers=None, timeout=None, verify=None, **kwargs):
             raise httpx.ConnectError("offline")
 
         monkeypatch.setattr(model_routes.httpx, "get", fake_get)
 
-        assert _probe_endpoint("https://fal.run/openrouter/router/openai/v1") == _PROVIDER_CURATED["fal"]
-        assert seen == ["https://fal.run/openrouter/router/openai/v1/models"]
+        assert _probe_endpoint(
+            "https://fal.run/openrouter/router/openai/v1", "FAL_KEY=secret"
+        ) == _PROVIDER_CURATED["fal"]
 
     def test_google_probe_uses_native_paginated_models_api(self, monkeypatch):
         monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)
