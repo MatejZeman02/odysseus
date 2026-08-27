@@ -94,6 +94,7 @@ def test_every_changed_approval_module_is_cache_busted_together():
     chat = (root / "static/js/chat.js").read_text(encoding="utf-8")
     compare_index = (root / "static/js/compare/index.js").read_text(encoding="utf-8")
     compare_stream = (root / "static/js/compare/stream.js").read_text(encoding="utf-8")
+    service_worker = (root / "static/sw.js").read_text(encoding="utf-8")
 
     assert f"chatStream.js?v={version}" in index
     assert f"chatStream.js?v={version}" in chat
@@ -101,3 +102,9 @@ def test_every_changed_approval_module_is_cache_busted_together():
     assert f"stream.js?v={version}" in compare_index
     # One chatRenderer instance, so the ask_user keydown listener binds once.
     assert f"chatRenderer.js?v={version}" in compare_stream
+    # The worker must update too: otherwise a client can retain the old app
+    # shell even when every individual module import has a new cache key.
+    assert f"const BUILD_ID = '{version}'" in service_worker
+    assert f"odysseus-build\" content=\"{version}" in index
+    assert f"window.__ODYSSEUS_BUILD_ID='{version}'" in index
+    assert f"sw.js?v={version}" in index
