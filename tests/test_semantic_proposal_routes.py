@@ -434,6 +434,36 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     assert raised.value.status_code == 404
 
 
+def test_legacy_memory_dry_run_rejects_tampered_or_incomplete_backup(monkeypatch, tmp_path):
+    _setup(monkeypatch)
+
+    class FakeMemory:
+        def __init__(self, root):
+            self.memory_file = root / "memory.json"
+
+        def load_all_for_update(self):
+            return [{"id": "one", "owner": "alice", "text": "private draft"}]
+
+    router = route_module.setup_companion_memory_routes(memory_manager=FakeMemory(tmp_path))
+    backup = _endpoint(router, "/api/companion/memory/legacy-backup", "POST")(SimpleNamespace())
+    files = list(tmp_path.glob("continuity-backups/*/*.json"))
+    assert len(files) == 1
+    files[0].write_text("[]", encoding="utf-8")
+    preview = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")
+    with pytest.raises(HTTPException) as raised:
+        preview(route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace())
+    assert raised.value.status_code == 422
+    assert "integrity" in str(raised.value.detail)
+
+    complete = _endpoint(router, "/api/companion/memory/legacy-backup", "POST")(SimpleNamespace())
+    manifest = next(tmp_path.glob(f"continuity-backups/*/{complete['backup_id']}.manifest"))
+    manifest.unlink()
+    with pytest.raises(HTTPException) as raised:
+        preview(route_module.LegacyMigrationDryRun(backup_id=complete["backup_id"]), SimpleNamespace())
+    assert raised.value.status_code == 422
+    assert "integrity manifest" in str(raised.value.detail)
+
+
 def test_project_relation_route_persists_owner_allowlist_without_project_content(monkeypatch):
     router = _setup(monkeypatch)
     continuity = ContinuityStore()

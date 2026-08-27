@@ -180,7 +180,9 @@ registered as a replacement for the existing native-memory writer.
 After the owner reviews that aggregate inventory, Personal Advisor offers an
 explicit owner-private native-memory backup. It copies only entries attributed
 to the authenticated owner and returns a count/digest without exposing the
-backup path or text. A backup-bound dry-run then reports aggregate exact-scope,
+backup path or text. Its private manifest binds the later reference to that
+digest, so an incomplete or changed backup fails closed. A backup-bound dry-run
+then reports aggregate exact-scope,
 unassigned, and duplicate candidate counts without reading provider content
 into the browser or writing a migration. It does not start a migration.
 

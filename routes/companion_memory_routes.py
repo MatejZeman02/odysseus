@@ -323,17 +323,35 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         backup_id = f"native-memory-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:10]}"
         backup_dir = Path(memory_manager.memory_file).resolve().parent / "continuity-backups" / owner_key
         backup_path = backup_dir / f"{backup_id}.json"
+        manifest_path = backup_dir / f"{backup_id}.manifest"
         backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(backup_dir, 0o700)
         temporary = backup_dir / f".{backup_id}.tmp"
+        temporary_manifest = backup_dir / f".{backup_id}.manifest.tmp"
+        manifest = json.dumps({
+            "format": "native-memory-owner-backup-manifest-v1",
+            "backup_id": backup_id,
+            "owner_key": owner_key,
+            "entry_count": len(owner_entries),
+            "sha256": digest,
+        }, sort_keys=True, separators=(",", ":"))
         try:
             temporary.write_text(serialized, encoding="utf-8")
             os.chmod(temporary, 0o600)
+            temporary_manifest.write_text(manifest, encoding="utf-8")
+            os.chmod(temporary_manifest, 0o600)
             os.replace(temporary, backup_path)
             os.chmod(backup_path, 0o600)
+            # The manifest is published last.  A crash between the two files
+            # leaves an intentionally unusable backup rather than one whose
+            # origin/integrity cannot later be proven.
+            os.replace(temporary_manifest, manifest_path)
+            os.chmod(manifest_path, 0o600)
         finally:
             if temporary.exists():
                 temporary.unlink(missing_ok=True)
+            if temporary_manifest.exists():
+                temporary_manifest.unlink(missing_ok=True)
         return {
             "backup_id": backup_id,
             "format": "native-memory-owner-backup-v1",
@@ -358,6 +376,37 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             raise FileNotFoundError("owner-private backup was not found")
         return candidate
 
+    def _read_legacy_backup(*, owner: str, backup_id: str) -> list[dict]:
+        """Read one server-created backup only if its immutable audit binds it.
+
+        The returned list stays internal to the migration path.  The browser
+        sees aggregate results only, while later migration stages can rely on
+        this exact content digest rather than a stale UI response.
+        """
+        backup_path = _legacy_backup_path(owner=owner, backup_id=backup_id)
+        manifest_path = backup_path.with_suffix(".manifest")
+        try:
+            if manifest_path.is_symlink() or not manifest_path.is_file():
+                raise ValueError("owner-private backup integrity manifest was not found")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            entries = json.loads(backup_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("owner-private backup could not be read safely") from exc
+        if not isinstance(manifest, dict) or not isinstance(entries, list):
+            raise ValueError("owner-private backup has an invalid format")
+        owner_key = hashlib.sha256(owner.encode("utf-8")).hexdigest()[:20]
+        canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        expected = {
+            "format": "native-memory-owner-backup-manifest-v1",
+            "backup_id": backup_id,
+            "owner_key": owner_key,
+            "entry_count": len(entries),
+            "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        }
+        if any(manifest.get(key) != value for key, value in expected.items()):
+            raise ValueError("owner-private backup integrity check failed")
+        return entries
+
     def _legacy_memory_dry_run(*, owner: str, backup_id: str) -> dict:
         """Classify a backed-up legacy store without migrating any record.
 
@@ -367,13 +416,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         writes to a provider.  Reports deliberately omit memory text, IDs, and
         individual fingerprints.
         """
-        backup_path = _legacy_backup_path(owner=owner, backup_id=backup_id)
-        try:
-            entries = json.loads(backup_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError("owner-private backup could not be read safely") from exc
-        if not isinstance(entries, list):
-            raise ValueError("owner-private backup has an invalid format")
+        entries = _read_legacy_backup(owner=owner, backup_id=backup_id)
 
         db = SessionLocal()
         try:

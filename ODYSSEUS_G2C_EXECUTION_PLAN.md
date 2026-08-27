@@ -324,7 +324,9 @@ Personal Advisor’s migration preflight now exposes a disabled-until-inventory
 **Create owner-private backup** action. On an explicit authenticated click it
 writes only the current owner’s attributed native entries into a private,
 atomic, permission-restricted backup and returns a count plus digest—not the
-backup path or any memory text. It never copies ownerless/other-owner entries,
+backup path or any memory text. A private manifest binds its owner-derived
+reference, entry count, and digest; an incomplete or changed backup is rejected
+before any dry run. It never copies ownerless/other-owner entries,
 touches vector/AgentMemory, indexes anything, or begins migration.
 
 An explicit **Preview scoped migration** action now accepts only that
