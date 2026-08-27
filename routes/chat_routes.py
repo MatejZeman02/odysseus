@@ -1062,6 +1062,9 @@ def setup_chat_routes(
         _search_enabled = web_search_enabled_for_turn(allow_web_search, use_web)
         _explicit_web_intent = False
         _explicit_browser_intent = False
+        _direct_readonly_web_request = False
+        _direct_readonly_fetch_url = False
+        _requested_document_output = False
         if isinstance(message, str):
             _msg_l = message.lower()
             _explicit_web_intent = bool(re.search(
@@ -1074,10 +1077,31 @@ def setup_chat_routes(
                 r"contact\s+form|web\s*form|form\s+submission)\b",
                 _msg_l,
             ))
+            # Some tasks intentionally cross domains: gather current sources,
+            # then create a durable report/artifact.  Remember that explicit
+            # deliverable so the web-only safety clamp below does not remove
+            # the document tools needed to finish the same request.
+            _requested_document_output = bool(re.search(
+                r"\b(?:create|make|write|draft|produce|build|compile)\b.{0,160}"
+                r"\b(?:artifact|artefact|document|doc|draft|report|file)\b",
+                _msg_l,
+            ))
+            _direct_readonly_web_request = bool(
+                _explicit_web_intent and not _explicit_browser_intent
+            )
+            _direct_readonly_fetch_url = bool(re.search(
+                r"(?i)(?<![\w@])(?:https?://|www\.)[^\s<>\[\]{}\"']+",
+                message,
+            ))
+            if _direct_readonly_web_request:
+                # Typing "search/look up/fetch <URL>" is itself authority for
+                # the built-in read-only web tools.  The passive toolbar toggle
+                # controls unsolicited browsing; it must not add a second
+                # permission step to a direct request. Browser interaction
+                # (click/fill/submit) remains separately gated.
+                _search_enabled = True
         _allow_browser_for_web_turn = bool(
             _explicit_browser_intent
-            or _explicit_web_intent
-            or _search_enabled
         )
         # Intent auto-escalation: if the user is clearly asking the assistant
         # to create a todo, reminder, or calendar event, promote chat → agent
@@ -1536,13 +1560,16 @@ def setup_chat_routes(
         if allow_bash is not None and str(allow_bash).lower() != "true":
             disabled_tools.update({"bash", "python", "read_file", "write_file", "edit_file"})
         _explicit_web_intent = _explicit_web_intent or bool(_tool_intent and _tool_intent.category == "web")
-        if is_web_search_explicitly_denied(allow_web_search) or not _search_enabled:
+        if (
+            is_web_search_explicitly_denied(allow_web_search)
+            and not _direct_readonly_web_request
+        ) or not _search_enabled:
             disabled_tools.update(WEB_TOOL_NAMES)
         if _explicit_web_intent:
             # A direct lookup/search request should not drift into personal
             # tools or shell fallbacks. It can only use web_search/web_fetch
             # when the request's explicit web setting enabled them.
-            disabled_tools.update({
+            _web_only_disabled = {
                 "bash", "python",
                 "search_chats", "manage_skills", "manage_memory",
                 "read_file", "write_file", "edit_file",
@@ -1550,9 +1577,27 @@ def setup_chat_routes(
                 "send_email", "reply_to_email",
                 "manage_notes", "manage_calendar", "manage_tasks",
                 "api_call",
-            })
+            }
+            if _requested_document_output:
+                _web_only_disabled.difference_update({
+                    "create_document", "edit_document", "update_document",
+                    "suggest_document", "manage_documents",
+                })
+            disabled_tools.update(_web_only_disabled)
+            if _direct_readonly_web_request:
+                # Keep basic lookup on the brokered web_search/web_fetch path.
+                # Playwright navigation is interactive browser authority and
+                # must not replace a read-only lookup merely because an MCP
+                # browser happens to be connected.
+                disabled_tools.update(_BROWSER_MCP_TOOLS)
             if _search_enabled:
                 disabled_tools.difference_update(WEB_TOOL_NAMES)
+                if _direct_readonly_web_request and not _direct_readonly_fetch_url:
+                    # A search query needs only the fixed search broker. Keep
+                    # the URL fetcher out so the model cannot turn a search
+                    # result into a new approval card. Supplying an exact URL
+                    # in the user turn enables that exact read separately.
+                    disabled_tools.add("web_fetch")
             else:
                 disabled_tools.update(WEB_TOOL_NAMES)
         elif _search_enabled:
@@ -2371,7 +2416,13 @@ def setup_chat_routes(
 
                     _forced_tools = None
                     if _search_enabled:
-                        _forced_tools = set(WEB_TOOL_NAMES)
+                        _forced_tools = (
+                            set(WEB_TOOL_NAMES)
+                            if not _direct_readonly_web_request or _direct_readonly_fetch_url
+                            else {"web_search"}
+                        )
+                        if _requested_document_output:
+                            _forced_tools.add("create_document")
                         if _explicit_browser_intent:
                             _forced_tools |= set(_BROWSER_MCP_TOOLS)
                     elif _explicit_browser_intent:

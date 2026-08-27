@@ -467,6 +467,7 @@ _DOMAIN_RULES = {
     "web": """\
 ## Web rules
 - For web lookup/search/latest/current requests, use `web_search` or `web_fetch`.
+- If a direct page fetch is blocked by login, JavaScript, robots, or an HTTP error, continue the same user request with `web_search` for the URL, person, or page title. Do not ask the user to repeat the task merely because the direct fetch failed.
 - Do not use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
 - "Research X" means `trigger_research`, not a one-off `web_search`, unless the user explicitly asks for a quick lookup.""",
     "documents": """\
@@ -1426,7 +1427,7 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         r"ruby|php|swift|kotlin|bash|shell|html|css|sql)\b",
         r"\b(?:code|script|program|game|function|class|module|app)\b",
     )
-    if has(r"\b(documents?|docs?|draft|compose|poem|story|essay|outline|letter|edit|rewrite|proofread|suggest|feedback|review this|make a file)\b"):
+    if has(r"\b(documents?|docs?|artifacts?|artefacts?|draft|compose|poem|story|essay|outline|letter|edit|rewrite|proofread|suggest|feedback|review this|make a file)\b"):
         domains.add("documents")
     if "notes_calendar_tasks" not in domains and has(r"\bwrite\b"):
         domains.add("documents")
@@ -1497,6 +1498,27 @@ def _turn_targets_active_document(intent: Dict[str, object], last_user: str, act
     """
     if active_document is None:
         return False
+    text = str(last_user or "").strip().lower()
+    if re.search(
+        r"\b(?:do\s+not|don't|without)\b.{0,100}"
+        r"\b(?:create|edit|revise|rewrite|update|change|replace|modify)\b"
+        r".{0,100}\b(?:artifact|artefact|document|doc|draft|report|file)\b",
+        text,
+    ):
+        return False
+    # "Create/make a new document/artifact" targets a fresh editor document,
+    # not whichever unrelated document happens to remain open in the split
+    # pane. Explicit edit/revise/update wording below still targets the open
+    # document as before.
+    if re.search(
+        r"\b(?:create|make|produce|build|compile)\b.{0,180}"
+        r"\b(?:new\s+)?(?:artifact|artefact|document|doc|report|file)\b",
+        text,
+    ) and not re.search(
+        r"\b(?:edit|revise|rewrite|update|change|replace|append|modify)\b",
+        text,
+    ):
+        return False
     raw_doc = getattr(active_document, "current_content", "") or ""
     title_l = (getattr(active_document, "title", "") or "").strip().lower()
     is_email_doc = (
@@ -1506,7 +1528,6 @@ def _turn_targets_active_document(intent: Dict[str, object], last_user: str, act
     )
     if "documents" in (intent.get("domains") or set()):
         return True
-    text = str(last_user or "").strip().lower()
     if not text:
         return False
     if is_email_doc and re.search(
@@ -3582,6 +3603,11 @@ async def stream_agent_loop(
     _t0 = time.time()
     _needs_admin = _detect_admin_intent(messages)
     _last_user = _extract_last_user_message(messages)
+    # Authority comes only from the current owner turn, never from retrieved
+    # pages, continuity artifacts, or earlier tool output.  This lets an exact
+    # URL the owner typed use the read-only fetcher without an approval detour
+    # while the external-context gate still blocks model-invented destinations.
+    run_security.authorize_latest_user_request(_last_user)
     _ody_qwen_finetune_model = _is_odysseus_qwen_model(model)
     # The caller's temperature survives for non-qwen routes; the qwen cap is
     # applied per candidate (here for the primary, in the candidate request

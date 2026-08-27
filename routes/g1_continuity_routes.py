@@ -21,6 +21,7 @@ from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.companion_runs import CompanionRunRegistry
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
 from src.qwen_inspection import effective_capability, inspection_readiness
+from src.computer_sandbox import readiness as computer_sandbox_readiness
 from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure, safe_turn_failure_detail
 
 logger = logging.getLogger(__name__)
@@ -269,13 +270,15 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
         _owner(request)
         qwen_ready, binary_ready, bubblewrap_ready = _qwen_readiness()
         inspection = inspection_readiness()
+        computer = computer_sandbox_readiness()
         return {"enabled": _enabled(), "qwen_ready": qwen_ready,
                 "containment": "bubblewrap-read-only", "scopes": {"project": "available", "personal": "native", "computer": "coming_soon"},
                 "native_chat_shell": False,
                 "components": {"qwen_binary": binary_ready, "bubblewrap": bubblewrap_ready,
                                "podman": inspection.podman_ready,
                                "sandbox_image": inspection.image_ready},
-                "inspection": inspection.public_payload()}
+                "inspection": inspection.public_payload(),
+                "computer": {"observe_ready": True, **computer.public_payload()}}
 
     @router.get("/projects")
     def list_projects(request: Request):

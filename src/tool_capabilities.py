@@ -8,11 +8,13 @@ run-local integrity gates before dispatch.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 from src.tool_approval_scopes import CHAT_SESSION_APPROVAL_CONTEXT_MARKER
 from src.tool_security import BUILTIN_EMAIL_TOOLS
@@ -565,6 +567,55 @@ POST_EXTERNAL_BLOCKED_EFFECTS = frozenset(
 )
 
 
+_USER_URL_RE = re.compile(
+    r"(?i)(?<![\w@])(?:https?://|www\.)[^\s<>\[\]{}\"']+"
+)
+
+
+def _canonical_read_url(value: Any) -> str | None:
+    """Canonicalise one http(s) URL without broadening its target."""
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().rstrip(".,;:!?)]}")
+    if raw.casefold().startswith("www."):
+        raw = "https://" + raw
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        return None
+    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.hostname:
+        return None
+    host = parsed.hostname.casefold()
+    port = parsed.port
+    default_port = (parsed.scheme.casefold() == "http" and port == 80) or (
+        parsed.scheme.casefold() == "https" and port == 443
+    )
+    authority = host if port is None or default_port else f"{host}:{port}"
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/") or "/"
+    return urlunsplit((parsed.scheme.casefold(), authority, path, parsed.query, ""))
+
+
+def _web_fetch_url(content: Any) -> str | None:
+    """Extract only the URL field understood by the built-in web_fetch."""
+    value = content
+    if isinstance(content, str):
+        try:
+            decoded = json.loads(content)
+        except (TypeError, ValueError):
+            decoded = None
+        if isinstance(decoded, dict):
+            value = decoded.get("url")
+        elif content.strip().casefold().startswith(("http://", "https://", "www.")):
+            value = content.strip()
+        else:
+            return None
+    elif isinstance(content, Mapping):
+        value = content.get("url")
+    return _canonical_read_url(value)
+
+
 @dataclass(frozen=True)
 class ToolGateDecision:
     allowed: bool
@@ -618,12 +669,36 @@ class ToolRunSecurityContext:
 
     external_untrusted_context_seen: bool = False
     external_sources: list[str] = field(default_factory=list)
+    user_authorized_read_urls: set[str] = field(default_factory=set)
+    user_authorized_new_document: bool = False
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     # Task-scope approval sets this for the resumed in-memory run. Chat-scope
     # approval is projected from the server-owned session history marker below.
     # The bypass affects only this automatic gate; current tool policy, ownership,
     # workspace confinement, and execution/sandbox restrictions still apply.
     approval_gate_bypassed: bool = False
+
+    def authorize_latest_user_request(self, text: Any) -> None:
+        """Record narrow authority stated directly in the latest user turn.
+
+        A URL the owner typed may be fetched read-only even when older web
+        results taint the conversation.  The match remains exact: content from
+        that page cannot redirect the model to a different target.  Likewise,
+        an explicit request for a *new* document authorizes only
+        ``create_document``; it never authorizes editing an existing document.
+        """
+        if not isinstance(text, str):
+            return
+        for match in _USER_URL_RE.finditer(text):
+            normalized = _canonical_read_url(match.group(0))
+            if normalized:
+                self.user_authorized_read_urls.add(normalized)
+        lowered = text.casefold()
+        self.user_authorized_new_document = bool(re.search(
+            r"\b(?:create|make|write|draft|produce|build|compile)\b.{0,180}"
+            r"\b(?:artifact|artefact|document|doc|draft|report|file)\b",
+            lowered,
+        ))
 
     def observe_messages(self, messages: Iterable[dict]) -> None:
         """Apply server-owned chat scope and promote untrusted prompt context."""
@@ -644,6 +719,12 @@ class ToolRunSecurityContext:
         if self.approval_gate_bypassed:
             return ToolGateDecision(True)
         if not self.external_untrusted_context_seen:
+            return ToolGateDecision(True)
+        if tool_name == "web_fetch":
+            requested_url = _web_fetch_url(content)
+            if requested_url and requested_url in self.user_authorized_read_urls:
+                return ToolGateDecision(True)
+        if tool_name == "create_document" and self.user_authorized_new_document:
             return ToolGateDecision(True)
         capabilities = capabilities_for_action(tool_name, content)
         blocked_effects = capabilities.effects & POST_EXTERNAL_BLOCKED_EFFECTS

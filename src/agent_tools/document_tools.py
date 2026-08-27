@@ -116,11 +116,11 @@ def _approved_document_version_error(doc: Any, ctx: dict) -> Optional[Dict]:
 
 
 def _stage_linked_personal_artifact_update(db: Any, doc: Any, owner: Any, content: str):
-    """Keep a Personal artifact authoritative when an agent edits its Document.
+    """Keep a private Companion artifact authoritative when an agent edits its Document.
 
     Native editor saves already use this transaction boundary. Agent document
     tools must use the same one: otherwise the visible document changes while
-    the artifact supplied to Personal Advisor and recall remains stale.
+    the artifact supplied to its Companion home and recall remains stale.
     """
     from src.companion_memory import CompanionMemoryStore
 

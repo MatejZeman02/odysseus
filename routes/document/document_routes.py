@@ -701,7 +701,7 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 try:
                     from src.scoped_memory import ScopedMemoryIndex
                     ScopedMemoryIndex().index(
-                        owner=doc.owner or user, scope_kind="personal", project_id=None,
+                        owner=doc.owner or user, scope_kind=artifact.scope_kind, project_id=artifact.project_id,
                         session_id=doc.session_id, source_kind="working_artifact",
                         source_id=artifact.id, content=f"{artifact.path}\n{artifact.summary}",
                     )

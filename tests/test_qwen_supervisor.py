@@ -206,6 +206,29 @@ async def test_supervisor_stop_terminates_entire_bubblewrap_process_group(tmp_pa
     assert signals == [(12345, 15), (12345, 0)]
 
 
+@pytest.mark.asyncio
+async def test_supervisor_stop_does_not_discard_a_clean_turn_for_log_cleanup(tmp_path):
+    class Process:
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+    class Client:
+        async def close(self):
+            return None
+
+    async def broken_log_drain():
+        raise RuntimeError("pipe already closed")
+
+    runtime = QwenRuntime(Process(), Client(), tmp_path)
+    runtime.log_task = asyncio.create_task(broken_log_drain())
+    supervisor = QwenSupervisor(binary=tmp_path / "missing")
+    supervisor.runtime = runtime
+
+    await supervisor.stop()
+
+
 def test_supervisor_records_the_nested_bubblewrap_session_group(tmp_path, monkeypatch):
     children = {
         100: "101",

@@ -31,7 +31,7 @@ class PersonalArtifactWrite(BaseModel):
 class LongPasteCapture(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str = Field(min_length=1, max_length=128)
-    content: str = Field(min_length=6000, max_length=512 * 1024)
+    content: str = Field(min_length=3000, max_length=512 * 1024)
 
 
 class ArtifactUndo(BaseModel):
@@ -95,7 +95,7 @@ def setup_companion_memory_routes() -> APIRouter:
     def memory_context(session_id: str, request: Request):
         try:
             owner = _owner(request); scope_kind, project_id = _scope(owner, session_id)
-            if scope_kind not in {"personal", "project"}:
+            if scope_kind not in {"personal", "project", "computer"}:
                 raise HTTPException(409, "Memory context is available only for Companion homes")
             store = ContinuityStore()
             checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
@@ -140,6 +140,19 @@ def setup_companion_memory_routes() -> APIRouter:
                 "Artifact storage needs a one-time update. Restart Odysseus, then try again.",
             ) from exc
 
+    @router.post("/artifacts/computer")
+    def write_computer_artifact(payload: PersonalArtifactWrite, request: Request):
+        try:
+            return memory.write_computer_artifact(owner=_owner(request), **payload.model_dump())
+        except (MemoryScopeError, ArtifactConflict) as exc:
+            raise _error(exc) from exc
+        except SQLAlchemyError as exc:
+            logger.exception("Computer artifact storage failed for session %s", payload.session_id)
+            raise HTTPException(
+                503,
+                "Computer artifact storage needs a one-time update. Restart Odysseus, then try again.",
+            ) from exc
+
     @router.post("/artifacts/capture-paste")
     def capture_long_paste(payload: LongPasteCapture, request: Request):
         try:
@@ -158,6 +171,13 @@ def setup_companion_memory_routes() -> APIRouter:
         except MemoryScopeError as exc:
             raise _error(exc) from exc
 
+    @router.get("/artifacts/computer/{artifact_id}")
+    def read_computer_artifact(artifact_id: str, request: Request):
+        try:
+            return memory.get_computer_artifact(owner=_owner(request), artifact_id=artifact_id)
+        except MemoryScopeError as exc:
+            raise _error(exc) from exc
+
     @router.post("/artifacts/personal/{artifact_id}/document")
     def open_personal_artifact_document(artifact_id: str, payload: ArtifactDocumentOpen, request: Request):
         try:
@@ -168,6 +188,18 @@ def setup_companion_memory_routes() -> APIRouter:
             raise _error(exc) from exc
         except SQLAlchemyError as exc:
             logger.exception("Companion artifact document bridge failed for %s", artifact_id)
+            raise HTTPException(503, "Artifact editor is temporarily unavailable. Restart Odysseus, then try again.") from exc
+
+    @router.post("/artifacts/computer/{artifact_id}/document")
+    def open_computer_artifact_document(artifact_id: str, payload: ArtifactDocumentOpen, request: Request):
+        try:
+            return memory.open_computer_artifact_document(
+                owner=_owner(request), session_id=payload.session_id, artifact_id=artifact_id,
+            )
+        except MemoryScopeError as exc:
+            raise _error(exc) from exc
+        except SQLAlchemyError as exc:
+            logger.exception("Computer artifact document bridge failed for %s", artifact_id)
             raise HTTPException(503, "Artifact editor is temporarily unavailable. Restart Odysseus, then try again.") from exc
 
     @router.post("/artefacts/personal/{artifact_id}/undo", include_in_schema=False)

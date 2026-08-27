@@ -114,8 +114,8 @@ def test_disabled_tools_respects_missing_vs_explicit_toggles():
     assert "disabled_tools.update(WEB_TOOL_NAMES)" in source, (
         "disabled_tools must add web_search/web_fetch when web is not explicitly enabled"
     )
-    assert "_forced_tools = set(WEB_TOOL_NAMES)" in source, (
-        "web tools should only be forced visible from the explicit web setting"
+    assert "set(WEB_TOOL_NAMES)" in source and 'else {"web_search"}' in source, (
+        "explicit web turns must force the narrow brokered tool set"
     )
 
 
@@ -137,6 +137,9 @@ def _build_disabled_tools(
     can_use_bash=True,
     can_use_browser=True,
     explicit_web_intent=False,
+    explicit_browser_intent=False,
+    direct_readonly_fetch_url=False,
+    requested_document_output=False,
     global_disabled=None,
 ):
     """Replicate the disabled-tools logic from chat_stream for unit testing.
@@ -148,11 +151,20 @@ def _build_disabled_tools(
     # Issue #3229 fix: only disable bash when explicitly set to a falsy value.
     if allow_bash is not None and str(allow_bash).lower() != "true":
         disabled_tools.add("bash")
-    search_enabled = web_search_enabled_for_turn(allow_web_search, use_web)
-    if is_web_search_explicitly_denied(allow_web_search) or not search_enabled:
+    direct_readonly_web_request = bool(
+        explicit_web_intent and not explicit_browser_intent
+    )
+    search_enabled = (
+        web_search_enabled_for_turn(allow_web_search, use_web)
+        or direct_readonly_web_request
+    )
+    if (
+        is_web_search_explicitly_denied(allow_web_search)
+        and not direct_readonly_web_request
+    ) or not search_enabled:
         disabled_tools.update(WEB_TOOL_NAMES)
     if explicit_web_intent:
-        disabled_tools.update({
+        web_only_disabled = {
             "bash", "python",
             "search_chats", "manage_skills", "manage_memory",
             "read_file", "write_file", "edit_file",
@@ -160,9 +172,17 @@ def _build_disabled_tools(
             "send_email", "reply_to_email",
             "manage_notes", "manage_calendar", "manage_tasks",
             "api_call", "builtin_browser",
-        })
+        }
+        if requested_document_output:
+            web_only_disabled.difference_update({
+                "create_document", "edit_document", "update_document",
+                "suggest_document", "manage_documents",
+            })
+        disabled_tools.update(web_only_disabled)
         if search_enabled:
             disabled_tools.difference_update(WEB_TOOL_NAMES)
+            if direct_readonly_web_request and not direct_readonly_fetch_url:
+                disabled_tools.add("web_fetch")
         else:
             disabled_tools.update(WEB_TOOL_NAMES)
     elif search_enabled:
@@ -227,9 +247,8 @@ def test_allow_web_search_false_wins_over_use_web_true():
         "can you look up the latest docs",
     ],
 )
-def test_explicit_false_disables_web_despite_prompt_web_intent(message):
-    """Explicit allow_web_search=false is a hard deny even when the prompt
-    asks for web search."""
+def test_direct_readonly_web_request_needs_no_toolbar_permission(message):
+    """A direct search request is already authority for read-only web tools."""
     intent = classify_tool_intent(message)
     assert intent is not None
     assert intent.category == "web"
@@ -238,12 +257,12 @@ def test_explicit_false_disables_web_despite_prompt_web_intent(message):
         allow_web_search="false",
         explicit_web_intent=True,
     )
-    assert "web_search" in disabled
+    assert "web_search" not in disabled
     assert "web_fetch" in disabled
 
 
-def test_prompt_web_intent_does_not_enable_web_without_setting():
-    """Prompt-derived web intent alone must not expose web tools."""
+def test_prompt_web_intent_enables_readonly_web_without_setting():
+    """Direct search wording must not require a second toolbar permission."""
     intent = classify_tool_intent("look up the latest docs")
     assert intent is not None
     assert intent.category == "web"
@@ -253,8 +272,49 @@ def test_prompt_web_intent_does_not_enable_web_without_setting():
         use_web=None,
         explicit_web_intent=True,
     )
+    assert "web_search" not in disabled
+    assert "web_fetch" in disabled
+
+
+def test_browser_interaction_still_respects_disabled_web_toggle():
+    """Click/fill/browser requests are not treated as basic read-only search."""
+    disabled = _build_disabled_tools(
+        allow_web_search="false",
+        explicit_web_intent=True,
+        explicit_browser_intent=True,
+    )
     assert "web_search" in disabled
     assert "web_fetch" in disabled
+
+
+def test_direct_search_without_url_does_not_offer_fetcher():
+    """Search-result URLs must not grow into approval prompts on their own."""
+    source = _CHAT_ROUTES.read_text(encoding="utf-8")
+    assert "_direct_readonly_fetch_url" in source
+    assert 'disabled_tools.add("web_fetch")' in source
+    assert 'else {"web_search"}' in source
+
+
+def test_web_lookup_can_still_create_requested_document():
+    """A combined lookup + artifact request needs both domains in one turn."""
+    disabled = _build_disabled_tools(
+        allow_web_search="true",
+        explicit_web_intent=True,
+        requested_document_output=True,
+    )
+    assert "web_search" not in disabled
+    assert "web_fetch" in disabled
+    assert "create_document" not in disabled
+
+
+def test_direct_url_lookup_enables_exact_fetcher():
+    disabled = _build_disabled_tools(
+        allow_web_search="false",
+        explicit_web_intent=True,
+        direct_readonly_fetch_url=True,
+    )
+    assert "web_search" not in disabled
+    assert "web_fetch" not in disabled
 
 
 def test_admin_user_gets_bash_enabled_by_default():

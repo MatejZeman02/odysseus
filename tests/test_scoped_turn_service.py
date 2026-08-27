@@ -34,6 +34,14 @@ def test_timeout_message_does_not_blame_an_already_small_request():
     assert "smaller request" not in detail
 
 
+def test_teardown_message_explains_that_the_result_was_withheld():
+    from src.scoped_turn_service import safe_turn_failure_detail
+
+    detail = safe_turn_failure_detail("teardown_failed")
+    assert "could not confirm" in detail
+    assert "result was withheld" in detail
+
+
 def test_context_bundle_render_order_is_stable():
     scope = ResolvedScope("alice", "s", "project", "p", "/project")
     checkpoint = ThreadCheckpointV1(session_id="s", project_id="p", source_hash="h")
@@ -50,6 +58,24 @@ def test_context_bundle_render_order_is_stable():
     assert "do not invoke another tool after drafting the final answer" in rendered
     assert "one broad case-insensitive regex search" in rendered
     assert "do not retry a sequence of tiny spelling" in rendered
+
+
+def test_selected_paste_is_context_source_not_a_workspace_file():
+    scope = ResolvedScope("alice", "s", "project", "p", "/project")
+    bundle = ContextBundle(
+        "profile", scope, "read pastes/example.md",
+        working_artifacts=({
+            "id": "artifact", "path": "pastes/example.md", "revision": 1,
+            "summary": "owner paste", "content": "exact source text",
+        },),
+    )
+
+    rendered = render_context_bundle(bundle)
+
+    assert "# Working artifact index (not project files)" in rendered
+    assert "# Owner-provided artifact source material" in rendered
+    assert "exact source text" in rendered
+    assert "Do not call read_file" in rendered
 
 
 @pytest.mark.asyncio

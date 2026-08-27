@@ -29,7 +29,7 @@ class ArtifactConflict(MemoryScopeError):
     pass
 
 
-LONG_PASTE_ARTIFACT_THRESHOLD = 6000
+LONG_PASTE_ARTIFACT_THRESHOLD = 3000
 MAX_ARTIFACT_BYTES = 512 * 1024
 
 
@@ -126,6 +126,21 @@ class CompanionMemoryStore:
             raise MemoryScopeError("Personal Advisor session was not found")
         return row
 
+    def _computer(self, db, owner: str, session_id: str) -> DbSession:
+        """Resolve the one owner-owned Computer Help home.
+
+        Computer incident records are private Odysseus artifacts, just like
+        Personal drafts.  They are deliberately not project workspace files
+        and may not be created from an arbitrary general chat.
+        """
+        row = db.query(DbSession).filter(
+            DbSession.id == session_id, DbSession.owner == owner,
+            DbSession.scope_kind == "computer",
+        ).first()
+        if not row:
+            raise MemoryScopeError("Computer Help session was not found")
+        return row
+
     def _project(self, db, owner: str, project_id: str) -> Project:
         row = db.query(Project).filter(Project.id == project_id, Project.owner == owner).first()
         if not row:
@@ -166,20 +181,24 @@ class CompanionMemoryStore:
             summary=f"Synced artifact revision {artifact.revision}", source="system",
         ))
 
-    def open_personal_artifact_document(self, *, owner: str, session_id: str, artifact_id: str) -> dict:
-        """Open a Personal artifact through the standard, split-pane editor.
+    def open_private_artifact_document(
+        self, *, owner: str, session_id: str, artifact_id: str, scope_kind: str,
+    ) -> dict:
+        """Open a private Companion artifact through the standard editor.
 
-        The artifact remains authoritative for scope and prompt inclusion.  The
+        The artifact remains authoritative for scope and prompt inclusion. The
         linked native Document is the editor surface and receives the same
         content and version history.
         """
+        if scope_kind not in {"personal", "computer"}:
+            raise MemoryScopeError("This artifact scope is not editable here")
         db = SessionLocal()
         try:
-            self._personal(db, owner, session_id)
+            (self._personal if scope_kind == "personal" else self._computer)(db, owner, session_id)
             artifact = db.query(WorkingArtifact).filter(
                 WorkingArtifact.id == artifact_id,
                 WorkingArtifact.owner == owner,
-                WorkingArtifact.scope_kind == "personal",
+                WorkingArtifact.scope_kind == scope_kind,
                 WorkingArtifact.project_id == None,
                 WorkingArtifact.status == "active",
             ).first()
@@ -216,13 +235,23 @@ class CompanionMemoryStore:
         finally:
             db.close()
 
+    def open_personal_artifact_document(self, *, owner: str, session_id: str, artifact_id: str) -> dict:
+        return self.open_private_artifact_document(
+            owner=owner, session_id=session_id, artifact_id=artifact_id, scope_kind="personal",
+        )
+
+    def open_computer_artifact_document(self, *, owner: str, session_id: str, artifact_id: str) -> dict:
+        return self.open_private_artifact_document(
+            owner=owner, session_id=session_id, artifact_id=artifact_id, scope_kind="computer",
+        )
+
     @staticmethod
-    def sync_personal_artifact_from_document(db, *, owner: str, document_id: str, content: str) -> WorkingArtifact | None:
-        """Stage a native editor save into its scoped artifact transaction."""
+    def sync_private_artifact_from_document(db, *, owner: str, document_id: str, content: str) -> WorkingArtifact | None:
+        """Stage a native editor save into its private artifact transaction."""
         artifact = db.query(WorkingArtifact).filter(
             WorkingArtifact.document_id == document_id,
             WorkingArtifact.owner == owner,
-            WorkingArtifact.scope_kind == "personal",
+            WorkingArtifact.scope_kind.in_(("personal", "computer")),
             WorkingArtifact.project_id == None,
             WorkingArtifact.status == "active",
         ).first()
@@ -239,6 +268,13 @@ class CompanionMemoryStore:
         artifact.revision += 1
         CompanionMemoryStore._sync_artifact_recall(db, artifact)
         return artifact
+
+    @staticmethod
+    def sync_personal_artifact_from_document(db, *, owner: str, document_id: str, content: str) -> WorkingArtifact | None:
+        """Backward-compatible name for private artifact document saves."""
+        return CompanionMemoryStore.sync_private_artifact_from_document(
+            db, owner=owner, document_id=document_id, content=content,
+        )
 
     def list_artifacts(self, *, owner: str, scope_kind: str, project_id: str | None = None) -> list[dict]:
         if scope_kind == "project":
@@ -310,18 +346,22 @@ class CompanionMemoryStore:
             value["content"] = row.content
         return value
 
-    def write_personal_artifact(self, *, owner: str, session_id: str, path: str, content: str,
-                                expected_revision: int | None = None, source_message_id: str | None = None) -> dict:
+    def _write_private_artifact(
+        self, *, owner: str, session_id: str, scope_kind: str, path: str, content: str,
+        expected_revision: int | None = None, source_message_id: str | None = None,
+    ) -> dict:
         path = normalise_artifact_path(path)
         if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
             raise MemoryScopeError("Artifact content must be UTF-8 Markdown up to 512 KiB")
         if _SECRET_RE.search(content):
             raise MemoryScopeError("Artifact contains credential-like material and was not saved")
+        if scope_kind not in {"personal", "computer"}:
+            raise MemoryScopeError("This artifact scope is not writable here")
         db = SessionLocal()
         try:
-            self._personal(db, owner, session_id)
+            (self._personal if scope_kind == "personal" else self._computer)(db, owner, session_id)
             row = db.query(WorkingArtifact).filter(
-                WorkingArtifact.owner == owner, WorkingArtifact.scope_kind == "personal",
+                WorkingArtifact.owner == owner, WorkingArtifact.scope_kind == scope_kind,
                 WorkingArtifact.project_id == None, WorkingArtifact.path == path,
                 WorkingArtifact.status == "active",
             ).first()
@@ -329,6 +369,8 @@ class CompanionMemoryStore:
                 raise ArtifactConflict("Artifact changed elsewhere; reload it before saving")
             digest = _hash(content)
             if row:
+                if row.content == content:
+                    return self.serialise_artifact(row, include_content=True)
                 db.add(WorkingArtifactRevision(
                     id=uuid.uuid4().hex, artifact_id=row.id, revision=row.revision,
                     content=row.content, content_hash=row.content_hash,
@@ -340,7 +382,7 @@ class CompanionMemoryStore:
                 row.source_message_id = source_message_id
             else:
                 row = WorkingArtifact(
-                    id=uuid.uuid4().hex, owner=owner, scope_kind="personal", project_id=None,
+                    id=uuid.uuid4().hex, owner=owner, scope_kind=scope_kind, project_id=None,
                     path=path, title=PurePosixPath(path).stem, summary=_summary(content),
                     content=content, content_hash=digest, revision=1, source_message_id=source_message_id,
                 )
@@ -354,6 +396,20 @@ class CompanionMemoryStore:
             db.rollback(); raise
         finally:
             db.close()
+
+    def write_personal_artifact(self, *, owner: str, session_id: str, path: str, content: str,
+                                expected_revision: int | None = None, source_message_id: str | None = None) -> dict:
+        return self._write_private_artifact(
+            owner=owner, session_id=session_id, scope_kind="personal", path=path, content=content,
+            expected_revision=expected_revision, source_message_id=source_message_id,
+        )
+
+    def write_computer_artifact(self, *, owner: str, session_id: str, path: str, content: str,
+                                expected_revision: int | None = None, source_message_id: str | None = None) -> dict:
+        return self._write_private_artifact(
+            owner=owner, session_id=session_id, scope_kind="computer", path=path, content=content,
+            expected_revision=expected_revision, source_message_id=source_message_id,
+        )
 
     def capture_long_paste(self, *, owner: str, session_id: str, content: str) -> dict:
         """Persist one large user paste without adding it to the raw transcript.
@@ -376,8 +432,8 @@ class CompanionMemoryStore:
                 DbSession.id == session_id,
                 DbSession.owner == owner,
             ).first()
-            if not session or session.scope_kind not in {"personal", "project"}:
-                raise MemoryScopeError("Automatic paste artifacts require a Personal or project home")
+            if not session or session.scope_kind not in {"personal", "project", "computer"}:
+                raise MemoryScopeError("Automatic paste artifacts require a Personal or project or Computer Help home")
             project_id = session.project_id if session.scope_kind == "project" else None
             if session.scope_kind == "project":
                 if not project_id:
@@ -411,11 +467,17 @@ class CompanionMemoryStore:
             db.close()
 
     def get_personal_artifact(self, *, owner: str, artifact_id: str) -> dict:
+        return self.get_private_artifact(owner=owner, artifact_id=artifact_id, scope_kind="personal")
+
+    def get_computer_artifact(self, *, owner: str, artifact_id: str) -> dict:
+        return self.get_private_artifact(owner=owner, artifact_id=artifact_id, scope_kind="computer")
+
+    def get_private_artifact(self, *, owner: str, artifact_id: str, scope_kind: str) -> dict:
         db = SessionLocal()
         try:
             row = db.query(WorkingArtifact).filter(
                 WorkingArtifact.id == artifact_id, WorkingArtifact.owner == owner,
-                WorkingArtifact.scope_kind == "personal", WorkingArtifact.status == "active",
+                WorkingArtifact.scope_kind == scope_kind, WorkingArtifact.status == "active",
             ).first()
             if not row:
                 raise MemoryScopeError("Artifact was not found")

@@ -48,7 +48,10 @@ _SAFE_TURN_FAILURE_DETAILS = {
         "Project files changed while Qwen was inspecting them, so the result was discarded and no patch was applied. "
         "Wait for editors or Git tasks to finish, then try again."
     ),
-    "teardown_failed": "Qwen finished, but its isolated worker did not shut down cleanly. No patch was applied.",
+    "teardown_failed": (
+        "Qwen produced a result, but Odysseus could not confirm that its isolated worker exited. "
+        "The result was withheld and no patch was applied. Try once more; if this repeats, restart Odysseus."
+    ),
     "sandbox_unavailable": "The required Qwen sandbox is unavailable. No less-protected fallback was used.",
     "command_denied": "Qwen requested an operation that this project profile does not permit.",
     "command_timeout": "A project inspection operation exceeded its time limit.",
@@ -58,8 +61,8 @@ _SAFE_TURN_FAILURE_DETAILS = {
     "worker_died": "The isolated Qwen worker stopped before producing a complete result. No patch was applied.",
     "cancelled": "The Qwen turn was stopped. No patch was applied.",
     "proposal_invalid": (
-        "Qwen finished but did not return a valid structured patch proposal. No files were changed. "
-        "Try a smaller, more specific change."
+        "Qwen completed, but did not return one valid structured change proposal. No files were changed. "
+        "Use a specific create, edit, or fix request; ordinary questions stay read-only."
     ),
     "proposal_too_large": "The proposed patch exceeded the file or size limit. No files were changed; request a smaller change.",
     "path_denied": "The proposal targeted a protected or out-of-project path. No files were changed.",
@@ -127,7 +130,35 @@ def render_context_bundle(bundle: ContextBundle) -> str:
     if bundle.episodic_hits:
         parts.append("# Scope-verified episodic hits\n" + json.dumps(bundle.episodic_hits, sort_keys=True))
     if bundle.working_artifacts:
-        parts.append("# Working artifacts\n" + json.dumps(bundle.working_artifacts, sort_keys=True))
+        # A WorkingArtifact is an owner-private Odysseus record, not
+        # necessarily a file in the read-only project mount.  In particular,
+        # automatic ``pastes/`` captures deliberately live only in Odysseus
+        # data.  Listing them as bare paths made Qwen understandably try
+        # ``read_file(pastes/...)`` and waste the turn on a guaranteed miss.
+        artifact_index = []
+        selected_artifacts = []
+        for artifact in bundle.working_artifacts:
+            item = dict(artifact)
+            content = item.pop("content", None)
+            artifact_index.append(item)
+            if content is not None:
+                selected_artifacts.append({
+                    "path": item.get("path"),
+                    "revision": item.get("revision"),
+                    "content": content,
+                    "content_truncated": bool(item.get("content_truncated")),
+                })
+        parts.append("# Working artifact index (not project files)\n" + json.dumps(artifact_index, sort_keys=True))
+        if selected_artifacts:
+            parts.append(
+                "# Owner-provided artifact source material (already supplied; not /workspace files)\n"
+                + json.dumps(selected_artifacts, sort_keys=True)
+            )
+            parts.append(
+                "Use the supplied `content` for every artifact listed in the preceding section. "
+                "Do not call read_file, glob, list_directory, or grep_search for a path under `pastes/`: "
+                "those captures are deliberately not mounted in /workspace."
+            )
     parts.append("# Recent raw transcript tail\n" + json.dumps(bundle.transcript_tail, sort_keys=True))
     parts.append("# Current request\n" + bundle.request)
     parts.append(

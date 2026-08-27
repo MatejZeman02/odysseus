@@ -41,3 +41,19 @@ def test_named_personal_artifact_adds_reviewed_revision_protocol():
     protocol = next(item["artifact_revision_protocol"] for item in payload if "artifact_revision_protocol" in item)
     assert protocol["selected_paths"] == ["drafts/love-letter.md"]
     assert "odysseus-artifact-revision" in protocol["instruction"]
+
+
+def test_automatic_paste_is_source_material_not_revision_target():
+    path = "pastes/2026-08-23-140401-deadbeef.md"
+    bundle = ContextBundle(
+        "", ResolvedScope("alice", "s", "personal"),
+        "create an artifact document from this paste",
+        manifest={"selected_working_artifact_paths": [path]},
+    )
+    message = _continuity_prompt_message(bundle)
+    payload = json.loads(message["content"].split("\n", 1)[1])
+
+    assert not any("artifact_revision_protocol" in item for item in payload)
+    policy = next(item["source_paste_policy"] for item in payload if "source_paste_policy" in item)
+    assert policy["source_paths"] == [path]
+    assert "create_document" in policy["instruction"]

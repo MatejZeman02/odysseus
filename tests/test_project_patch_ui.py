@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,14 @@ def test_automatic_mode_applies_only_the_server_proposal_revision():
     assert "Concurrent changes preserved" in chat
 
 
+def test_automatic_project_changes_only_requests_a_patch_for_a_change_intent():
+    chat = (ROOT / "static/js/chat.js").read_text()
+    assert "function _requestLikelyNeedsProjectPatch" in chat
+    assert "_automaticProjectChanges" in chat
+    assert "&& _requestLikelyNeedsProjectPatch(_finalMsgWithInject)" in chat
+    assert "this question will stay read-only" in chat
+
+
 def test_patch_card_is_reconstructed_from_persisted_assistant_metadata():
     renderer = (ROOT / "static/js/chatRenderer.js").read_text()
     assert "metadata?.project_patch" in renderer
@@ -56,5 +65,7 @@ def test_failed_process_replays_its_actionable_safe_detail():
 def test_patch_build_id_invalidates_existing_service_worker_cache():
     index = (ROOT / "static/index.html").read_text()
     worker = (ROOT / "static/sw.js").read_text()
-    assert "20260817g2c1" in index
-    assert "20260817g2c1" in worker
+    index_build = re.search(r"__ODYSSEUS_BUILD_ID='([^']+)'", index)
+    worker_build = re.search(r"const BUILD_ID = '([^']+)'", worker)
+    assert index_build and worker_build
+    assert index_build.group(1) == worker_build.group(1)

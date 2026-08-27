@@ -29,6 +29,7 @@ def store(monkeypatch):
     db = local()
     db.add_all([
         DbSession(id="personal", owner="alice", name="Personal", endpoint_url="http://x", model="m", scope_kind="personal"),
+        DbSession(id="computer", owner="alice", name="Computer", endpoint_url="http://x", model="m", scope_kind="computer"),
         DbSession(id="project", owner="alice", name="Dust", endpoint_url="http://x", model="m", scope_kind="project", project_id="dust"),
         DbSession(id="other", owner="alice", name="Other", endpoint_url="http://x", model="m", scope_kind="project", project_id="other"),
         Project(id="dust", owner="alice", name="Dust", workspace_root="/dust"),
@@ -86,6 +87,36 @@ def test_personal_artifact_opens_in_native_document_and_editor_save_stays_scoped
     finally:
         db.close()
     assert memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])["content"].endswith("updated")
+
+
+def test_computer_artifacts_are_private_revisioned_records_and_sync_from_documents(store):
+    _continuity, memory = store
+    artifact = memory.write_computer_artifact(
+        owner="alice", session_id="computer", path="computer/incidents/nvidia.md",
+        content="# NVIDIA issue\n\n- [ ] Capture the error",
+    )
+    assert artifact["scope_kind"] == "computer"
+    document = memory.open_computer_artifact_document(
+        owner="alice", session_id="computer", artifact_id=artifact["id"],
+    )
+    db = memory_module.SessionLocal()
+    try:
+        updated = CompanionMemoryStore.sync_personal_artifact_from_document(
+            db, owner="alice", document_id=document["id"], content="# NVIDIA issue\n\n- [x] Capture the error",
+        )
+        db.commit()
+        assert updated and updated.scope_kind == "computer" and updated.revision == 2
+    finally:
+        db.close()
+    assert memory.get_computer_artifact(owner="alice", artifact_id=artifact["id"])["content"].endswith("Capture the error")
+    assert memory.list_artifacts(owner="alice", scope_kind="computer")[0]["path"] == "computer/incidents/nvidia.md"
+
+
+def test_computer_long_paste_is_kept_in_owner_private_artifacts(store):
+    _continuity, memory = store
+    paste = memory.capture_long_paste(owner="alice", session_id="computer", content="x" * 3000)
+    assert paste["scope_kind"] == "computer"
+    assert paste["path"].startswith("pastes/")
 
 
 def test_agent_document_writes_keep_a_linked_personal_artifact_authoritative(store, monkeypatch):
@@ -200,6 +231,18 @@ def test_long_personal_paste_is_stored_once_and_mounted_by_reference(store):
     selected = next(item for item in bundle.working_artifacts if item["id"] == artifact["id"])
     assert selected["content"] == pasted
     assert bundle.manifest["selected_working_artifact_paths"] == [artifact["path"]]
+
+
+def test_long_paste_threshold_matches_real_companion_pastes(store):
+    _continuity, memory = store
+    captured = memory.capture_long_paste(
+        owner="alice", session_id="personal", content="x" * 3000,
+    )
+    assert captured["character_count"] == 3000
+    with pytest.raises(MemoryScopeError, match="at least 3000"):
+        memory.capture_long_paste(
+            owner="alice", session_id="personal", content="x" * 2999,
+        )
 
 
 def test_long_project_paste_stays_out_of_workspace_and_is_qwen_context(store, tmp_path):
@@ -358,7 +401,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "Allow once" in ui
     assert "project material is never searched automatically" in ui.lower()
     chat = open("static/js/chat.js", encoding="utf-8").read()
-    assert "LONG_PASTE_ARTIFACT_THRESHOLD = 6000" in chat
+    assert "LONG_PASTE_ARTIFACT_THRESHOLD = 3000" in chat
+    assert "Task excerpt:" in chat
     assert "Long paste saved as artifact" in chat
 
 
@@ -414,6 +458,11 @@ def test_personal_artifact_editor_has_a_document_only_agent_path():
     assert _is_personal_artifact_document_obj(artifact)
     assert _turn_targets_active_document(
         {"domains": set()}, "It is opened on the side now; you can start editing.", artifact,
+    )
+    assert not _turn_targets_active_document(
+        {"domains": {"documents"}},
+        "Create a new artifact markdown document from the pasted source.",
+        artifact,
     )
     assert _turn_requests_active_document_edit("It is opened on the side now; you can start editing.")
     assert _turn_requests_active_document_edit("Rewrite the poem in the artifact.")

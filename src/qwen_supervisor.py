@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import inspect
 import os
 import re
@@ -445,31 +446,45 @@ class QwenSupervisor:
         # Bubblewrap's --new-session gives each invocation its own process
         # group, so terminate that complete group instead.
         process_group_id = runtime.process_group_id
-        if process_group_id:
-            self._signal_process_group(process_group_id, signal.SIGTERM)
-        if runtime.process.returncode is None:
-            try:
-                runtime.process.terminate()
-            except ProcessLookupError:
-                pass
+        group_terminated = process_group_id is None
         try:
-            await asyncio.wait_for(runtime.process.wait(), timeout=10)
-        except asyncio.TimeoutError:
             if process_group_id:
-                self._signal_process_group(process_group_id, signal.SIGKILL)
+                self._signal_process_group(process_group_id, signal.SIGTERM)
+            if runtime.process.returncode is None:
+                with suppress(ProcessLookupError):
+                    runtime.process.terminate()
             try:
-                runtime.process.kill()
-            except ProcessLookupError:
-                pass
-            await runtime.process.wait()
-        # The launcher may already have exited before the ACP child does.
-        # Give its SIGTERM a brief chance, then make teardown deterministic.
-        if process_group_id and await self._process_group_is_alive(process_group_id, timeout=1.0):
-            self._signal_process_group(process_group_id, signal.SIGKILL)
-        if runtime.log_task:
-            await runtime.log_task
-        await runtime.client.close()
-        shutil.rmtree(runtime.root, ignore_errors=True)
+                await asyncio.wait_for(runtime.process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                if process_group_id:
+                    self._signal_process_group(process_group_id, signal.SIGKILL)
+                with suppress(ProcessLookupError):
+                    runtime.process.kill()
+                await runtime.process.wait()
+            # The launcher may already have exited before the ACP child does.
+            # After a graceful stop, confirm the *whole* bwrap session is gone;
+            # only a surviving process group is a containment failure.
+            if process_group_id and await self._process_group_is_alive(process_group_id, timeout=1.0):
+                self._signal_process_group(process_group_id, signal.SIGKILL)
+                group_terminated = not await self._process_group_is_alive(process_group_id, timeout=2.0)
+            elif process_group_id:
+                group_terminated = True
+        finally:
+            # These are observational/resource cleanups.  They must run, but a
+            # late closed-pipe/client error must not turn an already completed,
+            # fully-terminated, integrity-checked turn into a false failure.
+            if runtime.log_task:
+                try:
+                    await asyncio.wait_for(asyncio.shield(runtime.log_task), timeout=1.0)
+                except Exception:
+                    runtime.log_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await runtime.log_task
+            with suppress(Exception):
+                await runtime.client.close()
+            shutil.rmtree(runtime.root, ignore_errors=True)
+        if not group_terminated:
+            raise QwenHarnessError("Qwen teardown left an isolated worker process alive")
 
     @staticmethod
     def _signal_process_group(process_group_id: int, signal_number: int) -> None:

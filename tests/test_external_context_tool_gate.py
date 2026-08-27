@@ -354,6 +354,32 @@ def test_external_context_blocks_model_controlled_web_fetch_egress():
     ).allowed is True
 
 
+def test_external_context_allows_exact_url_typed_by_user():
+    context = ToolRunSecurityContext(external_untrusted_context_seen=True)
+    context.authorize_latest_user_request(
+        "Search this profile: www.linkedin.com/in/matej-zeman-199867205"
+    )
+
+    assert context.decision_for(
+        "web_fetch",
+        '{"url":"https://www.linkedin.com/in/matej-zeman-199867205"}',
+    ).allowed is True
+    assert context.decision_for(
+        "web_fetch",
+        '{"url":"https://attacker.example/collect"}',
+    ).allowed is False
+
+
+def test_external_context_allows_explicit_new_document_only():
+    context = ToolRunSecurityContext(external_untrusted_context_seen=True)
+    context.authorize_latest_user_request(
+        "Search my profile and create an artifact markdown document from it."
+    )
+
+    assert context.decision_for("create_document", "Profile\nmarkdown\nBody").allowed is True
+    assert context.decision_for("update_document", "replacement").allowed is False
+
+
 def test_unknown_mcp_tool_fails_closed_after_external_context():
     context = ToolRunSecurityContext(external_untrusted_context_seen=True)
 
@@ -886,7 +912,7 @@ def test_search_then_model_controlled_fetch_same_batch_is_blocked(monkeypatch):
     )
 
 
-def test_search_then_document_same_batch_has_no_editor_side_effect(monkeypatch):
+def test_search_then_explicit_new_document_is_allowed(monkeypatch):
     executed = []
     agent_loop = _patch_agent_loop(
         monkeypatch,
@@ -900,6 +926,21 @@ def test_search_then_document_same_batch_has_no_editor_side_effect(monkeypatch):
         executed,
     )
 
+    async def execute_explicit_document(block, *args, **kwargs):
+        executed.append(block.tool_type)
+        if block.tool_type == "web_search":
+            return "web_search", {"output": "external result", "exit_code": 0}
+        if block.tool_type == "create_document":
+            return "create_document", {
+                "output": "Created document",
+                "exit_code": 0,
+                "success": True,
+                "document_id": "doc-1",
+            }
+        raise AssertionError(f"unexpected tool: {block.tool_type}")
+
+    monkeypatch.setattr(agent_loop, "execute_tool_block", execute_explicit_document)
+
     events = _collect_agent_events(
         agent_loop.stream_agent_loop(
             "http://local.test/v1",
@@ -910,9 +951,8 @@ def test_search_then_document_same_batch_has_no_editor_side_effect(monkeypatch):
         )
     )
 
-    assert executed == ["web_search"]
-    assert not any(event.get("type", "").startswith("doc_stream_") for event in events)
-    assert any(
+    assert executed == ["web_search", "create_document"]
+    assert not any(
         event.get("type") == "tool_output"
         and event.get("tool") == "create_document"
         and event.get("ask_user", {}).get("kind") == "tool_approval"

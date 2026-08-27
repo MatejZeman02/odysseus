@@ -94,15 +94,35 @@ def _continuity_prompt_message(bundle) -> dict:
     if bundle.context_grants:
         sections.append({"approved_context_grants": list(bundle.context_grants)})
     selected_artifacts = list(bundle.manifest.get("selected_working_artifact_paths") or [])
-    if selected_artifacts:
+    revision_artifacts = [
+        path for path in selected_artifacts
+        if not str(path).replace("\\", "/").startswith("pastes/")
+    ]
+    source_pastes = [
+        path for path in selected_artifacts
+        if str(path).replace("\\", "/").startswith("pastes/")
+    ]
+    if revision_artifacts:
         sections.append({
             "artifact_revision_protocol": {
-                "selected_paths": selected_artifacts,
+                "selected_paths": revision_artifacts,
                 "instruction": (
                     "If the owner asks to revise one selected artifact, put the complete replacement Markdown "
                     "inside <odysseus-artifact-revision path=\"relative/path.md\">…</odysseus-artifact-revision>. "
                     "Use the exact selected path. Keep any explanation outside that tag. The owner must explicitly "
                     "press Apply to save it, so never claim it was already written."
+                ),
+            },
+        })
+    if source_pastes:
+        sections.append({
+            "source_paste_policy": {
+                "source_paths": source_pastes,
+                "instruction": (
+                    "These automatic paste artifacts are read-only source material for this turn. "
+                    "Do not emit an odysseus-artifact-revision for a path under pastes/. If the owner "
+                    "asked for a new artifact, document, report, or draft based on the paste, call "
+                    "create_document and put the newly composed result there. Do not overwrite the source paste."
                 ),
             },
         })
