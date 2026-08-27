@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import inspect
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,6 +74,30 @@ _SAFE_TURN_FAILURE_DETAILS = {
 def safe_turn_failure_detail(code: str) -> str:
     """Return an actionable browser-safe explanation for a stable code."""
     return _SAFE_TURN_FAILURE_DETAILS.get(code, "The read-only Qwen turn failed before completing. No patch was applied.")
+
+
+def _sanitize_process_value(value: object, *, limit: int) -> str:
+    """Make a Process field safe before SSE forwarding or persistence.
+
+    The normal Qwen supervisor already produces a narrow event schema, but
+    this service is the durable boundary.  A future worker or a malformed
+    callback must not be able to place provider URLs, bridge credentials, or
+    host paths in message metadata simply by bypassing that first sanitizer.
+    """
+    if value is None:
+        return ""
+    text = " ".join(str(value).replace("/workspace/", "").replace("/workspace", "workspace").split())
+    if not text:
+        return ""
+    text = re.sub(r"https?://[^\s`\"']+", "[service URL]", text, flags=re.I)
+    text = re.sub(r"(?<![\w:])/(?:[^\s`\"']+)", "[private path]", text)
+    text = re.sub(r"\bBearer\s+[A-Za-z0-9._~-]{8,}", "Bearer [redacted]", text, flags=re.I)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}", "[redacted key]", text)
+    text = re.sub(
+        r"\b(api[_-]?key|authorization|password|secret|token)\s*[=:]\s*[^\s,;]+",
+        lambda match: f"{match.group(1)}=[redacted]", text, flags=re.I,
+    )
+    return text if len(text) <= limit else f"{text[:limit - 1]}✂"
 
 
 def classify_turn_failure(exc: BaseException) -> str:
@@ -272,7 +297,7 @@ class ReadOnlyScopedTurnService:
             if not isinstance(event, dict):
                 return
             if event.get("kind") == "commentary":
-                text = str(event.get("text", "")).strip()[:800]
+                text = _sanitize_process_value(event.get("text"), limit=800)
                 if not text:
                     return
                 safe_event = {
@@ -289,7 +314,7 @@ class ReadOnlyScopedTurnService:
                         await result
                 return
             safe_event = {
-                key: ("" if event.get(key) is None else str(event.get(key)))[:2100]
+                key: _sanitize_process_value(event.get(key), limit=2100)
                 for key in ("operation", "tool", "path", "label", "command", "status")
             }
             # Qwen commonly emits a call and a later call-update.  They are

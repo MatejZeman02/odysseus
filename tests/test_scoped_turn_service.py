@@ -224,6 +224,21 @@ def test_patch_failures_have_stable_turn_codes():
     )
 
 
+def test_process_sanitizer_redacts_urls_credentials_and_host_paths():
+    from src.scoped_turn_service import _sanitize_process_value
+
+    result = _sanitize_process_value(
+        "Read /home/alice/private.md through http://127.0.0.1:4312/v1 with token=super-secret-value",
+        limit=800,
+    )
+    assert "/home/alice" not in result
+    assert "127.0.0.1" not in result
+    assert "super-secret-value" not in result
+    assert "[private path]" in result
+    assert "[service URL]" in result
+    assert "token=[redacted]" in result
+
+
 @pytest.mark.asyncio
 async def test_scoped_turn_persists_sanitized_qwen_process(monkeypatch, tmp_path):
     session = Session("s", "chat", "http://x", "m", owner="alice", scope_kind="project", project_id="p")
@@ -259,6 +274,8 @@ async def test_scoped_turn_persists_sanitized_qwen_process(monkeypatch, tmp_path
         async def run_prompt(self, prompt, *, progress_callback=None):
             await progress_callback({"kind": "commentary", "text": "I found the project index; next I’ll search it.",
                                      "status": "completed"})
+            await progress_callback({"kind": "commentary", "text": "I used http://localhost:4312/v1 and /home/alice/private.md token=secret-value.",
+                                     "status": "completed"})
             await progress_callback({"operation": "Search project files", "tool": "search", "path": ".",
                                      "label": "Search: fish", "command": "Search: 'fish' .", "status": "running"})
             await progress_callback({"operation": "Search project files", "tool": "search", "path": ".",
@@ -273,6 +290,8 @@ async def test_scoped_turn_persists_sanitized_qwen_process(monkeypatch, tmp_path
     result = await service.run(owner="alice", session_id="s", request="question", endpoint_id="e", model="m")
     assert result.qwen_process["events"] == [
         {"kind": "commentary", "text": "I found the project index; next I’ll search it.",
+         "status": "completed"},
+        {"kind": "commentary", "text": "I used [service URL] and [private path] token=[redacted]",
          "status": "completed"},
         {"operation": "Search project files", "tool": "search", "path": ".", "label": "Search: fish",
          "command": "Search: 'fish' .", "status": "completed"},
