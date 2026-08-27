@@ -226,8 +226,9 @@ Build the smallest useful version of the expanded Odysseus:
 > becoming the durable memory system.
 
 The first demonstrable flow was intentionally narrow. Its runtime, containment,
-scope-isolation, and UI portions are proven; the semantic artifact-writing step
-identified below still needs closure:
+scope-isolation, UI, and low-authority semantic-proposal path are implemented.
+The remaining operational gate is a configured-model canary followed by explicit
+owner review and promotion; derived output is never silently accepted memory:
 
 ```text
 open a conversation whose home project is Dust
@@ -236,24 +237,24 @@ open a conversation whose home project is Dust
   -> a pinned Qwen Serve worker searches and reads Dust in read-only safe mode
   -> the answer cites exact files and shows the unresolved contradiction
   -> Odysseus retains the raw transcript
-  -> Odysseus should derive two meaningful JSON artifacts:
-       this thread's checkpoint and Dust's shared project brief
-  -> after semantic derivation is closed, the primary Dust chat continues from
-     its meaningful checkpoint and recent raw tail
-  -> after semantic derivation is closed, an explicit Dust fork receives the
-     shared brief, not the old transcript
+  -> Odysseus can derive one bounded, source-linked semantic proposal
+  -> the owner selects and promotes proposal entries into Dust's shared brief
+  -> the primary Dust chat continues from its accepted brief and recent raw tail
+  -> an explicit Dust fork receives the accepted shared brief, not the old
+     primary transcript
   -> the ongoing Personal Advisor chat can answer "why is lemon acidic?" and
      receives no Dust context
   -> restarting Qwen does not destroy the durable project understanding
 ```
 
-Current production turns create the checkpoint cursor but do not supply a
-semantic derivation function, leaving objective/decisions/questions/actions
-empty. `ProjectBriefV1` can be stored and compiled when pre-seeded, but no
-production turn derives or writes it. Therefore fresh-worker raw-tail
-continuation is working, while meaningful compact continuity beyond that tail
-is not yet complete. This reconciliation supersedes stronger artifact-generation
-wording in the earlier G1 evidence report.
+Production has a bounded no-tools semantic-derivation route using only the
+session's stored model route and source span. It validates one immutable
+proposal, retains no malformed or provider-failed output, and requires owner
+selection before writing an accepted `ProjectBriefV1` or `PersonalBriefV1`.
+The optional background scheduler is off unless explicitly enabled; the manual
+Context action is the normal visible path. Restart/fork fixtures prove accepted
+brief reconstruction, but one owner-run configured-provider canary remains
+before calling the semantic pipeline operationally proven with a real model.
 
 G1.5 exposes the working flow through the ordinary Odysseus UI. The
 terminal-shaped control is the project Qwen toggle, while Chat / Agent remains
