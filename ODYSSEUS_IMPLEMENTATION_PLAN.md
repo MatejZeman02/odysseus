@@ -79,7 +79,7 @@ truth or personal facts. **Completed in commit `4906ba3`.**
 - preserve the current local fallback only as an availability aid when the
   semantic derivation route is unavailable.
 
-### Stage C1 — Validated semantic checkpoints and home briefs
+### Stage C1 — Validated semantic checkpoints and home briefs — in progress
 
 **Outcome:** each compacted conversation can produce an immutable bounded,
 schema-validated proposal separating objective, facts, decisions, proposals,
@@ -94,6 +94,11 @@ an explicit owner action that selects entries into accepted home state.
   or personal home state; unreviewed content remains derived/provisional;
 - prove a fresh worker and a project fork continue from automatic artifacts,
   never a different chat's raw tail.
+
+The proposal contract, bounded no-tools derivation route, owner-selected
+promotion transaction, and Context-panel review are implemented. Remaining
+work is background admission/cancellation/history plus the continuation proof
+in Stage C2.
 
 ### Stage C2 — Prove durable continuation
 

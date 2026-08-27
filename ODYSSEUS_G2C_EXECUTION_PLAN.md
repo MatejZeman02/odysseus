@@ -1,7 +1,7 @@
 # Odysseus G2C Execution Plan — Scoped Chat Memory and Working Artifacts
 
-**Status:** C0 provenance safety complete; C1 validated semantic proposals and
-owner promotion are next
+**Status:** C0 complete; C1 proposal/promotion foundation implemented; C2
+continuation proof is next after the remaining C1 integration checks
 
 **Depends on:** the implemented Companion homes, non-destructive continuity
 store/compiler, and reviewed project-patch transaction boundary.
@@ -54,6 +54,21 @@ model prompt state that neither kind is owner-approved truth.
 This is a containment measure, not semantic memory. Stage C1 must replace the
 fallback before any derived record can establish project canon, personal facts,
 or cross-chat authority.
+
+The first C1 implementation is now present: a tool-free, bounded derivation
+route uses the session's stored registered endpoint, accepts exactly one
+schema-validated JSON object, persists an immutable
+`SemanticCheckpointProposalV1`, and exposes it in the Context panel. The owner
+can inspect its individual entries and promote selected indexes—never
+browser-supplied replacement text—into an `accepted` home brief. Promotion
+rehashes cited messages inside the transaction and rejects stale, deleted, or
+scope-mismatched source material. Provider or schema failure persists no
+proposal and never changes home memory.
+
+Still required before calling C1 complete: an automatic/scheduled proposal
+trigger that cannot delay a foreground turn, cancellation/concurrency and
+restart coverage for that trigger, and an owner-visible proposal history rather
+than only the current proposal card.
 
 ## Memory layers
 
@@ -287,7 +302,7 @@ context explain that these are convenience background rather than accepted
 truth. The migration is additive, restart-safe, owner-isolated, and reversible
 by ignoring the derived layer.
 
-### C1 — Validated semantic checkpoint proposals
+### C1 — Validated semantic checkpoint proposals — in progress
 
 Replace the heuristic writer with a bounded, schema-validated derivation
 request. It must emit separate fields for facts, owner-accepted decisions,
@@ -309,6 +324,19 @@ copy an entire transcript or silently bless all proposal fields. The action
 rechecks owner, scope, source hash, current brief revision, and selected
 artifact references. Source changes yield a visible stale/conflict result.
 Automatic home briefs remain provisional until this promotion occurs.
+
+**Implemented foundation:** `SemanticCheckpointProposalV1` has strict bounded
+fields, source IDs/hash, model identity, and an immutable `proposed` status.
+The create endpoint never receives an endpoint, route, transcript, or selected
+text from the browser; it resolves the owner session route server-side and
+calls it with a no-tools extraction prompt. The Context panel offers explicit
+per-entry review and promotion. The transaction marks the proposal `promoted`
+only after it has revalidated the source span and written the accepted brief.
+
+**Remaining integration gate:** run proposal derivation off the foreground
+request path with one-at-a-time admission; make cancellation and provider
+failure visible in the Context panel; retain/browse source-linked historical
+proposals; and verify clean restart/replay against a real configured provider.
 
 ### C2 — Prove durable continuation
 

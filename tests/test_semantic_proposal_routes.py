@@ -50,12 +50,13 @@ def _setup(monkeypatch):
     ])
     db.commit()
     db.close()
-    return _endpoint(route_module.setup_companion_memory_routes(), "/api/companion/memory/sessions/{session_id}/semantic-proposals")
+    return route_module.setup_companion_memory_routes()
 
 
 @pytest.mark.asyncio
 async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persists(monkeypatch):
-    endpoint = _setup(monkeypatch)
+    router = _setup(monkeypatch)
+    endpoint = _endpoint(router, "/api/companion/memory/sessions/{session_id}/semantic-proposals")
     seen = {}
 
     monkeypatch.setattr(
@@ -80,10 +81,21 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     record = ContinuityStore().semantic_proposal(owner="alice", proposal_id=result["id"])
     assert record.proposal.facts == ["The branch is frozen"]
 
+    promote = _endpoint(router, "/api/companion/memory/semantic-proposals/{proposal_id}/promote")
+    promoted = promote(
+        result["id"], route_module.SemanticProposalPromotion(
+            expected_revision=result["revision"], selections={"facts": [0], "next_actions": [0]},
+        ), SimpleNamespace(),
+    )
+    assert promoted["proposal"]["status"] == "promoted"
+    assert promoted["brief"]["derivation_status"] == "accepted"
+    assert promoted["brief"]["confirmed_facts"] == ["The branch is frozen"]
+    assert promoted["brief"]["ongoing_goals"] == ["Ask the reviewer"]
+
 
 @pytest.mark.asyncio
 async def test_semantic_proposal_route_rejects_malformed_model_output_without_persisting(monkeypatch):
-    endpoint = _setup(monkeypatch)
+    endpoint = _endpoint(_setup(monkeypatch), "/api/companion/memory/sessions/{session_id}/semantic-proposals")
     monkeypatch.setattr(route_module, "resolve_endpoint_by_id", lambda *_args, **_kwargs: ("http://model", "model-a", {}))
 
     async def fake_llm(*_args, **_kwargs):
