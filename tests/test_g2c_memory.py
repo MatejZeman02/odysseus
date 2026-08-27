@@ -563,6 +563,9 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "Task excerpt:" in chat
     assert "Long paste saved as artifact" in chat
     assert "Create semantic proposal" in ui
+    assert "selected model ${model}" in ui
+    assert "no tools" in ui
+    assert '"mode": "no_tools"' in routes
     assert "/api/companion/project-brief" in ui
     assert "Edit ${payload.scope_kind === 'personal' ? 'Personal' : 'Project'} brief" in ui
     assert "Promote selected entries" in ui

@@ -417,6 +417,9 @@ win over late background work, and safe attempt outcomes plus proposal history
 are owner-visible after restart. The outstanding operational gate is a manual
 canary against a configured provider; it must confirm no foreground latency
 regression and correct Context disclosure before C1 is declared fully shipped.
+The manual response and Context disclosure identify the selected model, bounded
+source-message count, and fixed `no_tools` derivation profile, while excluding
+provider URLs, credentials, raw model output, and source text.
 
 ### C2 — Prove durable continuation — implementation proof complete
 

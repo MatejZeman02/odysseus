@@ -812,11 +812,20 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             if status >= 500:
                 logger.exception("Semantic proposal derivation failed for session %s", session_id, exc_info=exc)
             raise HTTPException(status, str(exc)) from exc
+        # This is deliberate provenance for an owner-visible canary.  It is
+        # constrained to the registered model identifier and the fixed
+        # derivation profile; provider URLs, headers, raw output, and source
+        # text remain server-only.
         return {
             "id": result.record.id,
             "revision": result.record.revision,
             "status": "proposed",
             "proposal": result.record.proposal.to_payload(),
+            "derivation": {
+                "mode": "no_tools",
+                "model": result.record.proposal.derivation_model,
+                "source_message_count": len(result.record.proposal.source_message_ids),
+            },
         }
 
     @router.get("/memory/semantic-proposals/{proposal_id}")

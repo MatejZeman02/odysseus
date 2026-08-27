@@ -82,6 +82,9 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     assert result["status"] == "proposed"
     assert result["proposal"]["source_message_ids"] == ["m1", "m2"]
     assert result["proposal"]["derivation_status"] == "proposed"
+    assert result["derivation"] == {
+        "mode": "no_tools", "model": "model-a", "source_message_count": 2,
+    }
     assert seen["kwargs"]["max_retries"] == 0
     assert seen["kwargs"]["workload"] == "foreground"
     assert seen["messages"][0]["role"] == "system"

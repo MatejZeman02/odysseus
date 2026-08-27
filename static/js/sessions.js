@@ -248,6 +248,13 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     ['open_questions', 'Open questions'], ['next_actions', 'Next actions'], ['artifact_refs', 'Artifact references'],
   ];
   const proposalHistory = Array.isArray(payload.semantic_proposal_history) ? payload.semantic_proposal_history : [];
+  const semanticProvenance = (item, {manual = false} = {}) => {
+    const model = String(item?.derivation_model || '').trim();
+    const sourceCount = Array.isArray(item?.source_message_ids) ? item.source_message_ids.length : 0;
+    const sourceLabel = sourceCount ? `${sourceCount} source message${sourceCount === 1 ? '' : 's'}` : 'bounded source messages';
+    const runLabel = manual ? 'Manual derivation' : 'Derivation';
+    return `${runLabel}: ${model ? `selected model ${model}` : 'recorded model unavailable'} · no tools · ${sourceLabel}.`;
+  };
   const proposalAttempt = payload.semantic_proposal_attempt || null;
   const proposalAttemptText = proposalAttempt && proposalAttempt.outcome !== 'ready'
     ? ({
@@ -290,9 +297,9 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const proposalHistoryHtml = proposalHistory.length > 1 ? `<details class="companion-semantic-history"><summary>Proposal history (${proposalHistory.length})</summary>${proposalHistory.map((record) => {
     const item = record.proposal || {};
     const itemCount = semanticFields.reduce((count, [field]) => count + (field === 'objective' ? (item.objective ? 1 : 0) : (item[field] || []).length), 0);
-    return `<details><summary>Revision ${esc(record.revision)} · ${esc(record.status)} · ${esc(itemCount)} entries</summary><p>${esc(item.objective || 'No objective proposed.')}</p><p class="companion-memory-help">Source through message ${esc(item.source_through_message_id || 'unknown')}.</p></details>`;
+    return `<details><summary>Revision ${esc(record.revision)} · ${esc(record.status)} · ${esc(itemCount)} entries</summary><p>${esc(item.objective || 'No objective proposed.')}</p><p class="companion-memory-help">${esc(semanticProvenance(item))} Source through message ${esc(item.source_through_message_id || 'unknown')}.</p></details>`;
   }).join('')}</details>` : '';
-  const proposalHtml = proposal ? `<section class="companion-semantic-proposal" data-proposal-id="${esc(proposalRecord.id)}" data-proposal-revision="${esc(proposalRecord.revision)}"><h5>Semantic proposal</h5><p class="companion-memory-help">Proposed from this chat’s source messages. Check only entries you want to promote into accepted home memory.</p>${semanticFields.map(([field, label]) => { const values = field === 'objective' ? (proposal.objective ? [proposal.objective] : []) : (proposal[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-proposal-field="${esc(field)}" data-proposal-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-proposal">Promote selected entries</button></section>` : '<section class="companion-semantic-proposal"><h5>Semantic proposal</h5><p class="companion-memory-help">Create a source-linked proposal, then review and promote individual entries. It will not change memory automatically.</p></section>';
+  const proposalHtml = proposal ? `<section class="companion-semantic-proposal" data-proposal-id="${esc(proposalRecord.id)}" data-proposal-revision="${esc(proposalRecord.revision)}"><h5>Semantic proposal</h5><p class="companion-memory-help">${esc(semanticProvenance(proposal, {manual: true}))} The model cannot use tools or write memory. Check only entries you want to promote into accepted home memory.</p>${semanticFields.map(([field, label]) => { const values = field === 'objective' ? (proposal.objective ? [proposal.objective] : []) : (proposal[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-proposal-field="${esc(field)}" data-proposal-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-proposal">Promote selected entries</button></section>` : '<section class="companion-semantic-proposal"><h5>Semantic proposal</h5><p class="companion-memory-help">Create a source-linked proposal, then review and promote individual entries. It will not change memory automatically.</p></section>';
   const proposalAction = !proposal && (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
     ? '<button type="button" class="companion-create-semantic-proposal">Create semantic proposal</button>' : '';
   const legacyInventoryHtml = payload.scope_kind === 'personal'
@@ -612,7 +619,9 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/semantic-proposals`, {method: 'POST', credentials: 'same-origin'});
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || 'Could not create a semantic proposal');
-      uiModule.showToast?.('Semantic proposal ready for review.', 2600);
+      const model = String(result?.derivation?.model || result?.proposal?.derivation_model || '').trim();
+      const sourceCount = Number(result?.derivation?.source_message_count || 0);
+      uiModule.showToast?.(`Semantic proposal ready for review${model ? ` · ${model}` : ''}${sourceCount ? ` · ${sourceCount} source message${sourceCount === 1 ? '' : 's'}` : ''}.`, 3600);
       close(); openCompanionMemory(meta, 'context');
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not create a semantic proposal');
