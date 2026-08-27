@@ -180,7 +180,8 @@ backup path or text; it does not start a migration.
 - retain project home/related-project editing, explicit `@Project Name`
   resolution, and a three-project related-context cap now implemented;
 - provide a concise context inspector for checkpoint, brief, mounted transfer,
-  episodic hits, artifacts, and grants;
+  episodic hits, artifacts, and grants. Episodic audit entries expose source
+  classes and counts only, not recalled content or provider metadata;
 - render native Obsidian callouts such as `> [!question]` in both chat and the
   established Documents Markdown preview, while Markdown export preserves the
   original portable source.  Collapsible `-` and expanded `+` callouts retain

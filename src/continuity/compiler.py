@@ -338,6 +338,16 @@ class ContextCompiler:
                     )
             except Exception:
                 working_artifacts, context_grants = (), ()
+        # The persisted manifest is an owner-facing audit trail, not another
+        # copy of recalled memory. Keep only the contributing source classes;
+        # never retain hit text, IDs, ranking scores, or provider metadata.
+        episodic_hit_kinds: dict[str, int] = {}
+        for hit in hits:
+            kind = hit.get("source_kind") if isinstance(hit, Mapping) else None
+            safe_kind = str(kind).strip().lower()[:64] if kind else "unknown"
+            if not re.fullmatch(r"[a-z0-9_.-]+", safe_kind):
+                safe_kind = "unknown"
+            episodic_hit_kinds[safe_kind] = episodic_hit_kinds.get(safe_kind, 0) + 1
         manifest = {
             "scope": {"kind": scope.scope_kind, "project_id": scope.project_id},
             "thread_checkpoint": bool(checkpoint),
@@ -345,6 +355,7 @@ class ContextCompiler:
             "personal_brief": bool(personal),
             "related_project_ids": [brief.project_id for brief in related],
             "episodic_hit_count": len(hits),
+            "episodic_hit_kinds": dict(sorted(episodic_hit_kinds.items())),
             "working_artifacts": [{"id": item["id"], "path": item["path"], "revision": item["revision"]} for item in working_artifacts],
             "selected_working_artifact_paths": [
                 item["path"] for item in working_artifacts if "content" in item

@@ -458,6 +458,11 @@ Native Obsidian-compatible callout rendering is now shared by chat and the
 Documents Markdown preview; export keeps the original Markdown source rather
 than serializing the presentation HTML.
 
+The Context inspector now records the count and source *classes* of scoped
+episodic hits for the last completed turn (for example, `artifact: 1`,
+`brief: 1`). It deliberately does not persist or display recalled text, source
+IDs, ranking scores, or provider metadata in that audit surface.
+
 The Context panel now also includes a reload-safe **Last compiled context**
 audit for the latest scoped assistant reply. It reports only the owner-safe
 categories/counts that were admitted (checkpoint, home brief, related brief,

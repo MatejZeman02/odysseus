@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,14 @@ def _last_compiled_context(*, owner: str, session_id: str) -> dict | None:
             related = manifest.get("related_project_ids") if isinstance(manifest.get("related_project_ids"), list) else []
             grants = manifest.get("context_grants") if isinstance(manifest.get("context_grants"), list) else []
             tail = manifest.get("transcript_tail_message_ids") if isinstance(manifest.get("transcript_tail_message_ids"), list) else []
+            raw_hit_kinds = manifest.get("episodic_hit_kinds") if isinstance(manifest.get("episodic_hit_kinds"), dict) else {}
+            hit_kinds: dict[str, int] = {}
+            for kind, raw_count in raw_hit_kinds.items():
+                if not isinstance(kind, str) or not re.fullmatch(r"[a-z0-9_.-]{1,64}", kind):
+                    continue
+                safe_count = count(raw_count, 20)
+                if safe_count:
+                    hit_kinds[kind] = safe_count
             return {
                 "recorded_at": row.timestamp.isoformat() if row.timestamp else None,
                 "scope_kind": scope.get("kind") if isinstance(scope.get("kind"), str) else None,
@@ -76,6 +85,7 @@ def _last_compiled_context(*, owner: str, session_id: str) -> dict | None:
                 "related_project_count": min(len(related), 3),
                 "mounted_checkpoint_count": min(len(mounts), 2),
                 "episodic_hit_count": count(manifest.get("episodic_hit_count"), 20),
+                "episodic_hit_kinds": dict(sorted(hit_kinds.items())[:8]),
                 "working_artifact_paths": [
                     item.get("path") for item in artifacts[:20]
                     if isinstance(item, dict) and isinstance(item.get("path"), str)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -385,6 +386,22 @@ def test_episodic_recall_filters_owner_home_and_project(store):
     index.index(owner="alice", scope_kind="personal", project_id=None, session_id="personal", source_kind="brief", source_id="personal", content="Fish dinner preference")
     assert [item["source_id"] for item in index.recall(owner="alice", scope_kind="project", project_id="dust", query="fish")] == ["dust"]
     assert [item["source_id"] for item in index.recall(owner="alice", scope_kind="personal", project_id=None, query="fish")] == ["personal"]
+
+
+def test_context_manifest_audits_episodic_source_kinds_without_recalled_text(store):
+    continuity, _memory = store
+    bundle = ContextCompiler(continuity).compile(
+        owner="alice", session_id="project", request="fish", transcript=[],
+        episodic_hits=[
+            {"source_kind": "artifact", "source_id": "private-artifact", "content": "must not be in manifest"},
+            {"source_kind": "brief", "source_id": "private-brief", "content": "must not be in manifest"},
+        ],
+    )
+
+    assert bundle.manifest["episodic_hit_count"] == 2
+    assert bundle.manifest["episodic_hit_kinds"] == {"artifact": 1, "brief": 1}
+    assert "must not be in manifest" not in json.dumps(bundle.manifest)
+    assert "private-artifact" not in json.dumps(bundle.manifest)
 
 
 def test_episodic_recall_excludes_expired_records_and_rejects_ambiguous_scope(store):
