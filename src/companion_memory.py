@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import uuid
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
@@ -58,6 +60,56 @@ def normalise_artifact_path(path: str) -> str:
 def _summary(content: str) -> str:
     compact = " ".join(content.strip().split())
     return compact[:280] + ("…" if len(compact) > 280 else "")
+
+
+def _read_project_artifact_no_follow(root: Path, path: str) -> str:
+    """Read one workspace artifact without following any path component.
+
+    Project artifacts are owner-selected source material that can be included
+    in a model prompt.  Resolving a candidate before checking ``is_symlink``
+    is insufficient: the resolution erases evidence that the leaf was a
+    symlink, and a later pathname read reopens a race.  Keep a descriptor for
+    every directory and use ``O_NOFOLLOW`` for the final regular file instead.
+    """
+    relative = PurePosixPath(normalise_artifact_path(path))
+    if not relative.parts or relative.parts[0] != ".artifacts":
+        raise MemoryScopeError("Artifact was not found")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        # A fallback to ordinary pathname traversal would weaken the artifact
+        # boundary on exactly the platforms that cannot enforce it.
+        raise MemoryScopeError("Artifact was not found")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | nofollow
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | nofollow
+    root_fd = current_fd = None
+    file_fd = None
+    try:
+        root_fd = os.open(root, directory_flags)
+        current_fd = root_fd
+        for component in relative.parts[:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=current_fd)
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = next_fd
+        file_fd = os.open(relative.name, file_flags, dir_fd=current_fd)
+        info = os.fstat(file_fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_ARTIFACT_BYTES:
+            raise MemoryScopeError("Artifact was not found")
+        with os.fdopen(file_fd, "rb", closefd=True) as handle:
+            file_fd = None
+            data = handle.read(MAX_ARTIFACT_BYTES + 1)
+        if len(data) > MAX_ARTIFACT_BYTES:
+            raise MemoryScopeError("Artifact was not found")
+        return data.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MemoryScopeError("Artifact was not found") from exc
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        if current_fd is not None and current_fd != root_fd:
+            os.close(current_fd)
+        if root_fd is not None:
+            os.close(root_fd)
 
 
 def _json_list(value: str) -> list[str]:
@@ -318,12 +370,13 @@ class CompanionMemoryStore:
             captured_paths = {item["path"] for item in captured}
             try:
                 for candidate in sorted(artifact_root.rglob("*.md")):
-                    if not candidate.is_file() or candidate.is_symlink():
-                        continue
                     relative = candidate.relative_to(root).as_posix()
                     if relative in captured_paths:
                         continue
-                    data = candidate.read_text(encoding="utf-8")
+                    try:
+                        data = _read_project_artifact_no_follow(root, relative)
+                    except MemoryScopeError:
+                        continue
                     records.append({"id": f"project:{project_id}:{relative}", "scope_kind": "project", "project_id": project_id,
                                     "path": relative, "title": candidate.stem, "summary": _summary(data), "revision": 1,
                                     "content_hash": _hash(data), "updated_at": None, "source_message_id": None})
@@ -562,17 +615,13 @@ class CompanionMemoryStore:
                 raise MemoryScopeError("Artifact was not found")
             project = self._project(db, owner, project_id)
             root = Path(project.workspace_root).resolve(strict=True)
-            candidate = (root / path).resolve(strict=True)
-            artifact_root = (root / ".artifacts").resolve(strict=True)
-            if candidate.is_symlink() or not candidate.is_file() or not candidate.is_relative_to(artifact_root):
-                raise MemoryScopeError("Artifact was not found")
-            content = candidate.read_text(encoding="utf-8")
+            content = _read_project_artifact_no_follow(root, path)
             return {
                 "id": f"project:{project_id}:{path}",
                 "scope_kind": "project",
                 "project_id": project_id,
                 "path": path,
-                "title": candidate.stem,
+                "title": PurePosixPath(path).stem,
                 "summary": _summary(content),
                 "revision": 1,
                 "content_hash": _hash(content),

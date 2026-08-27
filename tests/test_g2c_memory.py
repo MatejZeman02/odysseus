@@ -431,6 +431,43 @@ def test_project_artifacts_are_shared_by_project_sessions_and_survive_store_recr
     assert [item["path"] for item in fork_bundle.working_artifacts] == [".artifacts/plans/release.md"]
 
 
+def test_project_artifact_reads_reject_leaf_and_parent_symlinks(store, tmp_path):
+    """Project artifacts must never escape their recorded regular path."""
+    _continuity, memory = store
+    workspace = tmp_path / "dust"
+    artifact_root = workspace / ".artifacts"
+    (artifact_root / "plans").mkdir(parents=True)
+    (workspace / ".git").mkdir()
+    (artifact_root / "plans" / "release.md").write_text("# Release\nShip safely.", encoding="utf-8")
+    (artifact_root / "inside-link.md").symlink_to(artifact_root / "plans" / "release.md")
+    (artifact_root / "linked-plans").symlink_to(artifact_root / "plans", target_is_directory=True)
+    outside = tmp_path / "outside.md"
+    outside.write_text("do not expose", encoding="utf-8")
+    (artifact_root / "outside-link.md").symlink_to(outside)
+    db = memory_module.SessionLocal()
+    try:
+        db.query(Project).filter(Project.id == "dust").update({Project.workspace_root: str(workspace)})
+        db.commit()
+    finally:
+        db.close()
+
+    listed = memory.list_artifacts(owner="alice", scope_kind="project", project_id="dust")
+    assert [item["path"] for item in listed] == [".artifacts/plans/release.md"]
+    direct = memory.get_scoped_artifact_by_path(
+        owner="alice", scope_kind="project", project_id="dust", path=".artifacts/plans/release.md",
+    )
+    assert direct["content"] == "# Release\nShip safely."
+    for unsafe in (
+        ".artifacts/inside-link.md",
+        ".artifacts/linked-plans/release.md",
+        ".artifacts/outside-link.md",
+    ):
+        with pytest.raises(MemoryScopeError, match="Artifact was not found"):
+            memory.get_scoped_artifact_by_path(
+                owner="alice", scope_kind="project", project_id="dust", path=unsafe,
+            )
+
+
 def test_scoped_recall_outage_does_not_break_exact_artifact_or_checkpoint_context(store, monkeypatch):
     continuity, memory = store
     memory.write_personal_artifact(
