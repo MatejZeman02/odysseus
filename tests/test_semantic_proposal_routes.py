@@ -313,6 +313,30 @@ def test_legacy_memory_inventory_is_owner_aggregate_only_and_never_returns_text(
     assert "other owner's text" not in str(inventory)
 
 
+def test_owner_edited_personal_brief_is_the_only_other_checkpoint_derived_index_source(monkeypatch):
+    router = _setup(monkeypatch)
+    write_brief = _endpoint(router, "/api/companion/personal-brief", "POST")
+    result = write_brief(
+        route_module.PersonalBriefWrite(
+            session_id="session", summary="Prefers concise release updates",
+            ongoing_goals=["Prepare the release"],
+        ),
+        SimpleNamespace(),
+    )
+
+    assert result["brief"]["derivation_status"] == "accepted"
+    db = route_module.SessionLocal()
+    try:
+        indexed = db.query(ScopedMemoryRecord).filter(
+            ScopedMemoryRecord.owner == "alice", ScopedMemoryRecord.source_kind == "accepted_home_brief",
+        ).one()
+        assert indexed.scope_kind == "personal"
+        assert indexed.source_id
+        assert "Prefers concise release updates" in indexed.content
+    finally:
+        db.close()
+
+
 def test_legacy_memory_backup_is_owner_private_and_returns_only_audit_data(monkeypatch, tmp_path):
     _setup(monkeypatch)
 
