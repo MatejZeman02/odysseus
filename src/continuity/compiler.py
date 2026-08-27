@@ -236,6 +236,8 @@ class ContextCompiler:
             "mount_revision": mount.revision,
             "source_checkpoint_id": mount.source_checkpoint_id,
             "source_session_id": mount.source_session_id,
+            "sensitivity": mount.sensitivity,
+            "expires_at": mount.expires_at,
             "checkpoint": mount.checkpoint.to_payload(),
         } for mount in mounts)
         related: list[ProjectBriefV1] = []
@@ -388,6 +390,8 @@ class ContextCompiler:
                 "source_checkpoint_id": mount["source_checkpoint_id"],
                 "source_session_id": mount["source_session_id"],
                 "derivation_status": mount["checkpoint"]["derivation_status"],
+                "sensitivity": mount["sensitivity"],
+                "expires_at": mount["expires_at"],
                 "source_through_message_id": mount["checkpoint"]["source_through_message_id"],
                 "source_message_count": len(mount["checkpoint"]["source_message_ids"]),
             } for mount in mounted_checkpoints],

@@ -439,7 +439,12 @@ never compiled or promotable. An owner may also create a fresh non-primary
 Personal/project synthesis chat with exactly two selected immutable mounts; it
 inherits only the destination chat's stored route and scope, never merges
 transcripts, and calls no provider until the owner sends a reconciliation
-request. Richer synthesis review remains the next C3 work.
+request. The compiled mount also carries its sensitivity and expiry metadata,
+and the context policy requires source attribution: disagreement between mounts
+must remain explicit rather than being combined into an unverified fact. The
+review UI labels each selectable source with its home, derivation status, and
+source-message count before synthesis. Richer source-diff/reconciliation
+review remains deferred.
 
 Implement the user-facing alternative to transcript merging:
 

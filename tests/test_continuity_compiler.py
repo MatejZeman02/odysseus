@@ -362,9 +362,12 @@ def test_checkpoint_mount_is_labeled_context_not_destination_transcript(monkeypa
     assert len(bundle.mounted_checkpoints) == 1
     assert bundle.mounted_checkpoints[0]["source_checkpoint_id"] == source_write.id
     assert bundle.mounted_checkpoints[0]["checkpoint"]["objective"] == "Release options need comparison"
+    assert bundle.mounted_checkpoints[0]["sensitivity"] == "standard"
+    assert bundle.mounted_checkpoints[0]["expires_at"]
     assert "Release options" not in str(bundle.transcript_tail)
     assert bundle.manifest["checkpoint_mounts"][0]["source_message_count"] == 1
 
     from routes.chat_helpers import _continuity_prompt_message
     prompt = _continuity_prompt_message(bundle)
     assert "mounted_checkpoints_read_only" in prompt["content"]
+    assert "Keep each mount attributable" in prompt["content"]
