@@ -63,23 +63,24 @@ def transcript_fingerprint(messages: Iterable[Any]) -> str:
 
 
 def derive_checkpoint_fields(source: tuple[dict[str, Any], ...]) -> Mapping[str, Any]:
-    """Conservative local semantic checkpoint derivation.
+    """Small availability-only checkpoint derivation.
 
     This intentionally does not call a provider while a user is waiting for a
-    chat answer.  It produces a useful objective/question/action seed from
-    durable messages; richer approval remains an explicit future writer.
+    chat answer. It may only retain the user's current objective, questions,
+    and requested actions. In particular, it must never infer that assistant
+    prose represents an accepted decision.
     """
     users = [str(item.get("content") or "").strip() for item in source if item.get("role") == "user"]
-    assistants = [str(item.get("content") or "").strip() for item in source if item.get("role") == "assistant"]
     objective = users[-1][:500] if users else ""
     questions = [text[:300] for text in users[-3:] if "?" in text][-3:]
     actions = [text[:300] for text in users[-3:] if any(word in text.lower() for word in ("please", "create", "plan", "write", "review", "fix"))][-3:]
-    decisions = [text[:300] for text in assistants[-2:] if text][:2]
     return {
         "objective": objective,
         "open_questions": questions,
         "next_actions": actions,
-        "accepted_decisions": decisions,
+        "derivation_status": "heuristic",
+        "derivation_version": 1,
+        "derivation_method": "local_heuristic_v1",
     }
 
 
@@ -149,6 +150,9 @@ class CheckpointCompactor:
             source_message_ids=source_ids,
             source_through_message_id=source_ids[-1],
             source_hash=transcript_fingerprint(source),
+            derivation_status=str(values.get("derivation_status") or "heuristic"),
+            derivation_version=values.get("derivation_version", 1),
+            derivation_method=str(values.get("derivation_method") or "local_heuristic_v1"),
         )
         self.store.write_thread_checkpoint(owner=owner, checkpoint=checkpoint)
         try:
@@ -156,7 +160,7 @@ class CheckpointCompactor:
             ScopedMemoryIndex().index(owner=owner, scope_kind=scope.scope_kind, project_id=scope.project_id,
                                       session_id=session_id, source_kind="thread_checkpoint",
                                       source_id=checkpoint.source_hash,
-                                      content="\n".join([checkpoint.objective, *checkpoint.accepted_decisions, *checkpoint.open_questions, *checkpoint.next_actions]))
+                                      content="\n".join([checkpoint.objective, *checkpoint.proposals, *checkpoint.open_questions, *checkpoint.next_actions]))
         except Exception:
             pass
         # Home briefs are compact shared state, never transcript replacement.
@@ -172,7 +176,12 @@ class CheckpointCompactor:
                     accepted_decisions=checkpoint.accepted_decisions,
                     proposals=checkpoint.proposals, open_questions=checkpoint.open_questions,
                     current_plans=checkpoint.next_actions, source_refs=checkpoint.artifact_refs,
-                    source_session_ids=[session_id],
+                    source_session_ids=[session_id], source_message_ids=checkpoint.source_message_ids,
+                    source_through_message_id=checkpoint.source_through_message_id,
+                    source_revision=checkpoint.source_hash,
+                    derivation_status=checkpoint.derivation_status,
+                    derivation_version=checkpoint.derivation_version,
+                    derivation_method=checkpoint.derivation_method,
                 ), source_hash=checkpoint.source_hash,
                 source_through_message_id=checkpoint.source_through_message_id,
             )
@@ -183,7 +192,12 @@ class CheckpointCompactor:
                                       ongoing_goals=checkpoint.next_actions,
                                       open_questions=checkpoint.open_questions,
                                       artifact_refs=checkpoint.artifact_refs,
-                                      source_refs=checkpoint.source_message_ids),
+                                      source_refs=checkpoint.source_message_ids,
+                                      source_message_ids=checkpoint.source_message_ids,
+                                      source_through_message_id=checkpoint.source_through_message_id,
+                                      derivation_status=checkpoint.derivation_status,
+                                      derivation_version=checkpoint.derivation_version,
+                                      derivation_method=checkpoint.derivation_method),
                 source_hash=checkpoint.source_hash,
                 source_through_message_id=checkpoint.source_through_message_id,
             )
@@ -314,6 +328,11 @@ class ContextCompiler:
             "context_grants": [{"id": item["id"], "project_id": item["project_id"]} for item in context_grants],
             "project_catalog": self.store.project_catalog(owner=owner) if scope.scope_kind == "personal" else [],
             "transcript_tail_message_ids": [item["metadata"].get("_db_id") for item in tail],
+            "continuity_provenance": {
+                "thread_checkpoint": checkpoint.derivation_status if checkpoint else None,
+                "primary_project_brief": primary.derivation_status if primary else None,
+                "personal_brief": personal.derivation_status if personal else None,
+            },
         }
         return ContextBundle(
             companion_profile=companion_profile, scope=scope, request=request,

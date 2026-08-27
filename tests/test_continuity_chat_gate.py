@@ -28,7 +28,11 @@ def test_continuity_prompt_marks_derived_context_without_raw_transcript():
     assert message["role"] == "user"
     assert message["metadata"]["continuity_artifact"] is True
     assert "raw secret" not in message["content"]
-    assert payload[0]["thread_checkpoint"]["source_hash"] == "hash"
+    checkpoint_payload = next(item["thread_checkpoint"] for item in payload if "thread_checkpoint" in item)
+    provenance = next(item["continuity_provenance_policy"] for item in payload if "continuity_provenance_policy" in item)
+    assert checkpoint_payload["source_hash"] == "hash"
+    assert checkpoint_payload["derivation_status"] == "legacy_unclassified"
+    assert "owner-approved" in provenance
 
 
 def test_named_personal_artifact_adds_reviewed_revision_protocol():

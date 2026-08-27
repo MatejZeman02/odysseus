@@ -251,7 +251,13 @@ def setup_companion_memory_routes() -> APIRouter:
             raise HTTPException(409, "Personal brief requires a Personal Advisor session")
         values = payload.model_dump()
         session_id = values.pop("session_id")
-        brief = PersonalBriefV1(owner_id=owner, **values)
+        brief = PersonalBriefV1(
+            owner_id=owner,
+            derivation_status="accepted",
+            derivation_version=1,
+            derivation_method="owner_edit_v1",
+            **values,
+        )
         source_hash = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
         try:
             result = ContinuityStore().write_personal_brief(owner=owner, session_id=session_id, brief=brief, source_hash=source_hash)

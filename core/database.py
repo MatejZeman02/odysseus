@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -2315,6 +2316,51 @@ def _migrate_add_working_artifact_document_id():
             conn.close()
 
 
+def _migrate_continuity_derivation_metadata():
+    """Classify pre-C0 continuity payloads without changing their content.
+
+    Older records do not reliably say whether they came from the automatic
+    heuristic or an owner edit. Marking them ``legacy_unclassified`` keeps
+    them inspectable while preventing a later reader from treating them as
+    owner-approved facts. Raw messages and artifact revisions are untouched.
+    """
+    if not DATABASE_URL.startswith("sqlite:///"):
+        return
+    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "continuity_artifacts" not in tables:
+            return
+        rows = conn.execute(
+            "SELECT id, payload_json FROM continuity_artifacts "
+            "WHERE kind IN ('thread_checkpoint_v1', 'project_brief_v1', 'personal_brief_v1')"
+        ).fetchall()
+        for artifact_id, payload_json in rows:
+            try:
+                payload = json.loads(payload_json)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict) or "derivation_status" in payload:
+                continue
+            payload["derivation_status"] = "legacy_unclassified"
+            payload["derivation_version"] = 0
+            payload["derivation_method"] = "legacy_unclassified"
+            conn.execute(
+                "UPDATE continuity_artifacts SET payload_json = ? WHERE id = ?",
+                (json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False), artifact_id),
+            )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("continuity derivation metadata migration failed: %s", exc)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
@@ -2328,6 +2374,7 @@ def init_db():
     _migrate_artifact_table_spelling()
     Base.metadata.create_all(bind=engine)
     _migrate_add_working_artifact_document_id()
+    _migrate_continuity_derivation_metadata()
     _migrate_add_continuity_session_columns()
     _migrate_add_g15_session_columns()
     # Lock the DB file (and any SQLite sidecars) to 0o600 — it holds bearer-token

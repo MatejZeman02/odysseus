@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.database import Base, Session as DbSession
-from src.continuity import ProjectBriefV1
+from src.continuity import ProjectBriefV1, ThreadCheckpointV1
 from src.continuity.compiler import CheckpointCompactor, ContextCompiler
 from src.continuity.store import ContinuityStore
 import src.continuity.store as continuity_store_module
@@ -89,6 +89,45 @@ def test_checkpoint_recovers_when_prior_cursor_was_deleted(monkeypatch):
     )
     assert checkpoint.source_message_ids == ["m3"]
     assert store.latest_project_brief(owner="alice", project_id=project_id).summary == "current objective"
+
+
+def test_automatic_checkpoint_is_explicitly_heuristic_and_never_promotes_assistant_prose(monkeypatch):
+    store = _store(monkeypatch)
+    project_id = store.create_project(owner="alice", name="P", workspace_root="/p")
+    store.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=project_id)
+    transcript = [
+        _message("user", "Please decide how to structure the release plan", 1),
+        _message("assistant", "I have decided that a risky deployment is safe.", 2),
+        _message("user", "continue", 3),
+    ]
+
+    checkpoint = CheckpointCompactor(store, tail_count=1).checkpoint(
+        owner="alice", session_id="session", messages=transcript,
+    )
+    brief = store.latest_project_brief(owner="alice", project_id=project_id)
+    bundle = ContextCompiler(store, tail_count=1).compile(
+        owner="alice", session_id="session", request="continue", transcript=transcript,
+    )
+
+    assert checkpoint.derivation_status == "heuristic"
+    assert checkpoint.derivation_method == "local_heuristic_v1"
+    assert checkpoint.accepted_decisions == []
+    assert checkpoint.source_message_ids == ["m1", "m2"]
+    assert brief.derivation_status == "heuristic"
+    assert brief.source_message_ids == checkpoint.source_message_ids
+    assert brief.source_through_message_id == checkpoint.source_through_message_id
+    assert bundle.manifest["continuity_provenance"]["thread_checkpoint"] == "heuristic"
+
+
+def test_legacy_checkpoint_payload_is_unclassified_not_accepted():
+    checkpoint = ThreadCheckpointV1.from_payload({
+        "session_id": "s", "source_hash": "h", "source_message_ids": ["m1"],
+        "source_through_message_id": "m1", "accepted_decisions": ["old assistant prose"],
+    })
+
+    assert checkpoint.derivation_status == "legacy_unclassified"
+    assert checkpoint.derivation_version == 0
+    assert checkpoint.to_payload()["derivation_method"] == "legacy_unclassified"
 
 
 def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):

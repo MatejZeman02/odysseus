@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 
 SCOPES = frozenset({"project", "personal", "computer", "general"})
+DERIVATION_STATUSES = frozenset({"legacy_unclassified", "heuristic", "proposed", "accepted", "rejected"})
 
 
 class ContractError(ValueError):
@@ -27,6 +28,23 @@ def _mapping(value: Any, field_name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError(f"{field_name} must be an object")
     return dict(value)
+
+
+def _derivation_status(value: Any) -> str:
+    status = str(value or "legacy_unclassified")
+    if status not in DERIVATION_STATUSES:
+        raise ContractError(f"unsupported derivation_status: {status!r}")
+    return status
+
+
+def _derivation_version(value: Any) -> int:
+    try:
+        version = int(value if value is not None else 0)
+    except (TypeError, ValueError) as exc:
+        raise ContractError("derivation_version must be a non-negative integer") from exc
+    if version < 0:
+        raise ContractError("derivation_version must be a non-negative integer")
+    return version
 
 
 @dataclass(frozen=True)
@@ -61,6 +79,9 @@ class ThreadCheckpointV1:
     source_message_ids: list[str] = field(default_factory=list)
     source_through_message_id: Optional[str] = None
     source_hash: str = ""
+    derivation_status: str = "legacy_unclassified"
+    derivation_version: int = 0
+    derivation_method: str = "legacy_unclassified"
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -70,6 +91,8 @@ class ThreadCheckpointV1:
             raise ContractError("checkpoint requires session_id and source_hash")
         if self.source_through_message_id and self.source_through_message_id not in self.source_message_ids:
             raise ContractError("source_through_message_id must be among source_message_ids")
+        _derivation_status(self.derivation_status)
+        _derivation_version(self.derivation_version)
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -91,6 +114,9 @@ class ThreadCheckpointV1:
             source_message_ids=_text_list(data.get("source_message_ids"), "source_message_ids"),
             source_through_message_id=data.get("source_through_message_id") or None,
             source_hash=str(data.get("source_hash") or ""),
+            derivation_status=_derivation_status(data.get("derivation_status")),
+            derivation_version=_derivation_version(data.get("derivation_version")),
+            derivation_method=str(data.get("derivation_method") or "legacy_unclassified"),
             schema_version=data.get("schema_version", 1),
         )
 
@@ -106,8 +132,13 @@ class ProjectBriefV1:
     current_plans: list[str] = field(default_factory=list)
     source_refs: list[str] = field(default_factory=list)
     source_session_ids: list[str] = field(default_factory=list)
+    source_message_ids: list[str] = field(default_factory=list)
+    source_through_message_id: Optional[str] = None
     source_revision: Optional[str] = None
     updated_at: Optional[str] = None
+    derivation_status: str = "legacy_unclassified"
+    derivation_version: int = 0
+    derivation_method: str = "legacy_unclassified"
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -115,6 +146,10 @@ class ProjectBriefV1:
             raise ContractError("unsupported ProjectBrief schema_version")
         if not self.project_id:
             raise ContractError("project brief requires project_id")
+        _derivation_status(self.derivation_status)
+        _derivation_version(self.derivation_version)
+        if self.source_through_message_id and self.source_through_message_id not in self.source_message_ids:
+            raise ContractError("source_through_message_id must be among source_message_ids")
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -132,8 +167,13 @@ class ProjectBriefV1:
             current_plans=_text_list(data.get("current_plans"), "current_plans"),
             source_refs=_text_list(data.get("source_refs"), "source_refs"),
             source_session_ids=_text_list(data.get("source_session_ids"), "source_session_ids"),
+            source_message_ids=_text_list(data.get("source_message_ids"), "source_message_ids"),
+            source_through_message_id=data.get("source_through_message_id") or None,
             source_revision=data.get("source_revision") or None,
             updated_at=data.get("updated_at") or None,
+            derivation_status=_derivation_status(data.get("derivation_status")),
+            derivation_version=_derivation_version(data.get("derivation_version")),
+            derivation_method=str(data.get("derivation_method") or "legacy_unclassified"),
             schema_version=data.get("schema_version", 1),
         )
 
@@ -155,6 +195,11 @@ class PersonalBriefV1:
     open_questions: list[str] = field(default_factory=list)
     artifact_refs: list[str] = field(default_factory=list)
     source_refs: list[str] = field(default_factory=list)
+    source_message_ids: list[str] = field(default_factory=list)
+    source_through_message_id: Optional[str] = None
+    derivation_status: str = "legacy_unclassified"
+    derivation_version: int = 0
+    derivation_method: str = "legacy_unclassified"
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -162,6 +207,10 @@ class PersonalBriefV1:
             raise ContractError("unsupported PersonalBrief schema_version")
         if not self.owner_id:
             raise ContractError("personal brief requires owner_id")
+        _derivation_status(self.derivation_status)
+        _derivation_version(self.derivation_version)
+        if self.source_through_message_id and self.source_through_message_id not in self.source_message_ids:
+            raise ContractError("source_through_message_id must be among source_message_ids")
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -179,6 +228,11 @@ class PersonalBriefV1:
             open_questions=_text_list(data.get("open_questions"), "open_questions"),
             artifact_refs=_text_list(data.get("artifact_refs"), "artifact_refs"),
             source_refs=_text_list(data.get("source_refs"), "source_refs"),
+            source_message_ids=_text_list(data.get("source_message_ids"), "source_message_ids"),
+            source_through_message_id=data.get("source_through_message_id") or None,
+            derivation_status=_derivation_status(data.get("derivation_status")),
+            derivation_version=_derivation_version(data.get("derivation_version")),
+            derivation_method=str(data.get("derivation_method") or "legacy_unclassified"),
             schema_version=data.get("schema_version", 1),
         )
 

@@ -93,7 +93,17 @@ failed approaches, questions, actions, and artifact references.
 - prove a fresh worker and a project fork continue from automatic artifacts,
   never a different chat's raw tail.
 
-### Stage C2 — Checkpoint transfer and synthesis, not transcript merge
+### Stage C2 — Prove durable continuation
+
+**Outcome:** a fresh worker and a project fork continue from source-linked
+automatic artifacts, not a different chat's raw transcript tail.
+
+- replay and restart tests prove checkpoint/brief reconstruction;
+- derived records remain explicitly provisional until an owner promotion;
+- source spans, cancellation, failed derivations, and deleted-source behavior
+  remain visible and non-destructive.
+
+### Stage C3 — Checkpoint transfer and synthesis, not transcript merge
 
 **Outcome:** a finished chat can transfer selected context safely.
 
@@ -103,7 +113,7 @@ failed approaches, questions, actions, and artifact references.
 - keep raw transcript interleaving, automatic cross-home promotion, and true
   project branch merging out of scope.
 
-### Stage C3 — Scoped retrieval provider adoption
+### Stage C4 — Scoped retrieval provider adoption
 
 **Outcome:** AgentMemory, if retained after inventory, becomes a replaceable
 retrieval backend rather than project authority.
@@ -114,7 +124,7 @@ retrieval backend rather than project authority.
 - retain the local exact index and make provider outage non-fatal;
 - migrate no real records or writer until the owner approves the inventory.
 
-### Stage C4 — Continuity and project UX closure
+### Stage C5 — Continuity and project UX closure
 
 **Outcome:** long-running work is understandable and remains fast.
 

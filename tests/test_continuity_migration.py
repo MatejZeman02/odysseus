@@ -1,4 +1,5 @@
 import sqlite3
+import json
 
 import core.database as database
 
@@ -20,6 +21,30 @@ def test_legacy_sessions_gain_additive_continuity_columns(monkeypatch, tmp_path)
     conn.close()
     assert row == ("legacy", "Old chat", "general", None)
     assert "ix_sessions_scope_project" in indexes
+
+
+def test_legacy_continuity_payloads_are_marked_unclassified_without_content_rewrite(monkeypatch, tmp_path):
+    path = tmp_path / "legacy-continuity.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE continuity_artifacts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload_json TEXT NOT NULL)")
+    original = {"session_id": "legacy", "source_hash": "hash", "accepted_decisions": ["old text"]}
+    conn.execute(
+        "INSERT INTO continuity_artifacts (id, kind, payload_json) VALUES ('checkpoint', 'thread_checkpoint_v1', ?)",
+        (json.dumps(original),),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{path}")
+    database._migrate_continuity_derivation_metadata()
+
+    conn = sqlite3.connect(path)
+    payload = json.loads(conn.execute("SELECT payload_json FROM continuity_artifacts WHERE id = 'checkpoint'").fetchone()[0])
+    conn.close()
+    assert payload["accepted_decisions"] == ["old text"]
+    assert payload["derivation_status"] == "legacy_unclassified"
+    assert payload["derivation_version"] == 0
+    assert payload["derivation_method"] == "legacy_unclassified"
 
 
 def test_legacy_sessions_gain_safe_project_capability_default(monkeypatch, tmp_path):
