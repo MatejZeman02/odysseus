@@ -448,9 +448,9 @@ conversation bound to that project.
   tested rather than inferred from ordinary message text.
 - [x] The store/compiler admits only an explicitly supplied related-project ID
   that is present in the home project's direct allowlist.
-- [ ] Resolve owner-facing project names or `@project` references to those IDs
-  and expose the direct allowlist in the UI. G1/G1.5 tests currently pass IDs
-  directly to the compiler.
+- [x] Resolve exact owner-facing `@Project Name` references to direct-allowlist
+  IDs and expose the maximum-three relation editor in the Context UI. Casual
+  project mentions remain insufficient.
 - [x] Include only a labeled related `ProjectBriefV1` and source references in
   the initial cross-project bundle. Fetch exact cited file excerpts on demand in
   a later increment.
@@ -458,9 +458,9 @@ conversation bound to that project.
   shell/tool transcripts, Qwen state, unlinked projects, and transitive links.
 - [x] Keep related-project context ephemeral and separately labeled; never
   merge it into the primary project's brief.
-- [ ] Add explicit item/token caps before exposing multi-related-project
-  selection in the UI. G1 currently accepts only explicit server-validated
-  related-project IDs and uses bounded transcript tails.
+- [x] Keep a hard three-project relation cap and admit only one labeled brief
+  per exact mention; no related raw transcript, arbitrary artifact body, or
+  multi-project excerpt expansion is exposed.
 
 Future approved memories must remain discoverable only through scoped retrieval.
 “Available” must not mean “inserted into every prompt.” G1.5 does not yet make
@@ -492,12 +492,12 @@ The replacement behavior is now:
 - [x] Store stable source message IDs and a content hash.
 - [x] Compile the next prompt from the latest checkpoint plus a recent raw tail.
 - [x] On summarization failure, retain everything and trim only that model call.
-- [ ] Supply a production semantic derivation function so checkpoints contain
-  meaningful objective, decisions, proposals, questions, actions, references,
-  and failures instead of only a durable cursor/hash.
-- [ ] Project only reviewed, source-linked, shareable checkpoint state into a
-  new `ProjectBriefV1` revision. No production caller currently invokes
-  `write_project_brief()`.
+- [x] Supply a bounded, stored-endpoint semantic derivation route that accepts
+  exactly one validated proposal. It creates source-linked proposals only;
+  malformed/provider-failed output writes nothing.
+- [x] Project only owner-selected, source-linked proposal entries into a new
+  project/personal home-brief revision. The browser cannot submit replacement
+  summary text or promote unreviewed model output.
 - [x] Permit a new chat bound to the same project to load its project brief
   without copying another chat's checkpoint or transcript when a brief exists.
 
@@ -559,19 +559,24 @@ provider abstraction into context assembly before calling it “integrated.”
 
 Safety rules for the existing AgentMemory installation:
 
-- [ ] Use it only as an episodic index over structured Odysseus artifacts and
-  selected tool outcomes initially.
-- [ ] Namespace new records with an opaque owner and project identifier.
-- [ ] Use exact project-filtered search and post-verify every hit's scope.
-- [ ] Drop unknown, legacy-unscoped, or mismatched hits.
+- [x] Define the provider-neutral scoped contract and a local conformance
+  adapter over structured Odysseus records; it is intentionally not registered
+  as a new writer or a replacement for native memory.
+- [x] Validate owner, home/project binding, source provenance, sensitivity,
+  expiry, and opaque grant provenance before a scoped provider operates.
+- [x] Use exact scope filtering and expiry exclusion in the local recall index;
+  compiler failures leave checkpoint/raw-tail continuity available.
+- [x] Drop ambiguous/mismatched local scope requests before persistence or
+  recall. AgentMemory remains deferred rather than being treated as equivalent.
 - [ ] Do not use `memory_smart_search` as a project security boundary; its
   current hybrid result path does not reliably filter by project.
 - [ ] Do not call AgentMemory's free-form `remember` or enable Qwen auto-memory
   initially.
 - [ ] Keep AgentMemory outage non-fatal: exact continuity checkpoints still
   load without it.
-- [ ] Inventory and back up the owner's existing AgentMemory/native data before
-  changing the real writer.
+- [x] Provide an explicit aggregate-only inventory route and an explicit
+  owner-private native-memory backup route. Neither is invoked automatically;
+  a real owner action remains required before migration planning.
 
 G2C is broader than an AgentMemory provider switch. It must preserve private
 per-chat checkpoints, add a distinct Personal home brief, permit Personal
@@ -814,37 +819,33 @@ The owner kept Qwen and proceeded to the UI trial, completing the Qwen
 retention decision at checkpoint G1. Automatic semantic artifact derivation was
 not exercised by this slice and is deliberately tracked next.
 
-### Phase 2B — Semantic continuity closure — **Partial; replace heuristic**
+### Phase 2B — Semantic continuity closure — **Implemented; real-provider canary pending**
 
 - [x] Write source-linked checkpoints and project/personal home briefs without
   rewriting raw messages. Current values are heuristic only.
-- [ ] Add the C0 status/version migration so heuristic output is visible but
-  cannot become accepted truth.
-- [ ] Define the C1 bounded, schema-validated derivation request for
-  `ThreadCheckpointV1`; retain all source message IDs/hashes and never rewrite
-  raw messages if the derivation fails.
-- [ ] Select the derivation route according to the `[!QUESTION]` above, resolve
-  it owner-safely, and prevent the derivation call from receiving more authority
-  than the corresponding chat turn.
-- [ ] Derive and write a `ProjectBriefV1` only from explicitly shareable,
-  source-linked checkpoint fields; retain a revision and source cursor for every
-  projection.
-- [ ] Prove an automatically produced checkpoint survives restart and a fresh
-  project fork receives the automatically produced brief, never another thread's
-  raw tail.
-- [ ] Cover invalid JSON, provider failure, cancellation, concurrent projection,
-  stale cursor/hash, cross-owner access, and a model that tries to invent canon.
-- [ ] Add a visible but compact context disclosure that distinguishes raw tail,
-  checkpoint, and project brief only after those artifacts are meaningful.
+- [x] Label heuristic/legacy outputs and prevent either from becoming accepted
+  home truth without explicit owner promotion.
+- [x] Define the bounded schema-validated derivation request, retain source
+  IDs/hashes, and preserve raw history on all derivation failures.
+- [x] Resolve the stored registered endpoint owner-safely and run derivation
+  with no chat/worker authority beyond the source text it is allowed to derive.
+- [x] Create revisioned project/personal briefs only from selected source-linked
+  proposal fields.
+- [x] Prove restart/fork continuation, proposal concurrency, invalid output,
+  cancellation, stale sources, and cross-owner rejection in automated tests.
+- [x] Provide compact context disclosure, explicit older-history paging, mount
+  lifecycle, and last-compiled audit information.
 
-### Phase 3 — AgentMemory provider switch — **Deferred**
+### Phase 3 — Provider adoption and legacy migration — **Gated**
 
-- [ ] Implement the strictly scoped adapter and fake-server contract tests.
+- [x] Implement the strictly scoped provider contract and local conformance
+  adapter/tests. It is not wired as an automatic writer.
 - [ ] Wire normal context recall through `MemoryProviderRegistry`.
 - [ ] Index only approved structured artifacts/tool outcomes in separate
   Personal, Computer, and project namespaces.
-- [ ] Provide inventory, backup, dry-run migration, rollback, and duplicate
-  reports for existing native and AgentMemory data.
+- [x] Provide explicit aggregate inventory and owner-private backup gates.
+- [ ] After the owner authorizes those actions, add a dry-run migration,
+  rollback artifact, duplicate report, and only then consider a provider switch.
 
 **Checkpoint G2:** obtain explicit approval before reading the owner's real
 memory stores, changing a writer, or migrating memory data.
@@ -869,18 +870,15 @@ memory stores, changing a writer, or migrating memory data.
 - [x] Audit desktop and mobile behavior in a rendered browser and run a real
   provider-backed synthetic Qwen canary.
 
-### Phase 4B — UI hardening beyond G1.5 — **Deferred**
+### Phase 4B — Continuity UI hardening — **Implemented**
 
-- [ ] Paginate or virtualize very long chat history while retaining all older
-  raw messages behind an explicit history action.
-- [ ] Add a UI editor for stable home bindings and direct related-project
-  allowlists; current bindings are created and enforced by the server.
-- [ ] Add native `> [!QUESTION]` rendering/export if ordinary use demonstrates
-  that callout artifacts belong in chat rather than only project files.
-- [ ] Expand the context inspector only when a concrete debugging need cannot be
-  met by the current manifest disclosure.
-- [ ] Add explicit related-project item/token caps before exposing multi-project
-  selection in the UI.
+- [x] Page older raw history behind an explicit **Load older messages** action.
+- [x] Provide stable home/related-project controls in the Context UI.
+- [x] Render/export native `> [!QUESTION]` callouts in chat and Documents.
+- [x] Add a last-compiled Context audit, including safe episodic source-class
+  counts without recalled text.
+- [x] Enforce the direct-relation maximum and refuse transitive/raw-context
+  expansion.
 
 ### Phase 5 — Computer Help foundation — **Partial; task assistance deferred**
 
