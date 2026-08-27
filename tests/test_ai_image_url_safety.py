@@ -1,3 +1,5 @@
+import asyncio
+
 from src import ai_interaction
 
 
@@ -15,6 +17,13 @@ class _GenerationResponse:
 class _DownloadResponse:
     status_code = 503
     content = b""
+
+
+async def _run_inline(func, /, *args, **kwargs):
+    """Keep mocked endpoint resolution out of a disposable executor."""
+    result = func(*args, **kwargs)
+    await asyncio.sleep(0)
+    return result
 
 
 def _patch_generation(monkeypatch, image_url):
@@ -47,6 +56,7 @@ def _patch_generation(monkeypatch, image_url):
             {"Authorization": "Bearer test"},
         ),
     )
+    monkeypatch.setattr(ai_interaction.asyncio, "to_thread", _run_inline)
 
 
 async def test_generate_image_validates_provider_url_before_download(monkeypatch):
