@@ -1,7 +1,9 @@
 # Odysseus G2D Execution Plan — Sandboxed Computer Help
 
-**Status:** Foundation implemented; task assistance waits for semantic
-continuity C1/C2
+**Status:** G2D-0/1 foundations and the non-executing D2 continuity layer are
+implemented. Command assistance waits for the configured-provider C1/C2
+canary, a reviewed digest-pinned sandbox image, and a passing containment
+qualification report.
 
 **Depends on:** G2C C1/C2 validated checkpoints and transfer semantics, plus a
 command-only, rootless Podman execution broker. The rejected Qwen `0.21.3`
@@ -32,14 +34,16 @@ The intended experience is closer to Codex than a command-confirmation loop:
 ## Current implementation and sequencing
 
 G2D-0/1 are complete: Odysseus has a server-owned safe diagnostic snapshot and
-a qualified rootless-Podman, command-only read broker. G2D-2 private incident
-records and its basic UI are also present. The first D3 configuration primitive
-is now present: Computer Help can register owner-selected, dedicated directories
-as encrypted task-root records. Registration validates an existing current-user
-folder under the home directory, rejects broad/protected credential locations,
-returns no absolute path to the browser, and neither creates files nor enables
-execution. These capabilities remain read-only/contained and do not grant
-native host shell access.
+a rootless-Podman, command-only read-broker qualification contract. Live
+command admission remains disabled until the image and qualification evidence
+exist. G2D-2 private incident records, long-paste references, verified device
+context, and reviewed create/revision cards are present. The first D3
+configuration primitive is now present: Computer Help can register
+owner-selected, dedicated directories as encrypted task-root records.
+Registration validates an existing current-user folder under the home directory,
+rejects broad/protected credential locations, returns no absolute path to the
+browser, and neither creates files nor enables execution. These capabilities
+remain read-only/contained and do not grant native host shell access.
 
 The next Computer Help stage is intentionally **after G2C C1/C2**. A task plan,
 incident summary, completed-step record, and escalation TODO must be backed by
