@@ -52,9 +52,9 @@ Progress labels are deliberately non-temporal:
 |---|---|---|
 | G1 persistence/compiler and read-only Qwen harness | **Complete** | Scoped projects, raw history retained during compaction, artifact contracts/store, ModelBridge, pinned Qwen Serve, Bubblewrap, protected Dust canary |
 | G1.5 Companion homes and Qwen UI trial | **Complete** | Deterministic homes, projects/forks, Qwen streaming/Stop/Process/feedback, native comparison, desktop/mobile audit |
-| Semantic checkpoint and project-brief derivation | **Partial; must be replaced** | Production writes a source-linked checkpoint and brief using a conservative local heuristic. It is not a validated accepted/proposed-state writer and must not be treated as canonical truth. |
+| Semantic checkpoint and project-brief derivation | **Implementation complete; provider canary pending** | Source-linked, schema-validated semantic proposals and owner-selected promotions now establish accepted briefs. Heuristic checkpoints remain provisional thread context and never become canonical home state. |
 | Normal-use stabilization | **Active** | Use real project conversations, record incorrect/unsafe answers and UI failures, fix regressions without broadening authority |
-| G2C scoped chat memory and working artifacts | **Partial** | Local scope-filtered recall, Personal/project briefs, revisioned artifacts, long-paste capture, Documents bridge, and one-request project grants exist. Transfer/synthesis and AgentMemory migration do not. |
+| G2C scoped chat memory and working artifacts | **Active** | C1/C2 implementation proof, local scope-filtered recall, revisioned artifacts, long-paste capture, Documents bridge, grants, and bounded checkpoint transfer/synthesis exist. Richer synthesis review and provider migration remain gated. |
 | Computer Help read-only diagnostics | **Partial** | Safe snapshots, private incident records, and the qualified command-only Podman broker exist. User-level task execution, filtered egress, and reversible transactions do not. |
 | G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
@@ -108,7 +108,7 @@ derived heuristic checkpoint cannot replace an owner-promoted project or
 Personal brief. The reader prefers the latest accepted brief if historical
 heuristic rows already superseded it.
 
-### Stage C2 — Prove durable continuation
+### Stage C2 — Prove durable continuation — implementation proof complete
 
 **Outcome:** a fresh worker and a project fork continue from source-linked
 automatic artifacts, not a different chat's raw transcript tail.
@@ -117,6 +117,13 @@ automatic artifacts, not a different chat's raw transcript tail.
 - derived records remain explicitly provisional until an owner promotion;
 - source spans, cancellation, failed derivations, and deleted-source behavior
   remain visible and non-destructive.
+
+Automated restart and fork fixtures now prove that a cold project fork receives
+the owner-promoted, source-linked brief and not a primary transcript tail. The
+fixtures also cover stale/deleted source rejection and the rule that heuristic
+writes cannot supersede accepted state. The remaining operational gate is the
+same configured-provider canary required by C1; no real owner-derived record
+is promoted merely because the synthetic proof passes.
 
 ### Stage C3 — Checkpoint transfer and synthesis, not transcript merge
 
@@ -169,7 +176,9 @@ registered as a replacement for the existing native-memory writer.
 After the owner reviews that aggregate inventory, Personal Advisor offers an
 explicit owner-private native-memory backup. It copies only entries attributed
 to the authenticated owner and returns a count/digest without exposing the
-backup path or text; it does not start a migration.
+backup path or text. A backup-bound dry-run then reports aggregate exact-scope,
+unassigned, and duplicate candidate counts without reading provider content
+into the browser or writing a migration. It does not start a migration.
 
 ### Stage C5 — Continuity and project UX closure
 
@@ -189,8 +198,9 @@ backup path or text; it does not start a migration.
 
 ### Stage D3 — Computer Help task assistance
 
-**Outcome:** begin only after C1/C2 establish trustworthy incident and task
-state. Extend the already-qualified observation/broker foundation with
+**Outcome:** begin only after the configured-provider C1 canary and C2
+continuation proof establish trustworthy incident and task state. Extend the
+already-qualified observation/broker foundation with
 owner-selected task roots, filtered egress, transaction journals, rollback,
 and the bounded **Approve for me** mode described in G2D. No `sudo`, raw host
 shell, or system mutation is introduced by this stage.

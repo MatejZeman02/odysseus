@@ -1,7 +1,8 @@
 # Odysseus G2C Execution Plan — Scoped Chat Memory and Working Artifacts
 
-**Status:** C0 complete; C1 implementation complete pending a configured-model
-canary; C2 continuation proof is next.
+**Status:** C0 complete; C1/C2 implementation proof complete pending one
+configured-model canary; C3 bounded transfer is implemented; C4 is at the
+owner-review-only migration preflight.
 
 **Depends on:** the implemented Companion homes, non-destructive continuity
 store/compiler, and reviewed project-patch transaction boundary.
@@ -411,13 +412,15 @@ are owner-visible after restart. The outstanding operational gate is a manual
 canary against a configured provider; it must confirm no foreground latency
 regression and correct Context disclosure before C1 is declared fully shipped.
 
-### C2 — Prove durable continuation
+### C2 — Prove durable continuation — implementation proof complete
 
-Prove automatic checkpoints survive restart and that a fresh primary worker and
-project fork receive the automatically produced home brief—not an old raw tail.
-Add explicit revision/source-span manifests and regression fixtures for invented
-canon, contradictory proposals, deleted source messages, and source-hash
-conflicts.
+The restart/fork compiler fixtures now prove that a cold project fork receives
+an owner-promoted, source-linked home brief rather than an old primary raw
+tail. The manifest carries the brief revision, source span, source count, and
+source hash. Promotion fixtures reject stale/deleted source material and keep
+home state unchanged; the accepted-brief precedence fixture rejects an
+intervening heuristic replacement. This is implementation proof, not a
+substitute for the pending real configured-model C1 canary.
 
 ### C3 — Transfer and synthesis
 
