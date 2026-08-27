@@ -31,6 +31,13 @@ def _expand_endpoint():
     raise AssertionError("POST /api/presets/expand route not registered")
 
 
+async def _run_inline(func, /, *args, **kwargs):
+    """Run fake model resolution without creating a disposable executor."""
+    result = func(*args, **kwargs)
+    await asyncio.sleep(0)
+    return result
+
+
 def _patch_model_pipeline(monkeypatch):
     """Capture the owner passed to _resolve_model and stub the LLM call."""
     seen = {}
@@ -45,6 +52,10 @@ def _patch_model_pipeline(monkeypatch):
 
     monkeypatch.setattr("src.ai_interaction._resolve_model", fake_resolve_model)
     monkeypatch.setattr("src.llm_core.llm_call_async", fake_llm_call_async)
+    # The route offloads model resolution in production.  This test replaces
+    # it with an in-memory function, so a real executor provides no coverage
+    # and can outlive asyncio.run() on Python 3.13.
+    monkeypatch.setattr("routes.preset_routes.asyncio.to_thread", _run_inline)
     return seen
 
 
