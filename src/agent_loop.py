@@ -3541,6 +3541,7 @@ async def stream_agent_loop(
     _is_teacher_run: bool = False,
     history_session=None,
     defer_context_shaping: bool = False,
+    companion_scope: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -4421,7 +4422,11 @@ async def stream_agent_loop(
             compact=is_api or is_native_ollama or is_ollama_compat,
             owner=owner,
             suppress_local_context=guide_only,
-            suppress_skills=_low_signal_turn,
+            # Companion homes have their own scoped continuity/artifact
+            # context.  Globally learned native skills have no matching
+            # home/project/grant boundary, so they must not be injected into
+            # those prompts. Explicitly admitted tools still remain available.
+            suppress_skills=_low_signal_turn or companion_scope,
             active_email=active_email,
             workspace=workspace,
         )

@@ -2484,6 +2484,9 @@ def setup_chat_routes(
                         defer_context_shaping=_foreground_policy.enabled,
                         external_untrusted_context_seen=external_untrusted_context_seen,
                         exact_approval=exact_tool_approval,
+                        companion_scope=(getattr(sess, "scope_kind", "general") in {
+                            "personal", "project", "computer",
+                        }),
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
