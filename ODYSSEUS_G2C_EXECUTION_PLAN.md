@@ -1,7 +1,7 @@
 # Odysseus G2C Execution Plan — Scoped Chat Memory and Working Artifacts
 
-**Status:** Active, partially implemented; semantic correctness and transfer
-work are next
+**Status:** C0 provenance safety complete; C1 validated semantic proposals and
+owner promotion are next
 
 **Depends on:** the implemented Companion homes, non-destructive continuity
 store/compiler, and reviewed project-patch transaction boundary.
@@ -43,13 +43,17 @@ The branch already implements a substantial part of this plan:
 - Context manifests expose the mounted records and the local index is
   provider-independent, so retrieval outage does not erase raw history.
 
-There is one material limitation: current automatic checkpoint derivation is a
-local convenience heuristic. It selects recent user/assistant text and writes
-it into fields such as objective and accepted decisions. It preserves source
-hashes and does not rewrite raw history, but it is **not** a trustworthy
-accepted/proposed-state extractor. Its output must remain labelled `heuristic`
-until Stage C1 replaces it. It must not silently establish project canon,
-personal facts, or cross-chat authority.
+Stage C0 closed the most dangerous limitation in the original local fallback.
+New automatic checkpoints now retain only a user's current objective,
+questions, and requested actions; they are labelled `heuristic` with a version,
+method, and source span. They do not place assistant prose in
+`accepted_decisions`. Existing records are retained as
+`legacy_unclassified`, never rewritten as raw history, and the context UI and
+model prompt state that neither kind is owner-approved truth.
+
+This is a containment measure, not semantic memory. Stage C1 must replace the
+fallback before any derived record can establish project canon, personal facts,
+or cross-chat authority.
 
 ## Memory layers
 
@@ -273,14 +277,15 @@ Actual project-state branch merging remains outside G2C.
 
 ## Ordered implementation stages
 
-### C0 — Reconcile existing derived records
+### C0 — Reconcile existing derived records — complete
 
-Add a derivation status/version (`heuristic`, `proposed`, `accepted`, or
-`rejected`) without mutating payload meaning or raw chats. Mark existing local
-records `heuristic`, retain their provenance, and make the disclosure explain
-that they are a convenience summary rather than accepted truth. Verify this
-migration is additive, restart-safe, owner-isolated, and reversible by simply
-ignoring the derived layer.
+Add a derivation status/version (`legacy_unclassified`, `heuristic`,
+`proposed`, `accepted`, or `rejected`) without mutating raw chats. New local
+records are `heuristic`; pre-C0 records are `legacy_unclassified`, because the
+old payload does not reliably identify a writer. The disclosure and model
+context explain that these are convenience background rather than accepted
+truth. The migration is additive, restart-safe, owner-isolated, and reversible
+by ignoring the derived layer.
 
 ### C1 — Validated semantic checkpoint proposals
 
@@ -291,9 +296,19 @@ The derivation route inherits no web, shell, patch, or cross-project authority.
 Invalid JSON, cancellation, provider failure, stale source spans, and concurrent
 writes produce no accepted record and never alter raw messages.
 
-An owner approval/promotion action is required before a proposed item becomes
-shared `ProjectBriefV1` or `PersonalBriefV1` state. Automatic home briefs may
-contain only clearly labelled derived/provisional material until promoted.
+Implement this as a separate immutable `SemanticCheckpointProposalV1`, rather
+than changing the meaning of the current checkpoint payload in place. Each
+proposal carries its source message IDs, source hash, derivation model/route,
+validation result, bounded field sizes, and a `proposed` status. The compiler
+may mount it as labelled provisional context, but it may not index it as
+episodic memory or use it as a home brief.
+
+An owner promotion action selects explicit entries from a proposal and writes a
+new `accepted` revision to `ProjectBriefV1` or `PersonalBriefV1`; it does not
+copy an entire transcript or silently bless all proposal fields. The action
+rechecks owner, scope, source hash, current brief revision, and selected
+artifact references. Source changes yield a visible stale/conflict result.
+Automatic home briefs remain provisional until this promotion occurs.
 
 ### C2 — Prove durable continuation
 

@@ -69,8 +69,9 @@ unvalidated checkpoint as their authority.
 ### Stage C0 — Reconcile and contain the current heuristic
 
 **Outcome:** existing automatically generated checkpoints/briefs remain
-available for debugging but are explicitly labelled `heuristic`, never
-`accepted`, and cannot silently become project truth or personal facts.
+available for debugging but are explicitly labelled `heuristic` or
+`legacy_unclassified`, never `accepted`, and cannot silently become project
+truth or personal facts. **Completed in commit `4906ba3`.**
 
 - add a derivation version/status and source span to every generated record;
 - migrate existing heuristic records additively, with no transcript rewrite;
@@ -80,9 +81,10 @@ available for debugging but are explicitly labelled `heuristic`, never
 
 ### Stage C1 — Validated semantic checkpoints and home briefs
 
-**Outcome:** each compacted conversation can produce a bounded,
+**Outcome:** each compacted conversation can produce an immutable bounded,
 schema-validated proposal separating objective, facts, decisions, proposals,
-failed approaches, questions, actions, and artifact references.
+failed approaches, questions, actions, and artifact references. Promotion is
+an explicit owner action that selects entries into accepted home state.
 
 - use a narrowly scoped derivation route with no more authority than the
   originating chat;
