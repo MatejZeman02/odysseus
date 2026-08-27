@@ -105,6 +105,7 @@ def _copy_regular_file(
 
 def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]:
     """Copy ordinary, bounded workspace files without following symlinks."""
+    root_fd = -1
     try:
         root_info = workspace.lstat()
     except OSError as exc:
@@ -114,55 +115,75 @@ def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]
     # an unintended directory before the contained read-only broker starts.
     if stat.S_ISLNK(root_info.st_mode) or not stat.S_ISDIR(root_info.st_mode):
         raise ValueError("workspace_unavailable")
-    root = workspace.resolve(strict=True)
-    if not root.is_dir():
-        raise ValueError("workspace_unavailable")
-    # The parent temporary directory is 0700 on the host. The mounted input
-    # itself must be traversable by the image's unprivileged user, however,
-    # otherwise direct reads appear to work while find/rg/ls mysteriously
-    # fail. This visibility exists only inside the already-private temp tree
-    # and the networkless container mount.
-    destination.mkdir(mode=0o755)
-    files = total = 0
-    for current, dirs, names in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        dirs[:] = [
-            name for name in dirs
-            if name not in _SKIP_DIRECTORIES and not (current_path / name).is_symlink()
-        ]
-        for name in names:
-            source = current_path / name
-            if source.is_symlink() or not source.is_file():
-                continue
-            try:
-                size = source.stat().st_size
-            except OSError:
-                continue
-            if size > _MAX_SNAPSHOT_FILE_BYTES:
-                continue
-            if files >= _MAX_SNAPSHOT_FILES or total + size > _MAX_SNAPSHOT_BYTES:
-                raise _SnapshotLimit("snapshot_limited")
-            relative = source.relative_to(root)
-            target = destination / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.chmod(target.parent, 0o755)
-            try:
-                copied = _copy_regular_file(
-                    source,
-                    target,
-                    workspace_root=root,
-                    remaining_bytes=_MAX_SNAPSHOT_BYTES - total,
-                )
-            except FileNotFoundError:
-                # The project changed while a snapshot was being prepared.
-                # Omitting a disappeared file is safe; a replacement with a
-                # link or an out-of-root descriptor is not.
-                continue
-            if copied is None:
-                continue
-            files += 1
-            total += copied
-    return files, total
+    try:
+        root_fd = os.open(
+            workspace,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened_info = os.fstat(root_fd)
+        # Check the pathname again after the no-follow directory descriptor is
+        # held.  If an attacker swapped the workspace for a symlink between
+        # lstat and open, this rejects the input rather than resolving the new
+        # target by pathname.  Later walking uses the stable descriptor path.
+        current_info = workspace.lstat()
+        if (
+            stat.S_ISLNK(current_info.st_mode)
+            or not stat.S_ISDIR(opened_info.st_mode)
+            or (current_info.st_dev, current_info.st_ino) != (opened_info.st_dev, opened_info.st_ino)
+        ):
+            raise ValueError("workspace_unavailable")
+        root = Path(f"/proc/self/fd/{root_fd}")
+        # The parent temporary directory is 0700 on the host. The mounted input
+        # itself must be traversable by the image's unprivileged user, however,
+        # otherwise direct reads appear to work while find/rg/ls mysteriously
+        # fail. This visibility exists only inside the already-private temp tree
+        # and the networkless container mount.
+        destination.mkdir(mode=0o755)
+        files = total = 0
+        for current, dirs, names in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            dirs[:] = [
+                name for name in dirs
+                if name not in _SKIP_DIRECTORIES and not (current_path / name).is_symlink()
+            ]
+            for name in names:
+                source = current_path / name
+                if source.is_symlink() or not source.is_file():
+                    continue
+                try:
+                    size = source.stat().st_size
+                except OSError:
+                    continue
+                if size > _MAX_SNAPSHOT_FILE_BYTES:
+                    continue
+                if files >= _MAX_SNAPSHOT_FILES or total + size > _MAX_SNAPSHOT_BYTES:
+                    raise _SnapshotLimit("snapshot_limited")
+                relative = source.relative_to(root)
+                target = destination / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.chmod(target.parent, 0o755)
+                try:
+                    copied = _copy_regular_file(
+                        source,
+                        target,
+                        workspace_root=root,
+                        remaining_bytes=_MAX_SNAPSHOT_BYTES - total,
+                    )
+                except FileNotFoundError:
+                    # The project changed while a snapshot was being prepared.
+                    # Omitting a disappeared file is safe; a replacement with a
+                    # link or an out-of-root descriptor is not.
+                    continue
+                if copied is None:
+                    continue
+                files += 1
+                total += copied
+        return files, total
+    except OSError as exc:
+        raise ValueError("workspace_unavailable") from exc
+    finally:
+        if root_fd >= 0:
+            os.close(root_fd)
 
 
 def _commands(content: str) -> tuple[ReadOnlyCommand, ...]:

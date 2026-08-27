@@ -103,6 +103,35 @@ def test_snapshot_rejects_a_symlinked_workspace_root(tmp_path):
         raise AssertionError("a symlinked workspace root must never be snapshotted")
 
 
+def test_snapshot_rejects_a_workspace_swapped_to_symlink_after_open(monkeypatch, tmp_path):
+    """The snapshot root must be descriptor-bound, not path-resolved late."""
+    import os
+    import src.agent_tools.sandbox_tools as module
+
+    workspace = tmp_path / "workspace"; workspace.mkdir()
+    outside = tmp_path / "outside"; outside.mkdir()
+    original_open = os.open
+    swapped = False
+
+    def swap_after_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        fd = original_open(path, flags, mode, dir_fd=dir_fd)
+        if not swapped and os.fspath(path) == os.fspath(workspace):
+            swapped = True
+            workspace.rename(tmp_path / "workspace-original")
+            workspace.symlink_to(outside, target_is_directory=True)
+        return fd
+
+    monkeypatch.setattr(module.os, "open", swap_after_open)
+    try:
+        module._copy_workspace_input(workspace, tmp_path / "snapshot")
+    except ValueError as exc:
+        assert str(exc) == "workspace_unavailable"
+    else:
+        raise AssertionError("a post-open workspace symlink swap must be rejected")
+    assert not (tmp_path / "snapshot").exists()
+
+
 def test_sandbox_read_is_registered_and_requires_a_capability_gate():
     from src.agent_tools import TOOL_HANDLERS, TOOL_TAGS
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
