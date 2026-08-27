@@ -44,6 +44,18 @@ async def _immediate_to_thread(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _inline_mocked_auth_threading(monkeypatch):
+    """Auth route tests use a deliberately in-memory password implementation.
+
+    The production endpoints correctly offload password work.  These tests
+    replace the hashing functions with synchronous lambdas, so retaining a
+    disposable executor adds no coverage and can outlive ``asyncio.run`` on
+    Python 3.13.
+    """
+    monkeypatch.setattr(asyncio, "to_thread", _immediate_to_thread)
+
+
 # ── AuthManager.policy() ───────────────────────────────────────────────
 
 
