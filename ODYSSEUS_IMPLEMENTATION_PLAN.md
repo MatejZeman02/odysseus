@@ -951,7 +951,7 @@ whether those experiments require a snapshot-capable Fedora VM.
 | Protected Dust runtime proof | **Complete** | Cited conflict-aware answers, read-only integrity, fresh-worker raw-tail continuation, and scope isolation |
 | Companion UI trial | **Complete** | Testable homes/projects, Qwen/native comparison, Process visibility, feedback and lifecycle controls |
 | Normal-use stabilization | **Active** | Gather real failures and correct regressions without adding authority |
-| AgentMemory integration | **Deferred until C3** | Requires owner-approved inventory plus scope conformance and migration design |
+| AgentMemory integration | **Deferred** | Requires an explicit duplicate-data policy, owner approval for any real provider migration, and a separate scoped-provider adoption review |
 | Computer Help diagnostics | **Partial** | Observation, incident records, and broker complete; task assistance follows C1/C2 |
 
 The ordered C0 → C4 → D3 roadmap above supersedes the former choice among
