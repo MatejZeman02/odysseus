@@ -263,6 +263,18 @@ def test_checkpoint_synthesis_creates_fresh_scoped_chat_with_exactly_two_mounts(
         source_through_message_id="m2", source_hash="second",
     ))
     router = route_module.setup_companion_memory_routes(FakeSessionManager())
+    preview = _endpoint(router, "/api/companion/memory/checkpoint-synthesis/preview")
+    reviewed = preview(route_module.CheckpointSynthesisCreate(
+        destination_session_id="destination", source_checkpoint_ids=[first.id, second.id],
+    ), SimpleNamespace())
+    assert reviewed["destination_scope_kind"] == "personal"
+    assert [item["objective"] for item in reviewed["sources"]] == [
+        "First release option", "Second release option",
+    ]
+    assert "source_message_ids" not in json.dumps(reviewed)
+    assert "source_hash" not in json.dumps(reviewed)
+    assert "not transcripts" in reviewed["policy"]
+
     create = _endpoint(router, "/api/companion/memory/checkpoint-synthesis")
     result = create(route_module.CheckpointSynthesisCreate(
         destination_session_id="destination", source_checkpoint_ids=[first.id, second.id],

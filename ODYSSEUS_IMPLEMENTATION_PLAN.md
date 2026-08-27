@@ -139,8 +139,9 @@ requires an explicit acknowledgement before attaching. A new sibling synthesis
 chat can now be created from exactly two immutable checkpoint mounts, using the
 destination chat's stored scope and model route. Compiled mounts retain their
 sensitivity/expiry metadata, and the prompt requires disagreements to stay
-source-attributed. The remaining work is richer source-diff/reconciliation
-review UI.
+source-attributed. Owners can preview the exact two compact sources through a
+validated, transcript-free review before creating the chat. The remaining work
+is richer source-diff/reconciliation review UI.
 
 - attach an immutable checkpoint to another chat as a labeled read-only mount;
 - selectively promote owner-chosen items to Personal or project home state;

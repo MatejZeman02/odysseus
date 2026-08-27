@@ -520,6 +520,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "companion-attach-checkpoint" in ui
     assert "checkpointSourceLabel" in ui
     assert "disagreements remain source-attributed" in ui
+    assert "/api/companion/memory/checkpoint-synthesis/preview" in ui
+    assert "Review selected checkpoints" in ui
     assert "Personal threads" in ui
     assert "personalThreads" in ui
     assert "companion-run-legacy-inventory" in ui

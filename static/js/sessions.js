@@ -282,7 +282,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     ? `<label>Checkpoint <select class="companion-checkpoint-source">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(checkpointSourceLabel(item))}</option>`).join('')}</select></label><label>Keep mounted for <select class="companion-checkpoint-expiry"><option value="1">1 day</option><option value="7">7 days</option><option value="14" selected>14 days</option><option value="30">30 days</option></select></label><label class="companion-sensitive-checkpoint"><input type="checkbox" class="companion-checkpoint-sensitive"> Sensitive context — I understand this will be included in the destination chat until it expires or is detached.</label><button type="button" class="companion-attach-checkpoint">Attach checkpoint</button>`
     : '<p class="companion-memory-help">No other active Companion checkpoint is available to attach.</p>';
   const checkpointSynthesisControls = checkpointCandidates.length >= 2
-    ? `<details class="companion-checkpoint-synthesis"><summary>Create a synthesis chat from two checkpoints</summary><p class="companion-memory-help">Review both sources below. This creates a fresh sibling chat with two labeled, immutable mounts. It does not merge transcripts or call a model until you send your synthesis request; disagreements remain source-attributed.</p><label>First checkpoint <select class="companion-synthesis-source-a">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(checkpointSourceLabel(item))}</option>`).join('')}</select></label><label>Second checkpoint <select class="companion-synthesis-source-b">${checkpointCandidates.map((item, index) => `<option value="${esc(item.id)}"${index === 1 ? ' selected' : ''}>${esc(checkpointSourceLabel(item))}</option>`).join('')}</select></label><button type="button" class="companion-create-checkpoint-synthesis">Create synthesis chat</button></details>`
+    ? `<details class="companion-checkpoint-synthesis"><summary>Create a synthesis chat from two checkpoints</summary><p class="companion-memory-help">Review both sources below. This creates a fresh sibling chat with two labeled, immutable mounts. It does not merge transcripts or call a model until you send your synthesis request; disagreements remain source-attributed.</p><label>First checkpoint <select class="companion-synthesis-source-a">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(checkpointSourceLabel(item))}</option>`).join('')}</select></label><label>Second checkpoint <select class="companion-synthesis-source-b">${checkpointCandidates.map((item, index) => `<option value="${esc(item.id)}"${index === 1 ? ' selected' : ''}>${esc(checkpointSourceLabel(item))}</option>`).join('')}</select></label><button type="button" class="companion-preview-checkpoint-synthesis">Review selected checkpoints</button><div class="companion-synthesis-preview" aria-live="polite"></div><button type="button" class="companion-create-checkpoint-synthesis">Create synthesis chat</button></details>`
     : '';
   const checkpointMountHtml = (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
     ? `<section class="companion-checkpoint-mounts"><h5>Read-only checkpoint mounts</h5><p class="companion-memory-help">Attach a compact checkpoint from another one of your Companion chats. It is labeled context, never a transcript merge or shared memory write. Mounts expire automatically; sensitive mounts require acknowledgement.</p>${checkpointMounts.length ? checkpointMounts.map(mount => { const item = mount.checkpoint || {}; return `<details class="companion-checkpoint-mount" data-mount-id="${esc(mount.id)}" data-mount-revision="${esc(mount.revision)}"><summary><strong>${esc(mount.objective || 'Untitled checkpoint')}</strong> · ${esc(mount.derivation_status || 'legacy_unclassified')} · ${esc(mount.source_message_count || 0)} source messages</summary><p class="companion-memory-help">${esc(mount.sensitivity || 'standard')} context · ${esc(mountExpiryText(mount.expires_at))}. Select entries only if you want to promote them into this home’s accepted memory.</p>${checkpointPromotionFields.map(([field, label]) => { const values = field === 'objective' ? (item.objective ? [item.objective] : []) : (item[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-mount-field="${esc(field)}" data-mount-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-checkpoint">Promote selected entries</button><button type="button" class="companion-detach-checkpoint">Detach</button></details>`; }).join('') : '<p class="companion-memory-help">No checkpoint is mounted.</p>'}${checkpointAttachControls}${checkpointSynthesisControls}</section>`
@@ -484,6 +484,52 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       uiModule.showToast?.('Synthesis chat created with two read-only checkpoints. Send the question you want reconciled.', 3600);
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not create checkpoint synthesis chat');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelector('.companion-preview-checkpoint-synthesis')?.addEventListener('click', async (event) => {
+    const first = modal.querySelector('.companion-synthesis-source-a')?.value;
+    const second = modal.querySelector('.companion-synthesis-source-b')?.value;
+    const preview = modal.querySelector('.companion-synthesis-preview');
+    if (!first || !second || first === second) {
+      uiModule.showError?.('Choose two different checkpoints to review.');
+      return;
+    }
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch('/api/companion/memory/checkpoint-synthesis/preview', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({destination_session_id: meta.id, source_checkpoint_ids: [first, second]})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not review checkpoint sources');
+      if (!preview) return;
+      preview.replaceChildren();
+      const policy = document.createElement('p');
+      policy.className = 'companion-memory-help';
+      policy.textContent = result.policy || 'These are compact references, not transcripts.';
+      preview.append(policy);
+      const fields = [
+        ['objective', 'Objective'], ['accepted_decisions', 'Decisions'], ['proposals', 'Proposals'],
+        ['failures', 'Failed approaches'], ['open_questions', 'Open questions'],
+        ['next_actions', 'Next actions'], ['artifact_refs', 'Artifact references'],
+      ];
+      (Array.isArray(result.sources) ? result.sources : []).slice(0, 2).forEach((source, index) => {
+        const card = document.createElement('section');
+        card.className = 'companion-synthesis-source-review';
+        const heading = document.createElement('strong');
+        const scope = source.scope_kind === 'project' ? 'Project' : 'Personal';
+        heading.textContent = `Source ${index + 1}: ${source.session_name || 'Companion chat'} · ${scope} · ${source.derivation_status || 'legacy_unclassified'} · ${Number(source.source_message_count || 0)} source messages`;
+        card.append(heading);
+        fields.forEach(([field, label]) => {
+          const values = field === 'objective' ? (source.objective ? [source.objective] : []) : (Array.isArray(source[field]) ? source[field] : []);
+          if (!values.length) return;
+          const line = document.createElement('p');
+          line.textContent = `${label}: ${values.join(' · ')}`;
+          card.append(line);
+        });
+        preview.append(card);
+      });
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not review checkpoint sources');
+    } finally {
       event.currentTarget.disabled = false;
     }
   });

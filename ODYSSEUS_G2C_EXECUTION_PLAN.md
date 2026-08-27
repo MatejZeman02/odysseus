@@ -443,8 +443,10 @@ request. The compiled mount also carries its sensitivity and expiry metadata,
 and the context policy requires source attribution: disagreement between mounts
 must remain explicit rather than being combined into an unverified fact. The
 review UI labels each selectable source with its home, derivation status, and
-source-message count before synthesis. Richer source-diff/reconciliation
-review remains deferred.
+source-message count before synthesis. The owner may preview the two selected
+compact checkpoints through the same server-side validation used for creation;
+the preview exposes no source IDs, hashes, or transcript text. Richer
+source-diff/reconciliation review remains deferred.
 
 Implement the user-facing alternative to transcript merging:
 
