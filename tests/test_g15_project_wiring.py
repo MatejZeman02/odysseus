@@ -41,6 +41,41 @@ def test_project_workspace_comes_from_server_owned_binding(monkeypatch, tmp_path
     assert rejected == ""
 
 
+def test_native_project_workspace_rejects_a_swapped_symlink(monkeypatch, tmp_path):
+    import routes.chat_routes as chat_routes
+    import src.tool_security as tool_security
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    swapped = tmp_path / "workspace-link"
+    swapped.symlink_to(workspace, target_is_directory=True)
+
+    class Query:
+        def join(self, *_args, **_kwargs):
+            return self
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return SimpleNamespace(workspace_root=str(swapped))
+
+    class Db:
+        def query(self, *_args, **_kwargs):
+            return Query()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(chat_routes, "SessionLocal", lambda: Db())
+    monkeypatch.setattr(tool_security, "owner_is_admin_or_single_user", lambda _owner: True)
+
+    assert chat_routes._resolve_stored_project_workspace(
+        object(), "project-session", "alice",
+    ) == ("", str(swapped))
+
+
 def test_companion_owner_honors_established_loopback_bypass(monkeypatch):
     import routes.g1_continuity_routes as project_routes
 

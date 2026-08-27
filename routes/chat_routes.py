@@ -4,9 +4,11 @@ import asyncio
 import json
 import os
 import re
+import stat
 import time
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, AsyncGenerator, List, Optional
 
 from fastapi import APIRouter, Request, HTTPException, Form, Query
@@ -395,6 +397,16 @@ def _resolve_stored_project_workspace(request, session_id: str, owner: str | Non
 
     from src.tool_execution import vet_workspace
     stored = str(row.workspace_root).strip()
+    # A project binding is a persisted scope grant.  Unlike an ordinary
+    # one-turn browser workspace, do not canonicalize a leaf that has been
+    # replaced by a symlink: doing so could silently retarget native Agent
+    # tools at a different checkout after project creation.
+    try:
+        stored_info = Path(stored).expanduser().lstat()
+    except OSError:
+        return "", stored
+    if stat.S_ISLNK(stored_info.st_mode) or not stat.S_ISDIR(stored_info.st_mode):
+        return "", stored
     workspace = vet_workspace(stored) or ""
     return workspace, (stored if not workspace else "")
 
