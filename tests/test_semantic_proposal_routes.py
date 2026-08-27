@@ -6,13 +6,13 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, ChatMessage as DbMessage, ScopedMemoryRecord, Session as DbSession
+from core.database import Base, ChatMessage as DbMessage, Project, ScopedMemoryRecord, Session as DbSession
 import routes.companion_memory_routes as route_module
 import src.continuity.semantic_deriver as deriver_module
 import src.continuity.store as store_module
 import src.scoped_memory as scoped_memory_module
 from src.continuity.semantic_proposals import derivation_messages, parse_semantic_proposal
-from src.continuity.contracts import ThreadCheckpointV1
+from src.continuity.contracts import PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
 from src.continuity.store import ContinuityStore
 
 
@@ -353,6 +353,47 @@ def test_owner_edited_personal_brief_is_the_only_other_checkpoint_derived_index_
         assert "Prefers concise release updates" in indexed.content
     finally:
         db.close()
+
+
+def test_owner_summary_edits_preserve_existing_personal_and_project_brief_fields(monkeypatch):
+    router = _setup(monkeypatch)
+    store = ContinuityStore()
+    store.write_personal_brief(
+        owner="alice", session_id="session",
+        brief=PersonalBriefV1(
+            owner_id="alice", summary="Original", preferences=["concise"],
+            ongoing_goals=["Finish release"], derivation_status="accepted",
+        ), source_hash="personal-original",
+    )
+    write_personal = _endpoint(router, "/api/companion/personal-brief", "POST")
+    changed_personal = write_personal(
+        route_module.PersonalBriefWrite(session_id="session", summary="Revised"), SimpleNamespace(),
+    )["brief"]
+    assert changed_personal["summary"] == "Revised"
+    assert changed_personal["preferences"] == ["concise"]
+    assert changed_personal["ongoing_goals"] == ["Finish release"]
+
+    db = route_module.SessionLocal()
+    db.add_all([
+        Project(id="dust", owner="alice", name="Dust", workspace_root="/dust"),
+        DbSession(id="project", owner="alice", name="Dust", endpoint_url="http://unused", model="model-a",
+                  endpoint_id="endpoint-a", scope_kind="project", project_id="dust"),
+    ])
+    db.commit(); db.close()
+    store.write_project_brief(
+        owner="alice",
+        brief=ProjectBriefV1(
+            project_id="dust", summary="Original project", confirmed_facts=["Fact"],
+            accepted_decisions=["Decision"], derivation_status="accepted",
+        ), source_hash="project-original",
+    )
+    write_project = _endpoint(router, "/api/companion/project-brief", "POST")
+    changed_project = write_project(
+        route_module.ProjectBriefWrite(session_id="project", summary="Revised project"), SimpleNamespace(),
+    )["brief"]
+    assert changed_project["summary"] == "Revised project"
+    assert changed_project["confirmed_facts"] == ["Fact"]
+    assert changed_project["accepted_decisions"] == ["Decision"]
 
 
 def test_legacy_memory_backup_is_owner_private_and_returns_only_audit_data(monkeypatch, tmp_path):

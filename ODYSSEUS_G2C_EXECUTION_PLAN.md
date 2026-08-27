@@ -360,7 +360,9 @@ Actual project-state branch merging remains outside G2C.
 - Show the active memory scope near the composer.
 - Add a compact Context disclosure listing checkpoint, home brief, episodic
   hits, artifact revisions, and temporary project grants used for the turn.
-- Provide inspect/edit/pin/forget controls for memories.
+- Provide inspect/edit/pin/forget controls for memories. The current Personal
+  and Project brief summary editors are partial updates: fields not rendered
+  by the editor remain untouched rather than being reset to empty defaults.
 - Provide browse/open/diff/history/Undo controls for `.artifacts`.
 - Show project-access requests as explicit cards with Allow once and Deny.
 - Never display absolute host paths, provider internals, embeddings, or raw

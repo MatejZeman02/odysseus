@@ -19,7 +19,7 @@ from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.companion_capabilities import defaults_for_scope
 from src.memory import MemoryStoreUnreadable
-from src.continuity.contracts import ContractError, PersonalBriefV1, ThreadCheckpointV1
+from src.continuity.contracts import ContractError, PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
 from src.continuity.semantic_deriver import SemanticDerivationError, derive_semantic_proposal
 from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictError
 
@@ -150,13 +150,23 @@ class GrantDecision(BaseModel):
 class PersonalBriefWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str = Field(min_length=1, max_length=128)
-    summary: str = Field(default="", max_length=4000)
-    preferences: list[str] = Field(default_factory=list, max_length=30)
-    ongoing_goals: list[str] = Field(default_factory=list, max_length=30)
-    commitments: list[str] = Field(default_factory=list, max_length=30)
-    recurring_themes: list[str] = Field(default_factory=list, max_length=30)
-    open_questions: list[str] = Field(default_factory=list, max_length=30)
-    artifact_refs: list[str] = Field(default_factory=list, max_length=30)
+    # ``None`` means leave the accepted field untouched. The Context editor
+    # currently changes only the summary; empty defaults would otherwise erase
+    # owner-approved lists it does not render.
+    summary: str | None = Field(default=None, max_length=4000)
+    preferences: list[str] | None = Field(default=None, max_length=30)
+    ongoing_goals: list[str] | None = Field(default=None, max_length=30)
+    commitments: list[str] | None = Field(default=None, max_length=30)
+    recurring_themes: list[str] | None = Field(default=None, max_length=30)
+    open_questions: list[str] | None = Field(default=None, max_length=30)
+    artifact_refs: list[str] | None = Field(default=None, max_length=30)
+
+
+class ProjectBriefWrite(BaseModel):
+    """Owner edit of a project-home summary; omitted state remains intact."""
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+    summary: str | None = Field(default=None, max_length=4000)
 
 
 class SemanticProposalPromotion(BaseModel):
@@ -1059,22 +1069,80 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         scope_kind, _project_id = _scope(owner, payload.session_id)
         if scope_kind != "personal":
             raise HTTPException(409, "Personal brief requires a Personal Advisor session")
-        values = payload.model_dump()
+        values = payload.model_dump(exclude_none=True)
         session_id = values.pop("session_id")
+        store = ContinuityStore()
+        current = store.latest_personal_brief(owner=owner, session_id=session_id)
+        current_values = current.to_payload() if current else {}
+        current_values.update(values)
         brief = PersonalBriefV1(
             owner_id=owner,
             derivation_status="accepted",
             derivation_version=1,
             derivation_method="owner_edit_v1",
-            **values,
+            summary=str(current_values.get("summary") or ""),
+            confirmed_facts=list(current_values.get("confirmed_facts") or []),
+            preferences=list(current_values.get("preferences") or []),
+            ongoing_goals=list(current_values.get("ongoing_goals") or []),
+            commitments=list(current_values.get("commitments") or []),
+            proposals=list(current_values.get("proposals") or []),
+            recurring_themes=list(current_values.get("recurring_themes") or []),
+            failed_approaches=list(current_values.get("failed_approaches") or []),
+            open_questions=list(current_values.get("open_questions") or []),
+            artifact_refs=list(current_values.get("artifact_refs") or []),
+            source_refs=list(current_values.get("source_refs") or []),
+            source_message_ids=list(current_values.get("source_message_ids") or []),
+            source_through_message_id=current_values.get("source_through_message_id") or None,
         )
         source_hash = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
         try:
-            result = ContinuityStore().write_personal_brief(owner=owner, session_id=session_id, brief=brief, source_hash=source_hash)
+            result = store.write_personal_brief(owner=owner, session_id=session_id, brief=brief, source_hash=source_hash)
         except Exception as exc:
             raise _error(exc) from exc
         _index_accepted_home_brief(
             owner=owner, session_id=session_id, scope_kind="personal", project_id=None,
+            source_id=result.id, brief=brief,
+        )
+        return {"revision": result.revision, "brief": brief.to_payload()}
+
+    @router.post("/project-brief")
+    def write_project_brief(payload: ProjectBriefWrite, request: Request):
+        owner = _owner(request)
+        scope_kind, project_id = _scope(owner, payload.session_id)
+        if scope_kind != "project" or not project_id:
+            raise HTTPException(409, "Project brief requires a project Companion session")
+        store = ContinuityStore()
+        current = store.latest_project_brief(owner=owner, project_id=project_id)
+        current_values = current.to_payload() if current else {}
+        values = payload.model_dump(exclude_none=True)
+        values.pop("session_id")
+        current_values.update(values)
+        brief = ProjectBriefV1(
+            project_id=project_id,
+            summary=str(current_values.get("summary") or ""),
+            derived_working_state=dict(current_values.get("derived_working_state") or {}),
+            confirmed_facts=list(current_values.get("confirmed_facts") or []),
+            accepted_decisions=list(current_values.get("accepted_decisions") or []),
+            proposals=list(current_values.get("proposals") or []),
+            failed_approaches=list(current_values.get("failed_approaches") or []),
+            open_questions=list(current_values.get("open_questions") or []),
+            current_plans=list(current_values.get("current_plans") or []),
+            source_refs=list(current_values.get("source_refs") or []),
+            source_session_ids=list(current_values.get("source_session_ids") or []),
+            source_message_ids=list(current_values.get("source_message_ids") or []),
+            source_through_message_id=current_values.get("source_through_message_id") or None,
+            source_revision=current_values.get("source_revision") or None,
+            derivation_status="accepted",
+            derivation_version=1,
+            derivation_method="owner_edit_v1",
+        )
+        source_hash = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
+        try:
+            result = store.write_project_brief(owner=owner, brief=brief, source_hash=source_hash)
+        except Exception as exc:
+            raise _error(exc) from exc
+        _index_accepted_home_brief(
+            owner=owner, session_id=payload.session_id, scope_kind="project", project_id=project_id,
             source_id=result.id, brief=brief,
         )
         return {"revision": result.revision, "brief": brief.to_payload()}
