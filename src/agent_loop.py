@@ -4004,6 +4004,10 @@ async def stream_agent_loop(
     # RAG-based tool selection: retrieve relevant tools for this query.
     # If caller provided a pre-computed set (e.g. task_scheduler), use that.
     _relevant_tools = relevant_tools
+    # An exact approval or another server-owned caller can provide the final
+    # selected set, including an intentionally empty set.  Retrieval and
+    # intent heuristics may assist only when no such policy was supplied.
+    _caller_selected_tools = relevant_tools is not None
     _t1 = time.time()
     # An explicit empty set is a valid caller policy: it means this turn must
     # remain tool-less.  Do not treat it as a missing selection and start the
@@ -4094,7 +4098,7 @@ async def stream_agent_loop(
     # tool names. It prevents obvious requests like "last 5 emails" from
     # collapsing to only ask_user/manage_memory when vector retrieval misses or
     # times out.
-    if not guide_only and _relevant_tools is not None:
+    if not guide_only and _relevant_tools is not None and not _caller_selected_tools:
         for _domain in (_intent.get("domains") or set()):
             _relevant_tools.update(_DOMAIN_TOOL_MAP.get(str(_domain), set()))
         if "cookbook" in (_intent.get("domains") or set()):
@@ -4135,7 +4139,7 @@ async def stream_agent_loop(
     # regardless of which selection path (RAG, keyword, caller-provided) ran.
     # Do not leak document tools into unrelated turns just because the editor
     # panel is open.
-    if _relevant_tools is not None and _active_document_relevant:
+    if _relevant_tools is not None and _active_document_relevant and not _caller_selected_tools:
         _relevant_tools.update({"edit_document", "update_document", "suggest_document"})
         if _active_email_draft_relevant:
             # The open compose document already contains the recipient,
@@ -4154,7 +4158,7 @@ async def stream_agent_loop(
     # Current-turn chat uploads are real files under the upload/data root. Make
     # the read-side file/document tools visible immediately so the agent can
     # inspect files whose inline text was truncated or omitted.
-    if not guide_only and uploaded_files:
+    if not guide_only and uploaded_files and not _caller_selected_tools:
         if _relevant_tools is None:
             from src.tool_index import ALWAYS_AVAILABLE
             _relevant_tools = set(ALWAYS_AVAILABLE)
@@ -4163,7 +4167,7 @@ async def stream_agent_loop(
     # Per-request forced tools are stronger than retrieval. Explicit search
     # settings make web tools visible even when tool RAG misses them;
     # route-level disabled_tools decides what remains allowed.
-    if not guide_only and forced_tools:
+    if not guide_only and forced_tools and not _caller_selected_tools:
         forced_set = {t for t in forced_tools if t not in disabled_tools}
         if _relevant_tools is None:
             from src.tool_index import ALWAYS_AVAILABLE
@@ -4180,7 +4184,12 @@ async def stream_agent_loop(
     # (grep, read_file, ...) that aren't in its schema list. Keep the schemas
     # in lockstep: manage_skills is callable whenever any skill is indexed,
     # and a matched skill's declared requires_toolsets ride along with it.
-    if not guide_only and _relevant_tools is not None and not _low_signal_turn:
+    if (
+        not guide_only
+        and _relevant_tools is not None
+        and not _caller_selected_tools
+        and not _low_signal_turn
+    ):
         try:
             from services.memory.skills import SkillsManager
             from src.constants import DATA_DIR

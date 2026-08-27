@@ -2876,6 +2876,35 @@ def test_toolless_multi_round_agent_persists_round_route_provenance(monkeypatch)
     assert tool_batch_sizes == [0, 0]
 
 
+def test_explicit_empty_tool_selection_cannot_be_expanded_by_domain_heuristics(monkeypatch):
+    """Exact tool approvals are authority, not a starting point for RAG."""
+    captured = []
+    monkeypatch.setattr(agent_loop, "get_setting", lambda key, default=None: default)
+    monkeypatch.setattr(agent_loop, "get_mcp_manager", lambda: None)
+    monkeypatch.setattr(agent_loop, "estimate_tokens", lambda *args, **kwargs: 10)
+    monkeypatch.setattr(
+        agent_loop,
+        "_classify_agent_request",
+        lambda *_args, **_kwargs: {
+            "low_signal": False, "retrieval_query": "files", "domains": {"files"}, "continuation": False,
+        },
+    )
+
+    async def fake_stream(_candidates, _messages, **kwargs):
+        captured.append([schema["function"]["name"] for schema in (kwargs.get("tools") or [])])
+        yield 'data: {"delta": "answer"}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(agent_loop, "stream_llm_with_fallback", fake_stream)
+    _collect(agent_loop.stream_agent_loop(
+        "https://api.openai.com/v1", "gpt-4.1",
+        [{"role": "user", "content": "List project files."}],
+        workspace="/tmp", relevant_tools=set(), max_rounds=1, _is_teacher_run=True,
+    ))
+
+    assert captured == [[]]
+
+
 def test_agent_metrics_attribute_usage_to_each_answering_route(monkeypatch):
     calls = 0
     primary = ("https://paid.example/v1", "selected-model", {})
