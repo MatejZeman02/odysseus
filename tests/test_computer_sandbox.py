@@ -235,12 +235,20 @@ def test_readonly_pipeline_rejects_command_specific_execution_escapes():
         ("awk", "BEGIN { system(\"id\") }"),
         ("awk", "{ getline line; print line }"),
         ("sed", "e id"),
+        ("sed", "1e id"),
+        ("sed", "/needle/e id"),
         ("sed", "s/x/y/e"),
+        ("sed", "s/x/y/w output.txt"),
+        ("sed", "-f", "program.sed"),
         ("find", ".", "-fprint", "/tmp/out"),
         ("fd", "--exec", "id"),
+        ("fd", "--exec=id"),
         ("rg", "--pre", "id", "needle"),
+        ("rg", "--pre=id", "needle"),
         ("sort", "--compress-program", "id"),
+        ("sort", "--compress-program=id"),
         ("git", "diff", "--ext-diff"),
+        ("git", "diff", "--ext-diff=id"),
     ]
     for argv in denied:
         try:

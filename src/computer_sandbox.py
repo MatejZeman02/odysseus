@@ -109,7 +109,7 @@ _READ_ONLY_COMMANDS = frozenset({
 })
 _FORBIDDEN_ARGUMENTS = frozenset({
     "-delete", "-exec", "-execdir", "-ok", "-okdir", "-i", "--in-place", "-o", "--output",
-    "-fprint", "-fprint0", "-fprintf", "-fls",
+    "-f", "--file", "-fprint", "-fprint0", "-fprintf", "-fls",
     "--exec", "--exec-batch", "--execdir", "--delete",
     "--compress-program", "--ext-diff", "--pre", "--pre-glob",
 })
@@ -119,6 +119,37 @@ _XARGS_VALUE_FLAGS = frozenset({"-n", "--max-args", "-s", "--max-chars"})
 _XARGS_RUNNERS = frozenset({
     "wc", "grep", "rg", "stat", "file", "head", "tail", "sed", "awk", "cut", "tr", "sort", "uniq",
 })
+
+_FORBIDDEN_OPTION_PREFIXES = (
+    "--compress-program=", "--exec=", "--exec-batch=", "--execdir=",
+    "--ext-diff=", "--file=", "--in-place=", "--output=", "--pre=", "--pre-glob=",
+)
+
+
+def _contains_unsafe_sed_program(program: str) -> bool:
+    """Detect the small set of sed forms that can execute, read, or write.
+
+    ``sed`` remains useful for bounded viewing/transformation, but its ``e``,
+    ``r`` and ``w`` commands are an execution/read/write surface.  We do not
+    accept a script file at all, and conservatively deny those command forms
+    both at a command boundary and as substitution flags.  A false rejection
+    is safe; a missed form would turn a read-only inventory into a generic
+    process launcher.
+    """
+    # Handles common numeric, `$`, and `/regex/` address prefixes, including
+    # a two-address range.  Commands introduced after `;` or a newline have
+    # no address prefix and are covered too.
+    address = r"(?:\s*(?:\d+|\$|/(?:\\.|[^/\n])*/)(?:\s*,\s*(?:\d+|\$|/(?:\\.|[^/\n])*/))?\s*)?"
+    if re.search(rf"(?:^|[;\n]){address}[erw](?:\s|$)", program):
+        return True
+    # For `s<delim>old<delim>new<delim>flags`, e/w are unsafe flags as well.
+    # Escaped delimiters are consumed as one token so ordinary escaped content
+    # does not terminate the expression early.
+    substitution = re.compile(
+        r"s(?P<delimiter>[^A-Za-z0-9\\s\\\\])(?:\\\\.|.)*?(?P=delimiter)"
+        r"(?:\\\\.|.)*?(?P=delimiter)(?P<flags>[A-Za-z0-9]*)"
+    )
+    return any("e" in match.group("flags") or "w" in match.group("flags") for match in substitution.finditer(program))
 
 
 def _validate_xargs_argv(values: tuple[str, ...]) -> None:
@@ -182,13 +213,11 @@ def _validate_command_specific_arguments(values: tuple[str, ...]) -> None:
         if any(re.search(r"\b(?:system|getline|@include)\b", arg) for arg in arguments):
             raise SandboxRunError("command_denied")
     elif command == "sed":
-        # GNU sed's e/r/w commands execute, read, or write files.  The normal
-        # substitution/selection forms remain available.
-        if any(
-            re.search(r"(?:^|[;\n])\s*[erw](?:\s|$)", arg)
-            or re.search(r"s[^\n]*/[^\n]*/[^\n]*/e$", arg)
-            for arg in arguments
-        ):
+        # GNU sed's e/r/w commands execute, read, or write files.  Do not
+        # load unparsed scripts from the mounted input either; a repository
+        # controls those contents.  Normal inline selection/substitution
+        # forms remain available after their unsafe command/flag scan.
+        if any(_contains_unsafe_sed_program(arg) for arg in arguments):
             raise SandboxRunError("command_denied")
     elif command == "git" and any(arg in {"--ext-diff", "--no-index"} for arg in arguments):
         raise SandboxRunError("command_denied")
@@ -213,7 +242,7 @@ def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
     if command == "git" and (len(values) < 2 or values[1] not in _READ_ONLY_GIT_SUBCOMMANDS):
         raise SandboxRunError("command_denied")
     for argument in values[1:]:
-        if argument in _FORBIDDEN_ARGUMENTS or argument.startswith("--output=") or argument.startswith("--in-place="):
+        if argument in _FORBIDDEN_ARGUMENTS or argument.startswith(_FORBIDDEN_OPTION_PREFIXES):
             raise SandboxRunError("command_denied")
         # Shell control characters are ordinary data to execve, but rejecting
         # them makes the plan representation unambiguous and prevents later
