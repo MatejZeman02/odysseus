@@ -598,7 +598,9 @@ Safety rules for the existing AgentMemory installation:
 - [x] Do not call AgentMemory's free-form `remember` or enable Qwen auto-memory
   initially. Qwen managed memory is disabled, and Companion homes do not queue
   the native global auto-memory/skill extractors or inject legacy native
-  memory, RAG, or skills into their prompts.
+  memory, RAG, or skills into their prompts. The shared executor also blocks
+  dynamically named MCP legacy-memory actions, so an installed
+  `mcp__<server>__memory_save` tool cannot bypass this boundary.
 - [x] Keep AgentMemory outage non-fatal: exact continuity checkpoints still
   load without it. The default Companion provider is local and exact-scoped;
   a regression test makes legacy native-provider construction fail.
