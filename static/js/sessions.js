@@ -258,9 +258,9 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const proposalAttempt = payload.semantic_proposal_attempt || null;
   const proposalAttemptText = proposalAttempt && proposalAttempt.outcome !== 'ready'
     ? ({
-      cancelled: 'Automatic proposal paused because a newer turn started. No memory was changed.',
-      failed: `Automatic proposal could not be created (${String(proposalAttempt.code || 'unknown').replaceAll('_', ' ')}). No memory was changed.`,
-    }[proposalAttempt.outcome] || 'Automatic proposal did not complete. No memory was changed.')
+      cancelled: 'Background proposal paused because a newer turn started. No memory was changed.',
+      failed: `Background proposal could not be created (${String(proposalAttempt.code || 'unknown').replaceAll('_', ' ')}). No memory was changed.`,
+    }[proposalAttempt.outcome] || 'Background proposal did not complete. No memory was changed.')
     : '';
   const checkpointMounts = Array.isArray(payload.checkpoint_mounts) ? payload.checkpoint_mounts : [];
   const mountedCheckpointIds = new Set(checkpointMounts.map(mount => mount.source_checkpoint_id));

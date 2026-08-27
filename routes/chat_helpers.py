@@ -188,9 +188,16 @@ def _spawn_bg(coro) -> asyncio.Task:
 
 
 def _semantic_proposals_auto_enabled() -> bool:
-    """Allow owners to opt out of the bounded Companion proposal worker."""
-    return os.getenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", "1").strip().lower() not in {
-        "0", "false", "no", "off",
+    """Keep provider-backed proposal generation owner-visible by default.
+
+    The manual Context action is the normal C1 path.  Background derivation is
+    useful only as an explicitly deployed experiment: it makes a stored-model
+    provider call, even though it cannot write accepted memory.  Treating an
+    unset variable as enabled made that cost/privacy-relevant call surprising
+    and contradicted the manual canary gate in the implementation plan.
+    """
+    return os.getenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", "0").strip().lower() in {
+        "1", "true", "yes", "on",
     }
 
 

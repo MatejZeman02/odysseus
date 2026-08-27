@@ -12,6 +12,15 @@ from src.continuity.store import ContinuityStore
 import src.continuity.store as store_module
 
 
+def test_semantic_proposals_require_explicit_background_opt_in(monkeypatch):
+    monkeypatch.delenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", raising=False)
+    assert helpers._semantic_proposals_auto_enabled() is False
+    monkeypatch.setenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", "1")
+    assert helpers._semantic_proposals_auto_enabled() is True
+    monkeypatch.setenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", "off")
+    assert helpers._semantic_proposals_auto_enabled() is False
+
+
 @pytest.mark.asyncio
 async def test_semantic_proposal_scheduler_derives_after_quiet_period(monkeypatch):
     helpers._SEMANTIC_PROPOSAL_TASKS.clear()

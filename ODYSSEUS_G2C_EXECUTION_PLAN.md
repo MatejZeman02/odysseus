@@ -421,6 +421,12 @@ The manual response and Context disclosure identify the selected model, bounded
 source-message count, and fixed `no_tools` derivation profile, while excluding
 provider URLs, credentials, raw model output, and source text.
 
+Background proposal generation is disabled unless
+`ODYSSEUS_SEMANTIC_PROPOSALS_AUTO=1` is deliberately set. The manual Context
+action is therefore the default provider-backed path; an unset configuration
+cannot create unexpected model calls merely because a chat reaches a message
+count threshold.
+
 ### C2 — Prove durable continuation — implementation proof complete
 
 The restart/fork compiler fixtures now prove that a cold project fork receives
