@@ -1,7 +1,22 @@
 import json
+import signal
+from unittest.mock import Mock
 from pathlib import Path
 
 from src import computer_sandbox
+
+
+def test_terminate_group_signals_descendants_even_if_podman_client_exited(monkeypatch):
+    process = Mock()
+    process.pid = 4242
+    process.poll.return_value = 0
+    killpg = Mock()
+    monkeypatch.setattr(computer_sandbox.os, "killpg", killpg)
+
+    computer_sandbox._terminate_group(process)
+
+    killpg.assert_called_once_with(4242, signal.SIGTERM)
+    process.wait.assert_not_called()
 
 
 def test_task_command_has_mandatory_containment_flags(tmp_path):

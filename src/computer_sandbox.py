@@ -245,12 +245,18 @@ def _display_pipeline(commands: Sequence[ReadOnlyCommand]) -> str:
 
 def _terminate_group(process: subprocess.Popen[bytes]) -> None:
     """Terminate the Podman client and all descendants it owns, best-effort."""
-    if process.poll() is not None:
-        return
     try:
         os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=2)
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
+        return
+    # The client can already have exited while a descendant inherited one of
+    # its output pipes.  The dedicated process group must still be signalled;
+    # otherwise a timeout can leave the descendant alive.  Only wait when the
+    # direct child is still present.
+    try:
+        if process.poll() is None:
+            process.wait(timeout=2)
+    except subprocess.SubprocessError:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except OSError:
