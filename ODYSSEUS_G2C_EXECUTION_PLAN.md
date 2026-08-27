@@ -319,6 +319,15 @@ atomic, permission-restricted backup and returns a count plus digest—not the
 backup path or any memory text. It never copies ownerless/other-owner entries,
 touches vector/AgentMemory, indexes anything, or begins migration.
 
+An explicit **Preview scoped migration** action now accepts only that
+server-created backup reference. It classifies aggregate candidates whose
+recorded session is still owner-owned and bound to a Personal/project home,
+reports unresolved legacy entries and possible duplicate counts, and exposes no
+text, record IDs, fingerprints, path, or provider state. The preview does not
+write native memory, the scoped index, vector memory, or AgentMemory. Explicit
+scope assignment, durable rollback, and actual provider writes remain later
+owner-reviewed work.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to

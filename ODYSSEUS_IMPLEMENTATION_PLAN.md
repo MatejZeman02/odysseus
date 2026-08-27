@@ -844,8 +844,11 @@ not exercised by this slice and is deliberately tracked next.
 - [ ] Index only approved structured artifacts/tool outcomes in separate
   Personal, Computer, and project namespaces.
 - [x] Provide explicit aggregate inventory and owner-private backup gates.
-- [ ] After the owner authorizes those actions, add a dry-run migration,
-  rollback artifact, duplicate report, and only then consider a provider switch.
+- [x] Provide an owner-triggered, backup-bound dry-run report with exact-home
+  candidate counts, unresolved legacy counts, and aggregate duplicate counts;
+  it cannot write to any memory provider.
+- [ ] After the owner reviews that report, add explicit scope assignment,
+  a rollback journal, and only then consider a provider switch.
 
 **Checkpoint G2:** obtain explicit approval before reading the owner's real
 memory stores, changing a writer, or migrating memory data.
