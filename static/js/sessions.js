@@ -629,6 +629,7 @@ function _clearHistoryPager() {
   if (_historyPager?.handler && box) {
     box.removeEventListener('scroll', _historyPager.handler);
   }
+  _historyPager?.button?.remove();
   _historyPager = null;
 }
 
@@ -645,6 +646,7 @@ function _installHistoryPager(id, pageInfo, modelName) {
     done: false,
     modelName,
     handler: null,
+    button: null,
   };
 
   const loadOlder = async () => {
@@ -660,6 +662,10 @@ function _installHistoryPager(id, pageInfo, modelName) {
     }
 
     _historyPager.loading = true;
+    if (_historyPager.button) {
+      _historyPager.button.disabled = true;
+      _historyPager.button.textContent = 'Loading older messages…';
+    }
     const anchor = box.querySelector('.msg, .agent-thread, .gallery-bubble');
     const beforeHeight = box.scrollHeight;
     try {
@@ -677,6 +683,10 @@ function _installHistoryPager(id, pageInfo, modelName) {
       }
       _historyPager.offset = Number(data.offset || nextOffset);
       _historyPager.done = !data.has_more_before;
+      if (_historyPager.button) {
+        _historyPager.button.disabled = _historyPager.done;
+        _historyPager.button.textContent = _historyPager.done ? 'All older messages loaded' : 'Load older messages';
+      }
       if (window.hljs) {
         newEls.forEach(el => el.querySelectorAll('pre code:not(.hljs)').forEach(block => window.hljs.highlightElement(block)));
       }
@@ -684,10 +694,26 @@ function _installHistoryPager(id, pageInfo, modelName) {
       box.scrollTop += heightDelta;
     } catch (e) {
       console.warn('Failed to load older chat history:', e);
+      if (_historyPager?.button) {
+        _historyPager.button.disabled = false;
+        _historyPager.button.textContent = 'Retry loading older messages';
+      }
     } finally {
-      if (_historyPager) _historyPager.loading = false;
+      if (_historyPager) {
+        _historyPager.loading = false;
+        if (_historyPager.button && !_historyPager.done) _historyPager.button.disabled = false;
+      }
     }
   };
+
+  const loadButton = document.createElement('button');
+  loadButton.type = 'button';
+  loadButton.className = 'history-load-older-btn';
+  loadButton.textContent = 'Load older messages';
+  loadButton.title = 'Load the previous page of this chat history';
+  loadButton.addEventListener('click', () => loadOlder());
+  box.prepend(loadButton);
+  _historyPager.button = loadButton;
 
   _historyPager.handler = () => {
     if (box.scrollTop <= 90) loadOlder();
