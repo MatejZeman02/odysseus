@@ -105,7 +105,7 @@ class ReadOnlyCommand:
 
 _READ_ONLY_COMMANDS = frozenset({
     "find", "fd", "rg", "grep", "wc", "head", "tail", "sed", "awk", "cut", "tr",
-    "sort", "uniq", "stat", "file", "ls", "git", "xargs",
+    "sort", "uniq", "stat", "file", "ls", "xargs",
 })
 _FORBIDDEN_ARGUMENTS = frozenset({
     "-delete", "-exec", "-execdir", "-ok", "-okdir", "-i", "--in-place", "-o", "--output",
@@ -113,7 +113,6 @@ _FORBIDDEN_ARGUMENTS = frozenset({
     "--exec", "--exec-batch", "--execdir", "--delete",
     "--compress-program", "--ext-diff", "--pre", "--pre-glob",
 })
-_READ_ONLY_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "ls-files", "grep"})
 _XARGS_FLAGS = frozenset({"-0", "-r", "-x", "--no-run-if-empty", "--exit"})
 _XARGS_VALUE_FLAGS = frozenset({"-n", "--max-args", "-s", "--max-chars"})
 _XARGS_RUNNERS = frozenset({
@@ -219,8 +218,6 @@ def _validate_command_specific_arguments(values: tuple[str, ...]) -> None:
         # forms remain available after their unsafe command/flag scan.
         if any(_contains_unsafe_sed_program(arg) for arg in arguments):
             raise SandboxRunError("command_denied")
-    elif command == "git" and any(arg in {"--ext-diff", "--no-index"} for arg in arguments):
-        raise SandboxRunError("command_denied")
 
 
 def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
@@ -238,8 +235,6 @@ def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
         raise SandboxRunError("command_denied")
     command = values[0]
     if command not in _READ_ONLY_COMMANDS:
-        raise SandboxRunError("command_denied")
-    if command == "git" and (len(values) < 2 or values[1] not in _READ_ONLY_GIT_SUBCOMMANDS):
         raise SandboxRunError("command_denied")
     for argument in values[1:]:
         if argument in _FORBIDDEN_ARGUMENTS or argument.startswith(_FORBIDDEN_OPTION_PREFIXES):

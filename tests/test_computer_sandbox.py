@@ -214,6 +214,7 @@ def test_readonly_pipeline_rejects_writes_shell_control_and_untrusted_paths():
         ("rm", "-rf", "/inputs"),
         ("find", ".", "-delete"),
         ("sed", "-i", "s/a/b/", "file.md"),
+        ("git", "status"),
         ("git", "commit", "-m", "no"),
         ("rg", "token", "/etc"),
         ("grep", "x", "file; touch pwned"),
@@ -247,8 +248,6 @@ def test_readonly_pipeline_rejects_command_specific_execution_escapes():
         ("rg", "--pre=id", "needle"),
         ("sort", "--compress-program", "id"),
         ("sort", "--compress-program=id"),
-        ("git", "diff", "--ext-diff"),
-        ("git", "diff", "--ext-diff=id"),
     ]
     for argv in denied:
         try:

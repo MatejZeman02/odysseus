@@ -24,6 +24,10 @@ _SKIP_DIRECTORIES = frozenset({
     ".git", ".hg", ".svn", "node_modules", "venv", ".venv", "__pycache__",
     ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build", ".next",
 })
+# Source-control metadata is deliberately absent from the disposable input:
+# project-controlled Git configuration, hooks, and filters must never become
+# part of the command runtime.  Do not re-enable Git in the command broker
+# until it has a dedicated, inert repository-metadata snapshot design.
 _MAX_SNAPSHOT_FILES = 5_000
 _MAX_SNAPSHOT_FILE_BYTES = 2 * 1024 * 1024
 _MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024
