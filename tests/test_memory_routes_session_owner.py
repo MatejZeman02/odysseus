@@ -7,8 +7,8 @@ another tenant's session and leak their chat history, session-scoped LLM
 credentials, or session title.
 """
 import asyncio
-import io
 import sys
+import tempfile
 import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -50,10 +50,14 @@ def _request(user):
 
 
 def _upload(name="memories.json"):
-    return UploadFile(
-        filename=name,
-        file=io.BytesIO(b'[{"text": "Project Phoenix uses Python", "category": "project"}]'),
-    )
+    # Match Starlette's normal request parser.  A bare BytesIO is treated as
+    # disk-backed by UploadFile and dispatches ``read`` through AnyIO's
+    # threadpool; that makes this otherwise synchronous JSON fast-path hang
+    # under Python 3.13's test event loop.
+    file = tempfile.SpooledTemporaryFile(max_size=1024)
+    file.write(b'[{"text": "Project Phoenix uses Python", "category": "project"}]')
+    file.seek(0)
+    return UploadFile(filename=name, file=file)
 
 
 def _allow_memory_management(monkeypatch):
