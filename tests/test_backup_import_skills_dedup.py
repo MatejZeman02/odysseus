@@ -6,10 +6,9 @@ So importing your own backup silently drops any skill whose title (or id)
 collides with ANOTHER user's skill — the same cross-tenant data-loss bug
 that was already fixed for memories in the block just above.
 """
-import pytest
+import asyncio
+from types import SimpleNamespace
 
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
 import routes.backup_routes as backup_routes
 from routes.backup_routes import setup_backup_routes
 
@@ -66,21 +65,22 @@ class FakeSkillsManager:
         return {"name": name, "id": entry["id"]}
 
 
-def _make_client(skills_mgr, monkeypatch):
+class _ImportRequest:
+    def __init__(self, payload):
+        self._payload = payload
+        self.state = SimpleNamespace(user="alice")
+
+    async def json(self):
+        return self._payload
+
+
+def _import_endpoint(skills_mgr, monkeypatch):
     # Bypass the admin gate and read the importer straight off request.state.
     monkeypatch.setattr(backup_routes, "require_admin", lambda *a, **k: None)
     monkeypatch.setattr(backup_routes, "get_current_user",
                         lambda req: getattr(req.state, "user", None))
-    app = FastAPI()
-
-    @app.middleware("http")
-    async def _set_user(request: Request, call_next):
-        request.state.user = "alice"
-        return await call_next(request)
-
     router = setup_backup_routes(FakeMemoryManager(), FakePresetManager(), skills_mgr)
-    app.include_router(router)
-    return TestClient(app)
+    return next(route.endpoint for route in router.routes if route.path == "/api/import")
 
 
 def test_import_skill_not_dropped_by_other_users_title_collision(monkeypatch):
@@ -88,7 +88,7 @@ def test_import_skill_not_dropped_by_other_users_title_collision(monkeypatch):
     skills_mgr = FakeSkillsManager([
         {"id": "bob-1", "title": "Deploy", "name": "Deploy", "owner": "bob"},
     ])
-    client = _make_client(skills_mgr, monkeypatch)
+    endpoint = _import_endpoint(skills_mgr, monkeypatch)
 
     # Alice imports HER OWN backup containing a skill also titled "Deploy".
     payload = {
@@ -96,8 +96,8 @@ def test_import_skill_not_dropped_by_other_users_title_collision(monkeypatch):
             {"id": "alice-1", "title": "Deploy", "name": "Deploy"},
         ],
     }
-    resp = client.post("/api/import", json=payload)
-    assert resp.status_code == 200, resp.text
+    response = asyncio.run(endpoint(_ImportRequest(payload)))
+    assert response["ok"] is True
 
     # Alice's skill must have been imported and assigned to her.
     alice_skills = skills_mgr.load(owner="alice")
