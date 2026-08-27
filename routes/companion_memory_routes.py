@@ -636,6 +636,35 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             raise ValueError("owner-private backup integrity check failed")
         return token, normalized
 
+    def _commit_migration_review(
+        *, db, review: LegacyMemoryMigrationReview, expected_revision: int,
+        status: str, plan: dict, journal: list,
+    ) -> LegacyMemoryMigrationReview:
+        """Atomically advance a review once, even under concurrent requests."""
+        next_revision = expected_revision + 1
+        changed = db.query(LegacyMemoryMigrationReview).filter(
+            LegacyMemoryMigrationReview.id == review.id,
+            LegacyMemoryMigrationReview.owner == review.owner,
+            LegacyMemoryMigrationReview.revision == expected_revision,
+        ).update({
+            "revision": next_revision,
+            "status": status,
+            "plan_json": json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            "journal_json": json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            "updated_at": utcnow_naive(),
+        }, synchronize_session=False)
+        if changed != 1:
+            raise ArtifactConflict("This migration review changed; reload it before continuing")
+        db.expire_all()
+        refreshed = db.query(LegacyMemoryMigrationReview).filter(
+            LegacyMemoryMigrationReview.id == review.id,
+            LegacyMemoryMigrationReview.owner == review.owner,
+            LegacyMemoryMigrationReview.revision == next_revision,
+        ).one_or_none()
+        if not refreshed:
+            raise ArtifactConflict("This migration review changed; reload it before continuing")
+        return refreshed
+
     def _stage_exact_home_assignments(
         *, owner: str, review_id: str, expected_revision: int,
     ) -> dict:
@@ -707,18 +736,19 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 raise ValueError("migration review could not be read safely") from exc
             if not isinstance(journal, list):
                 raise ValueError("migration review could not be read safely")
-            review.revision += 1
-            review.status = "assignments_staged"
+            next_revision = expected_revision + 1
             journal.append({
                 "kind": "exact_home_assignments_staged",
-                "revision": review.revision,
+                "revision": next_revision,
                 "staged_count": staged,
                 "unavailable_count": unavailable,
                 "unresolved_count": unresolved,
                 "recorded_at": utcnow_naive().isoformat(),
             })
-            review.plan_json = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            review.journal_json = json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            review = _commit_migration_review(
+                db=db, review=review, expected_revision=expected_revision,
+                status="assignments_staged", plan=plan, journal=journal,
+            )
             db.commit()
             return _legacy_migration_review_payload(review)
         except Exception:
@@ -807,6 +837,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 admitted.append((candidate, token, content, source))
             if not admitted:
                 raise MemoryScopeError("No exact-home assignments are available to migrate")
+            records_to_add: list[ScopedMemoryRecord] = []
             for candidate, token, content, source in admitted:
                 assignment = candidate["assignment"]
                 record = ScopedMemoryRecord(
@@ -820,7 +851,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                     content=content,
                     sensitivity="normal",
                 )
-                db.add(record)
+                records_to_add.append(record)
                 candidate["migration"] = {
                     "record_id": record.id,
                     "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
@@ -828,11 +859,10 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             journal = json.loads(review.journal_json or "[]")
             if not isinstance(journal, list):
                 raise ValueError("migration review could not be read safely")
-            review.revision += 1
-            review.status = "migration_applied"
+            next_revision = expected_revision + 1
             journal.append({
                 "kind": "local_scoped_migration_applied",
-                "revision": review.revision,
+                "revision": next_revision,
                 "record_count": len(admitted),
                 "recorded_at": utcnow_naive().isoformat(),
             })
@@ -840,8 +870,11 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 "provider": "local-scoped-index",
                 "applied_count": len(admitted),
             }
-            review.plan_json = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            review.journal_json = json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            review = _commit_migration_review(
+                db=db, review=review, expected_revision=expected_revision,
+                status="migration_applied", plan=plan, journal=journal,
+            )
+            db.add_all(records_to_add)
             db.commit()
             return _legacy_migration_review_payload(review)
         except Exception:
@@ -891,21 +924,22 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 removable.append(record)
             if not removable:
                 raise MemoryScopeError("No migrated records are available to roll back")
-            for record in removable:
-                db.delete(record)
             journal = json.loads(review.journal_json or "[]")
             if not isinstance(journal, list):
                 raise ValueError("migration review could not be read safely")
-            review.revision += 1
-            review.status = "migration_rolled_back"
+            next_revision = expected_revision + 1
             journal.append({
                 "kind": "local_scoped_migration_rolled_back",
-                "revision": review.revision,
+                "revision": next_revision,
                 "record_count": len(removable),
                 "recorded_at": utcnow_naive().isoformat(),
             })
-            review.plan_json = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            review.journal_json = json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            review = _commit_migration_review(
+                db=db, review=review, expected_revision=expected_revision,
+                status="migration_rolled_back", plan=plan, journal=journal,
+            )
+            for record in removable:
+                db.delete(record)
             db.commit()
             return _legacy_migration_review_payload(review)
         except Exception:

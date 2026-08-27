@@ -364,7 +364,9 @@ and inserts every record atomically. Native `memory.json` remains untouched;
 no AgentMemory writer is selected. The review journal records only counts and
 recording time. A conditional rollback removes only records whose stored
 provenance and content hash still match the review; a changed/missing record
-fails closed instead of being overwritten.
+fails closed instead of being overwritten. Stage, apply, and rollback advance
+the review through an atomic expected-revision update, so concurrent stale
+requests cannot both change its state.
 
 ## Conversation attachment, not transcript merging
 
