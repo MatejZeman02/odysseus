@@ -10,10 +10,9 @@ import modelsModule from './js/models.js?v=20260715startupcalm2';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-// Keep the approval-critical module graph on one shared versioned URL. Query
-// variants are distinct ES modules, so every importer below must use the same
-// version and sessions.js itself stays unversioned everywhere.
-import chatModule from './js/chat.js?v=20260819approvalcontrol1';
+// Stateful chat modules must use one canonical URL. A query variant is a
+// distinct ES module, which previously split renderer/session state.
+import chatModule from './js/chat.js';
 import compareModule from './js/compare/index.js?v=20260819approvalcontrol1';
 import documentModule from './js/document.js?v=20260818artifactedit2';
 import searchChatModule from './js/search-chat.js';
@@ -25,7 +24,7 @@ import {
   settleSessionHydration
 } from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js?v=20260819approvalcontrol1';
+import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';

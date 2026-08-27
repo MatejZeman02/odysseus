@@ -61,7 +61,7 @@ _SAFE_TURN_FAILURE_DETAILS = {
     "worker_died": "The isolated Qwen worker stopped before producing a complete result. No patch was applied.",
     "cancelled": "The Qwen turn was stopped. No patch was applied.",
     "proposal_invalid": (
-        "Qwen completed, but did not return one valid structured change proposal. No files were changed. "
+        "Qwen completed, but did not return one valid structured patch proposal. No files were changed. "
         "Use a specific create, edit, or fix request; ordinary questions stay read-only."
     ),
     "proposal_too_large": "The proposed patch exceeded the file or size limit. No files were changed; request a smaller change.",

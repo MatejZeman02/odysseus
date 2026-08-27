@@ -69,7 +69,7 @@ function _syncCompanionScopeBanner(meta) {
     detail.textContent = 'Native · personal scope';
   } else {
     title.textContent = 'Computer Help';
-    detail.textContent = 'Native · safe diagnostics';
+    detail.textContent = 'Native · Qwen coming next';
   }
   banner.hidden = false;
   const supportsMemory = ['project', 'personal', 'computer'].includes(scope);
