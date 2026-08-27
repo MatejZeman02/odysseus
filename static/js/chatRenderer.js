@@ -508,11 +508,9 @@ function stripExecutedFence(match, tag, inline, body) {
 
 async function loadExecFenceRegex() {
   try {
-    // Shared with admin.js, and — more to the point — with the other copies of
-    // this module: chatRenderer.js is imported under three different ?v= query
-    // strings, so it is instantiated three times per load and used to issue
-    // three identical /api/tools requests. appConfig.js is imported by one
-    // specifier from all of them, so they now share a single fetch.
+    // Shared with admin.js through appConfig's single request cache. Keeping
+    // tool metadata central avoids redundant startup requests and makes all
+    // renderers use one consistent tool policy snapshot.
     const data = await getTools();
     const tags = (data.tools || [])
       .map((t) => t.id)

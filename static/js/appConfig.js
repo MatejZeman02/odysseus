@@ -4,12 +4,10 @@
 // module wants at startup.
 //
 // Before this, /api/auth/settings was fetched independently by six modules and
-// /api/tools by three, none of them aware of the others — 4 and 3 requests on a
-// single cold load. Worse than the requests: each caller could observe a
-// different snapshot of the same object, and chatRenderer.js is imported under
-// three different ?v= query strings, so it is three separate module instances
-// each issuing its own /api/tools fetch. Caching here fixes both, because the
-// cache lives in one module every instance imports by the same specifier.
+// /api/tools by several modules, none of them aware of the others. Worse than
+// the requests: each caller could observe a different snapshot of the same
+// object. Caching here fixes both because the cache lives in one shared module
+// imported by the same canonical specifier.
 //
 // URLs are bare paths on purpose. The callers that used `${API_BASE}/api/...`
 // resolved to the identical URL — API_BASE is `window.location.origin`
