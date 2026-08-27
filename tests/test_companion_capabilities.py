@@ -13,7 +13,9 @@ from src.companion_capabilities import (
 def test_scope_defaults_keep_host_and_sandbox_authority_offside_by_default():
     personal = defaults_for_scope("personal")
     project = defaults_for_scope("project")
-    assert personal[WEB_SEARCH] is False
+    # Public search is a non-mutating default; host observation and contained
+    # commands remain explicit owner choices.
+    assert personal[WEB_SEARCH] is True
     assert personal[SYSTEM_OBSERVE] is False
     assert personal[SANDBOX_READ] is False
     assert project[WEB_SEARCH] is True
@@ -55,3 +57,15 @@ def test_companion_ui_uses_one_capability_drawer_and_native_documents_for_artifa
     assert "companion-open-documents" in sessions
     assert "documentApi.openLibrary({tab: 'documents'})" in sessions
     assert "odysseus:tool-toggle" in app
+
+
+def test_companion_web_search_defaults_on_but_server_enforces_an_owner_disable():
+    from src.companion_capabilities import WEB_SEARCH, defaults_for_scope
+
+    for scope in ("personal", "project", "computer"):
+        assert defaults_for_scope(scope)[WEB_SEARCH] is True
+    assert defaults_for_scope("general")[WEB_SEARCH] is False
+
+    source = open("routes/chat_routes.py", encoding="utf-8").read()
+    assert "_companion_web_enabled = bool(_chat_capabilities.get(WEB_SEARCH, False))" in source
+    assert "_search_enabled = bool(_search_enabled and _companion_web_enabled)" in source

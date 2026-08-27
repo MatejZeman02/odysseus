@@ -54,7 +54,11 @@ def defaults_for_scope(scope_kind: str) -> dict[str, bool]:
     """Return conservative initial grants for a newly-created session."""
     scope = str(scope_kind or "general")
     return {
-        WEB_SEARCH: scope == "project",
+        # Public search is a low-authority read and should not make Personal
+        # Advisor or Computer Help stop for a permission card.  The owner can
+        # still turn it off for an individual chat; the route then enforces
+        # that stored choice rather than trusting a browser toggle.
+        WEB_SEARCH: scope in {"personal", "project", "computer"},
         WORKSPACE_READ: scope == "project",
         # Computer Help keeps its existing safe diagnostics ready.  Other
         # homes must opt in before their chat can receive host observations.

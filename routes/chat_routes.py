@@ -1567,10 +1567,12 @@ def setup_chat_routes(
         from src.companion_capabilities import (
             SANDBOX_READ,
             SYSTEM_OBSERVE,
+            WEB_SEARCH,
             legacy_tools_denied_for_scope,
             normalize as normalize_chat_capabilities,
         )
         _chat_scope_kind = getattr(sess, "scope_kind", "general") or "general"
+        _companion_web_enabled = True
         # This denial is independent of any optional sandbox metadata. A
         # malformed/legacy capability record must not re-enable global memory
         # or raw-chat tooling in a Companion home.
@@ -1580,6 +1582,11 @@ def setup_chat_routes(
                 getattr(sess, "capability_grants", None),
                 scope_kind=_chat_scope_kind,
             )
+            # The browser toggle is presentation only for Companion homes.
+            # A direct request payload must never regain external-network
+            # authority after the owner has disabled this chat's Web search.
+            if _chat_scope_kind in {"personal", "project", "computer"}:
+                _companion_web_enabled = bool(_chat_capabilities.get(WEB_SEARCH, False))
             if not _chat_capabilities.get(SANDBOX_READ, False):
                 disabled_tools.add("sandbox_read")
             if not _chat_capabilities.get(SYSTEM_OBSERVE, False):
@@ -1589,6 +1596,7 @@ def setup_chat_routes(
             # command runner. This tool did not exist for legacy sessions.
             disabled_tools.add("sandbox_read")
             disabled_tools.add("system_observe")
+            _companion_web_enabled = _chat_scope_kind not in {"personal", "project", "computer"}
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
         # Web search is per-turn opt-in: either the chat pre-search setting
@@ -1597,6 +1605,7 @@ def setup_chat_routes(
         if allow_bash is not None and str(allow_bash).lower() != "true":
             disabled_tools.update({"bash", "python", "read_file", "write_file", "edit_file"})
         _explicit_web_intent = _explicit_web_intent or bool(_tool_intent and _tool_intent.category == "web")
+        _search_enabled = bool(_search_enabled and _companion_web_enabled)
         if (
             is_web_search_explicitly_denied(allow_web_search)
             and not _direct_readonly_web_request
