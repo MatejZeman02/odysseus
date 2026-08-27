@@ -90,6 +90,14 @@ def test_task_root_registration_is_owner_scoped_private_and_non_executable(monke
         session_id="computer", expected_revision=1,
     ), SimpleNamespace())
     assert retired["retired"] is True
+    assert retired["revision"] == 2
+    db = local()
+    try:
+        stored = db.query(ComputerTaskRoot).one()
+        assert stored.status == "retired"
+        assert stored.revision == 2
+    finally:
+        db.close()
     assert task_dir.is_dir()
 
 
