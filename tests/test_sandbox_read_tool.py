@@ -18,6 +18,8 @@ def test_sandbox_read_snapshots_only_the_active_workspace(monkeypatch, tmp_path)
         captured["input_dir"] = input_dir
         assert input_dir != workspace
         assert (input_dir / "README.md").read_text(encoding="utf-8") == "private project text"
+        assert (input_dir / "README.md").stat().st_mode & 0o777 == 0o644
+        assert input_dir.stat().st_mode & 0o777 == 0o755
         assert not (input_dir / "skip-link").exists()
         return SandboxRunResult(output="1 README.md\n", duration_ms=4)
 

@@ -25,7 +25,9 @@ from core.constants import DATA_DIR
 
 
 _DIGEST_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
-_REPORT_VERSION = 1
+# Bump whenever the qualification contract gets a materially stronger gate so
+# an old report can never authorize a newer execution profile.
+_REPORT_VERSION = 3
 _REPORT_PATH = Path(DATA_DIR) / "computer_sandbox_qualification.json"
 _REQUIRED_FINAL_CHECKS = frozenset({
     "rootless_podman", "read_only_input", "private_writable_task", "network_none",
@@ -255,7 +257,11 @@ def _podman_task_command(image: str, *, input_dir: Path, script: str, name: str 
         # The broker supplies fresh directories and will reject nested mount
         # points before general task admission. Podman does not support Docker's
         # non-standard `rbind=false` mount option.
-        "--mount", f"type=bind,src={input_dir},dst=/inputs,ro=true",
+        # Fedora SELinux denies an unlabeled bind mount to the image's
+        # unprivileged command user even when its POSIX mode is readable.
+        # This is a fresh server-created temporary input tree, never a user
+        # workspace, so private relabeling cannot relabel user data.
+        "--mount", f"type=bind,src={input_dir},dst=/inputs,ro=true,relabel=private",
         "--workdir", "/task", "--env", "HOME=/home/sandbox", "--env", "TMPDIR=/tmp",
         "--env", "PATH=/usr/bin:/bin", "--env", "LC_ALL=C",
     ]
@@ -396,13 +402,17 @@ def qualify_containment() -> dict:
         checks.append("rootless_podman")
         with tempfile.TemporaryDirectory(prefix="odysseus-computer-probe-") as root:
             root_path = Path(root); inputs = root_path / "inputs"; marker = root_path / "host-only"
-            inputs.mkdir(mode=0o700)
+            # The temporary parent remains private. The direct container mount
+            # needs a traversable input directory because the reviewed image
+            # intentionally runs commands as an unprivileged user.
+            inputs.mkdir(mode=0o755)
             (inputs / "sentinel.txt").write_text("read-only fixture", encoding="utf-8")
             marker.write_text("must not appear in container", encoding="utf-8")
             home = str(Path.home()).replace("'", "'\\''")
             marker_path = str(marker).replace("'", "'\\''")
             script = f"""
               test -r /inputs/sentinel.txt; test ! -w /inputs/sentinel.txt
+              find /inputs -maxdepth 1 -name sentinel.txt -print | grep -qx /inputs/sentinel.txt
               test -w /task; test -w /tmp
               test ! -e /run/user/$(id -u)/podman/podman.sock
               test ! -e /var/run/docker.sock; test ! -e /host-home

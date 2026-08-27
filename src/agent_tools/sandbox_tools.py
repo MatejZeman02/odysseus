@@ -37,7 +37,12 @@ def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]
     root = workspace.resolve(strict=True)
     if not root.is_dir() or root.is_symlink():
         raise ValueError("workspace_unavailable")
-    destination.mkdir(mode=0o700)
+    # The parent temporary directory is 0700 on the host. The mounted input
+    # itself must be traversable by the image's unprivileged user, however,
+    # otherwise direct reads appear to work while find/rg/ls mysteriously
+    # fail. This visibility exists only inside the already-private temp tree
+    # and the networkless container mount.
+    destination.mkdir(mode=0o755)
     files = total = 0
     for current, dirs, names in os.walk(root, followlinks=False):
         current_path = Path(current)
@@ -60,10 +65,11 @@ def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]
             relative = source.relative_to(root)
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(target.parent, 0o755)
             # copyfile follows no symlink because source was checked directly
             # above and the destination is a private new tree.
             shutil.copyfile(source, target, follow_symlinks=False)
-            os.chmod(target, 0o600)
+            os.chmod(target, 0o644)
             files += 1
             total += size
     return files, total

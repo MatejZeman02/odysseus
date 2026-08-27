@@ -11,6 +11,7 @@ def test_task_command_has_mandatory_containment_flags(tmp_path):
     )
     assert "--network=none" in command
     assert "--read-only" in command
+    assert any("relabel=private" in value for value in command)
     assert "--cap-drop=ALL" in command
     assert "--security-opt=no-new-privileges" in command
     assert "--pull=never" in command
@@ -26,7 +27,7 @@ def test_readiness_requires_matching_passing_report(monkeypatch, tmp_path):
     monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
     assert computer_sandbox.readiness().qualified is False
     report.write_text(json.dumps({
-        "version": 1, "image": image, "passed": True, "complete": True,
+        "version": computer_sandbox._REPORT_VERSION, "image": image, "passed": True, "complete": True,
         "checks": ["rootless_podman", "read_only_input", "private_writable_task", "network_none", "socket_absence", "host_path_absence", "resource_limits", "descendant_cleanup"],
     }), encoding="utf-8")
     assert computer_sandbox.readiness().qualified is True
@@ -84,6 +85,7 @@ def test_readonly_pipeline_is_structured_allowlisted_and_never_uses_caller_shell
     )
     assert "--network=none" in built
     assert "--read-only" in built
+    assert any("relabel=private" in value for value in built)
     assert built[-1] == "set -f; find . -name '*.md'"
 
 
