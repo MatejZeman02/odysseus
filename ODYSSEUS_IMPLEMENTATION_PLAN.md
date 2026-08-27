@@ -150,6 +150,13 @@ retrieval backend rather than project authority.
 - retain the local exact index and make provider outage non-fatal;
 - migrate no real records or writer until the owner approves the inventory.
 
+**Preflight audit:** the current native JSON memory manager has useful
+owner-aware, fail-closed mutation and compatibility/export behavior, but its
+provider abstraction lacks explicit home/project/sensitivity/grant/retention/
+expiry/provenance filters. C4 must first add an owner-confirmed inventory and
+backup report, then extend that contract before attempting AgentMemory recall
+or writes.
+
 ### Stage C5 — Continuity and project UX closure
 
 **Outcome:** long-running work is understandable and remains fast.

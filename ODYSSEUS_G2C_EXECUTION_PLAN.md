@@ -276,6 +276,25 @@ Do not enable Qwen auto-memory or AgentMemory's unscoped free-form `remember`
 path. The context compiler remains the only component that admits recalled
 records into a model prompt.
 
+### C4 preflight audit (2026-08)
+
+The active native store is `src/memory.MemoryManager`, backed by the owner's
+`data/memory.json`; it already has useful fail-closed mutation behavior through
+`load_all_for_update()`, owner fields, pinned/manual entries, export/backup
+compatibility, and a keyword fallback. `src/memory_vector.MemoryVectorStore`
+adds optional Chroma-backed similarity and must remain non-fatal when Chroma or
+embeddings are unavailable. The existing `src/memory_provider.MemoryProvider`
+is **not yet sufficient** for C4: it can filter by owner and carries optional
+session metadata, but has no first-class home, project, sensitivity, grant,
+retention, expiry, or provenance constraints. It must not be treated as a
+scoped AgentMemory adapter yet.
+
+Consequently, the next C4 change is an owner-confirmed, read-only inventory and
+export/backup report. It must report counts, validity, owner/scope coverage and
+provider availability without leaking memory text into a browser response. No
+legacy record, vector collection, or AgentMemory backend may be read for
+migration, re-indexed, or written until that inventory is explicitly approved.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to
