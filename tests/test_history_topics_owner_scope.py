@@ -19,19 +19,14 @@ This test pins the data flow by:
       zero topics (or an empty result) when owner is None/empty,
       because no caller has identified themselves.
 
-  (2) Driving the actual route through FastAPI's TestClient with an
-      AuthMiddleware stub that mimics the LOCALHOST_BYPASS path: the
-      request has no auth cookie, no bearer token, no internal-tool
-      header, but the middleware short-circuits BEFORE setting
-      `request.state.current_user`. The expected behavior is one of:
-          (a) 401 / 403 response, OR
-          (b) a response that only contains the requesting user's
-              topics (which for this anonymous caller is none).
+  (2) Calling the actual route handler with an unauthenticated
+      loopback-shaped request on a configured server. The route must reject
+      the request before it can aggregate topics.
 
 If the test FAILS, the bug is REAL. If the test PASSES, the claim
 is a FALSE POSITIVE.
 """
-import os
+import asyncio
 import sys
 import types
 from types import SimpleNamespace
@@ -141,66 +136,18 @@ def test_analyze_topics_with_owner_none_no_owner_attribute_session_also_safe():
 
 
 # ---------------------------------------------------------------------------
-# 2. End-to-end test through FastAPI TestClient with a stubbed
-#    AuthMiddleware that simulates the LOCALHOST_BYPASS branch.
+# 2. Route-boundary test with an unauthenticated loopback-shaped request.
 # ---------------------------------------------------------------------------
 
-
-def _build_app_with_loopback_bypass(session_manager):
+def test_route_rejects_unauthenticated_loopback_when_bypass_is_off(monkeypatch):
     """
-    Build a minimal FastAPI app that:
-      * mounts the real `setup_history_routes(session_manager)` router,
-      * installs a stub `AuthMiddleware` whose `dispatch` reproduces
-        the LOCALHOST_BYPASS branch from app.py:248-249 (return from
-        dispatch *before* setting `request.state.current_user`),
-      * uses an `AuthManager` whose `is_configured` is True so the
-        non-loopback / non-bypass path would otherwise 401.
-
-    The result: the middleware trusts the request as loopback-bypass
-    but leaves `request.state.current_user` unset. The route then
-    reads `get_current_user(request)` -> None, which `analyze_topics`
-    treats as 'no filter' and returns cross-tenant topics.
+    Invoke the real route handler with a request that has no current user.
+    A configured server must reject it rather than hand an ownerless request
+    to topic analysis.  Calling the handler directly keeps this route-boundary
+    test independent of TestClient's background portal lifecycle.
     """
-    from fastapi import FastAPI
+    from fastapi import HTTPException
     from routes.history_routes import setup_history_routes
-
-    app = FastAPI()
-    app.include_router(setup_history_routes(session_manager))
-
-    # Stub AuthManager so app.state.auth_manager.is_configured is True.
-    auth_mgr = MagicMock()
-    auth_mgr.is_configured = True
-    auth_mgr.users = {"alice": {}, "bob": {}, "carol": {}}
-    app.state.auth_manager = auth_mgr
-
-    # Stub BaseHTTPMiddleware that mirrors the loopback-bypass branch.
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.requests import Request as _Req
-
-    class LoopbackBypassMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            # Faithful reproduction of the LOCALHOST_BYPASS branch:
-            # `if LOCALHOST_BYPASS and _is_trusted_loopback(request):
-            #      return await call_next(request)`
-            # No `request.state.current_user = ...` is set.
-            return await call_next(request)
-
-    # Re-register as "AuthMiddleware" to mirror the prod class name and
-    # make the contract obvious to the reader.
-    class AuthMiddleware(LoopbackBypassMiddleware):
-        pass
-
-    app.add_middleware(AuthMiddleware)
-    return app
-
-
-def test_route_rejects_or_scopes_under_loopback_bypass():
-    """
-    Drive the real route via TestClient with a stubbed AuthMiddleware
-    that mimics LOCALHOST_BYPASS: no `current_user` is set. The
-    endpoint must NOT return cross-tenant topics in the response.
-    """
-    from fastapi.testclient import TestClient
 
     sessions = {
         "s-alice-1": _make_session(
@@ -216,27 +163,23 @@ def test_route_rejects_or_scopes_under_loopback_bypass():
             [{"role": "user", "content": "Family dinner planning tonight."}],
         ),
     }
-    sm = _stub_session_manager(sessions)
-    app = _build_app_with_loopback_bypass(sm)
-    client = TestClient(app)
-
-    # No auth cookie, no bearer token, no internal-tool header. Pretend
-    # to come from a real local client. The middleware bypasses auth
-    # exactly as app.py:248 would.
-    resp = client.get(
-        "/api/conversations/topics",
-        headers={"host": "127.0.0.1:8000"},
+    auth_mgr = MagicMock(is_configured=True)
+    request = SimpleNamespace(
+        state=SimpleNamespace(),
+        app=SimpleNamespace(state=SimpleNamespace(auth_manager=auth_mgr)),
+        client=SimpleNamespace(host="127.0.0.1"),
+    )
+    monkeypatch.delenv("LOCALHOST_BYPASS", raising=False)
+    router = setup_history_routes(_stub_session_manager(sessions))
+    endpoint = next(
+        route.endpoint
+        for route in router.routes
+        if route.path == "/api/conversations/topics" and "GET" in route.methods
     )
 
-    # Behavior under the fix: the route uses `require_user` which raises
-    # 401 when auth_manager is configured and the caller is anonymous,
-    # which is the state this test sets up. The cross-tenant leak path
-    # (200 with topics from other owners) must be closed.
-    assert resp.status_code == 401, (
-        f"Expected 401 from /api/conversations/topics under the loopback "
-        f"bypass + configured auth_manager; got {resp.status_code}. "
-        f"body={resp.text!r}"
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(endpoint(request))
+    assert exc_info.value.status_code == 401
 
 
 def test_route_data_flow_on_paper():
