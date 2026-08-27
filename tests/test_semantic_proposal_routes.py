@@ -506,6 +506,7 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
         "assignment_staged_count": 0,
         "assignment_unavailable_count": 0,
         "assignment_unresolved_count": 0,
+        "migration_applied_count": 0,
         "migration_started": False,
     }
     assert "session" not in str(review_summary)
@@ -531,6 +532,7 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     assert staged["assignment_unavailable_count"] == 0
     assert staged["assignment_unresolved_count"] == 2
     assert staged["journal_entry_count"] == 1
+    assert staged["migration_applied_count"] == 0
     assert "prefers concise" not in str(staged)
     assert "source-two" not in str(staged)
     with pytest.raises(HTTPException) as stale:
@@ -542,6 +544,70 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
             SimpleNamespace(),
         )
     assert stale.value.status_code == 409
+
+    apply = _endpoint(router, "/api/companion/memory/legacy-migration-reviews/{review_id}/apply", "POST")
+    applied = apply(
+        review_id,
+        route_module.LegacyMigrationApply(
+            expected_revision=2, confirm_additive_local_migration=True,
+        ),
+        SimpleNamespace(),
+    )
+    assert applied["status"] == "migration_applied"
+    assert applied["revision"] == 3
+    assert applied["migration_started"] is True
+    assert applied["migration_applied_count"] == 2
+    assert applied["journal_entry_count"] == 2
+    assert "prefers concise" not in str(applied)
+    db = route_module.SessionLocal()
+    migrated = db.query(ScopedMemoryRecord).filter(
+        ScopedMemoryRecord.owner == "alice",
+        ScopedMemoryRecord.source_kind == "legacy_native_migration",
+    ).all()
+    assert len(migrated) == 2
+    assert {record.scope_kind for record in migrated} == {"personal", "project"}
+    assert {record.project_id for record in migrated} == {None, "dust"}
+    db.close()
+
+    rollback = _endpoint(router, "/api/companion/memory/legacy-migration-reviews/{review_id}/rollback", "POST")
+    personal_record = next(record for record in migrated if record.scope_kind == "personal")
+    personal_record_id = personal_record.id
+    db = route_module.SessionLocal()
+    personal_record = db.query(ScopedMemoryRecord).filter(
+        ScopedMemoryRecord.id == personal_record_id,
+    ).one()
+    personal_record.content = "tampered after migration"
+    db.commit(); db.close()
+    with pytest.raises(HTTPException) as rollback_conflict:
+        rollback(
+            review_id,
+            route_module.LegacyMigrationRollback(expected_revision=3),
+            SimpleNamespace(),
+        )
+    assert rollback_conflict.value.status_code == 409
+    db = route_module.SessionLocal()
+    assert db.query(ScopedMemoryRecord).filter(
+        ScopedMemoryRecord.source_kind == "legacy_native_migration",
+    ).count() == 2
+    personal_record = db.query(ScopedMemoryRecord).filter(
+        ScopedMemoryRecord.id == personal_record_id,
+    ).one()
+    personal_record.content = "prefers concise updates"
+    db.commit(); db.close()
+    rolled_back = rollback(
+        review_id,
+        route_module.LegacyMigrationRollback(expected_revision=3),
+        SimpleNamespace(),
+    )
+    assert rolled_back["status"] == "migration_rolled_back"
+    assert rolled_back["revision"] == 4
+    assert rolled_back["migration_started"] is False
+    assert rolled_back["journal_entry_count"] == 3
+    db = route_module.SessionLocal()
+    assert db.query(ScopedMemoryRecord).filter(
+        ScopedMemoryRecord.source_kind == "legacy_native_migration",
+    ).count() == 0
+    db.close()
 
     repeated = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")(
         route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace(),

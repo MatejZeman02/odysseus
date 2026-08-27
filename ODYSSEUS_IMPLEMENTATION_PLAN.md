@@ -875,9 +875,11 @@ not exercised by this slice and is deliberately tracked next.
   review record, bound to that backup digest, with opaque candidates and an
   empty rollback journal. The owner may stage only still-valid exact-home
   assignments; unscoped/duplicate/changing-home entries remain unresolved and
-  no legacy entry is read or migrated.
-- [ ] After the owner reviews those staged assignments, add any remaining
-  explicit scope choices and only then consider a provider switch.
+  no legacy entry is read or migrated. A separate explicit action may
+  additively copy those exact-home entries into encrypted local scoped recall,
+  retaining native memory unchanged and allowing conditional rollback.
+- [ ] After the owner reviews unresolved entries, add any remaining explicit
+  scope choices and only then consider an AgentMemory provider switch.
 
 **Checkpoint G2:** obtain explicit approval before reading the owner's real
 memory stores, changing a writer, or migrating memory data.

@@ -356,6 +356,16 @@ record, select AgentMemory, or change a native-memory writer. Unscoped,
 duplicate, deleted-home, and changed-home candidates remain unresolved for a
 later separately reviewed choice.
 
+After staging, a distinct owner confirmation may apply only those exact-home
+entries to the encrypted local scoped index as `legacy_native_migration`
+records. It re-reads the digest-bound backup inside the server transaction,
+recomputes every opaque candidate token, rechecks the current home binding,
+and inserts every record atomically. Native `memory.json` remains untouched;
+no AgentMemory writer is selected. The review journal records only counts and
+recording time. A conditional rollback removes only records whose stored
+provenance and content hash still match the review; a changed/missing record
+fails closed instead of being overwritten.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to

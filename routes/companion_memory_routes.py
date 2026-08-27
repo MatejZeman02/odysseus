@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from core.database import (
     ChatMessage as DbChatMessage, ContinuityArtifact, LegacyMemoryMigrationReview,
-    Project, Session as DbSession, SessionLocal, utcnow_naive,
+    Project, ScopedMemoryRecord, Session as DbSession, SessionLocal, utcnow_naive,
 )
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
@@ -131,6 +131,18 @@ class LegacyMigrationStageAssignments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
     accept_exact_provenance: bool
+
+
+class LegacyMigrationApply(BaseModel):
+    """Apply an already-staged review to the local scoped provider only."""
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    confirm_additive_local_migration: bool
+
+
+class LegacyMigrationRollback(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
 
 
 class ArtifactUndo(BaseModel):
@@ -598,6 +610,32 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             raise FileNotFoundError("migration review was not found")
         return review
 
+    def _legacy_candidate_material(*, backup_id: str, ordinal: int, entry: object, owner: str) -> tuple[str, str]:
+        """Recreate the opaque candidate token and bounded local recall text.
+
+        This function is used only inside an explicit apply transaction. Its
+        return value never reaches the browser; the token makes it impossible
+        to substitute a different backup entry after the review was staged.
+        """
+        if not isinstance(entry, dict) or entry.get("owner") != owner:
+            raise ValueError("owner-private backup integrity check failed")
+        raw_text = entry.get("text")
+        category = entry.get("category", "fact")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            raise ValueError("owner-private backup integrity check failed")
+        if len(raw_text.encode("utf-8")) > 512 * 1024:
+            raise ValueError("owner-private backup integrity check failed")
+        if not isinstance(category, str) or len(category) > 64:
+            raise ValueError("owner-private backup integrity check failed")
+        normalized = " ".join(raw_text.split())[:4000]
+        fingerprint = hashlib.sha256((category + "\x00" + raw_text.strip()).encode("utf-8")).hexdigest()
+        token = hashlib.sha256(
+            f"{backup_id}\x00{ordinal}\x00{fingerprint}".encode("utf-8")
+        ).hexdigest()[:32]
+        if not normalized:
+            raise ValueError("owner-private backup integrity check failed")
+        return token, normalized
+
     def _stage_exact_home_assignments(
         *, owner: str, review_id: str, expected_revision: int,
     ) -> dict:
@@ -689,6 +727,193 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         finally:
             db.close()
 
+    def _apply_staged_legacy_migration(
+        *, owner: str, review_id: str, expected_revision: int,
+    ) -> dict:
+        """Add reviewed exact-home entries to local scoped recall atomically.
+
+        Native legacy memory is deliberately left untouched. The transaction
+        only creates encrypted ``legacy_native_migration`` records in the
+        already active local scoped provider; a later external-provider choice
+        is a separate decision. Every staged record is re-bound to the backup
+        digest and its current owner/home before the first insert.
+        """
+        db = SessionLocal()
+        try:
+            review = _load_legacy_migration_review_for_update(
+                db=db, owner=owner, review_id=review_id,
+            )
+            if review.revision != expected_revision:
+                raise ArtifactConflict("This migration review changed; reload it before applying")
+            if review.status != "assignments_staged":
+                raise MemoryScopeError("Stage exact-home assignments before applying this migration")
+            try:
+                plan = json.loads(review.plan_json)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("migration review could not be read safely") from exc
+            if not isinstance(plan, dict) or plan.get("schema_version") != 1:
+                raise ValueError("migration review could not be read safely")
+            backup_id = plan.get("backup_id")
+            if not isinstance(backup_id, str) or backup_id != review.backup_id:
+                raise ValueError("migration review could not be read safely")
+            entries = _read_legacy_backup(owner=owner, backup_id=backup_id)
+            candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else None
+            if candidates is None:
+                raise ValueError("migration review could not be read safely")
+            sessions = {
+                row.id: row for row in db.query(DbSession).filter(DbSession.owner == owner).all()
+            }
+            admitted: list[tuple[dict, str, str, DbSession]] = []
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                assignment = candidate.get("assignment")
+                if not isinstance(assignment, dict):
+                    continue
+                ordinal = candidate.get("ordinal")
+                if not isinstance(ordinal, int) or ordinal < 0 or ordinal >= len(entries):
+                    raise ValueError("migration review no longer matches its backup")
+                token, content = _legacy_candidate_material(
+                    backup_id=backup_id, ordinal=ordinal, entry=entries[ordinal], owner=owner,
+                )
+                if token != candidate.get("candidate_token"):
+                    raise ValueError("migration review no longer matches its backup")
+                source = sessions.get(assignment.get("source_session_id"))
+                scope_kind = assignment.get("scope_kind")
+                project_id = assignment.get("project_id")
+                valid = (
+                    assignment.get("kind") == "exact_source_home_v1"
+                    and source is not None
+                    and scope_kind in {"personal", "project"}
+                    and (source.scope_kind or "general") == scope_kind
+                    and source.id == candidate.get("source_session_id")
+                    and source.id == assignment.get("source_session_id")
+                    and (
+                        (scope_kind == "personal" and project_id is None)
+                        or (scope_kind == "project" and project_id and source.project_id == project_id)
+                    )
+                )
+                if not valid:
+                    raise MemoryScopeError("A staged source home changed; review assignments again before applying")
+                existing = db.query(ScopedMemoryRecord).filter(
+                    ScopedMemoryRecord.owner == owner,
+                    ScopedMemoryRecord.scope_kind == scope_kind,
+                    ScopedMemoryRecord.project_id == project_id,
+                    ScopedMemoryRecord.source_kind == "legacy_native_migration",
+                    ScopedMemoryRecord.source_id == token,
+                ).first()
+                if existing:
+                    raise ArtifactConflict("A staged legacy record already exists; reload the migration review")
+                admitted.append((candidate, token, content, source))
+            if not admitted:
+                raise MemoryScopeError("No exact-home assignments are available to migrate")
+            for candidate, token, content, source in admitted:
+                assignment = candidate["assignment"]
+                record = ScopedMemoryRecord(
+                    id=uuid.uuid4().hex,
+                    owner=owner,
+                    scope_kind=assignment["scope_kind"],
+                    project_id=assignment["project_id"],
+                    session_id=source.id,
+                    source_kind="legacy_native_migration",
+                    source_id=token,
+                    content=content,
+                    sensitivity="normal",
+                )
+                db.add(record)
+                candidate["migration"] = {
+                    "record_id": record.id,
+                    "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                }
+            journal = json.loads(review.journal_json or "[]")
+            if not isinstance(journal, list):
+                raise ValueError("migration review could not be read safely")
+            review.revision += 1
+            review.status = "migration_applied"
+            journal.append({
+                "kind": "local_scoped_migration_applied",
+                "revision": review.revision,
+                "record_count": len(admitted),
+                "recorded_at": utcnow_naive().isoformat(),
+            })
+            plan["migration_summary"] = {
+                "provider": "local-scoped-index",
+                "applied_count": len(admitted),
+            }
+            review.plan_json = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            review.journal_json = json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            db.commit()
+            return _legacy_migration_review_payload(review)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def _rollback_staged_legacy_migration(
+        *, owner: str, review_id: str, expected_revision: int,
+    ) -> dict:
+        """Remove only untouched records created by this exact review."""
+        db = SessionLocal()
+        try:
+            review = _load_legacy_migration_review_for_update(
+                db=db, owner=owner, review_id=review_id,
+            )
+            if review.revision != expected_revision:
+                raise ArtifactConflict("This migration review changed; reload it before rolling back")
+            if review.status != "migration_applied":
+                raise MemoryScopeError("Only an applied migration can be rolled back")
+            try:
+                plan = json.loads(review.plan_json)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("migration review could not be read safely") from exc
+            candidates = plan.get("candidates") if isinstance(plan, dict) else None
+            if not isinstance(candidates, list):
+                raise ValueError("migration review could not be read safely")
+            removable: list[ScopedMemoryRecord] = []
+            for candidate in candidates:
+                if not isinstance(candidate, dict) or not isinstance(candidate.get("migration"), dict):
+                    continue
+                assignment = candidate.get("assignment")
+                migration = candidate["migration"]
+                if not isinstance(assignment, dict):
+                    raise ValueError("migration review could not be read safely")
+                record = db.query(ScopedMemoryRecord).filter(
+                    ScopedMemoryRecord.id == migration.get("record_id"),
+                    ScopedMemoryRecord.owner == owner,
+                    ScopedMemoryRecord.scope_kind == assignment.get("scope_kind"),
+                    ScopedMemoryRecord.project_id == assignment.get("project_id"),
+                    ScopedMemoryRecord.source_kind == "legacy_native_migration",
+                    ScopedMemoryRecord.source_id == candidate.get("candidate_token"),
+                ).first()
+                if not record or hashlib.sha256(record.content.encode("utf-8")).hexdigest() != migration.get("content_sha256"):
+                    raise ArtifactConflict("A migrated record changed or is missing; rollback will not overwrite it")
+                removable.append(record)
+            if not removable:
+                raise MemoryScopeError("No migrated records are available to roll back")
+            for record in removable:
+                db.delete(record)
+            journal = json.loads(review.journal_json or "[]")
+            if not isinstance(journal, list):
+                raise ValueError("migration review could not be read safely")
+            review.revision += 1
+            review.status = "migration_rolled_back"
+            journal.append({
+                "kind": "local_scoped_migration_rolled_back",
+                "revision": review.revision,
+                "record_count": len(removable),
+                "recorded_at": utcnow_naive().isoformat(),
+            })
+            review.plan_json = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            review.journal_json = json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            db.commit()
+            return _legacy_migration_review_payload(review)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def _legacy_migration_review_payload(review: LegacyMemoryMigrationReview) -> dict:
         """Project a private review row to its aggregate browser-safe surface."""
         try:
@@ -707,6 +932,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         rejected = plan.get("rejected") if isinstance(plan.get("rejected"), dict) else {}
         candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
         assignment = plan.get("assignment_summary") if isinstance(plan.get("assignment_summary"), dict) else {}
+        migration = plan.get("migration_summary") if isinstance(plan.get("migration_summary"), dict) else {}
 
         def bounded_count(value: object) -> int:
             try:
@@ -737,7 +963,8 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             "assignment_staged_count": bounded_count(assignment.get("staged_count")),
             "assignment_unavailable_count": bounded_count(assignment.get("unavailable_count")),
             "assignment_unresolved_count": bounded_count(assignment.get("unresolved_count")),
-            "migration_started": False,
+            "migration_applied_count": bounded_count(migration.get("applied_count")),
+            "migration_started": review.status == "migration_applied",
         }
 
     def _legacy_migration_review_summary(*, owner: str, review_id: str) -> dict:
@@ -1090,6 +1317,52 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory assignment staging failed")
             raise HTTPException(503, "Migration assignments could not be staged safely. No data was changed.") from exc
+
+    @router.post("/memory/legacy-migration-reviews/{review_id}/apply")
+    def legacy_memory_apply(
+        review_id: str, payload: LegacyMigrationApply, request: Request,
+    ):
+        """Owner-triggered additive migration into local scoped recall."""
+        if not payload.confirm_additive_local_migration:
+            raise HTTPException(422, "Confirm the additive local migration before applying")
+        try:
+            return _apply_staged_legacy_migration(
+                owner=_owner(request), review_id=review_id,
+                expected_revision=payload.expected_revision,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Migration review was not found.") from exc
+        except ArtifactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except MemoryScopeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory migration apply failed")
+            raise HTTPException(503, "Migration could not be applied safely. Native memory was not changed.") from exc
+
+    @router.post("/memory/legacy-migration-reviews/{review_id}/rollback")
+    def legacy_memory_rollback(
+        review_id: str, payload: LegacyMigrationRollback, request: Request,
+    ):
+        """Owner-triggered conditional removal of local records made by apply."""
+        try:
+            return _rollback_staged_legacy_migration(
+                owner=_owner(request), review_id=review_id,
+                expected_revision=payload.expected_revision,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Migration review was not found.") from exc
+        except ArtifactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except MemoryScopeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory migration rollback failed")
+            raise HTTPException(503, "Migration rollback could not be completed safely. Native memory was not changed.") from exc
 
     @router.put("/memory/projects/{project_id}/relations")
     def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):

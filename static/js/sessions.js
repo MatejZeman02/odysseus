@@ -364,30 +364,79 @@ async function openCompanionMemory(meta, initialTab = 'context') {
           ? `Saved review: ${staged} exact-home assignments staged · ${review.assignment_unresolved_count || 0} remain unresolved · no migration started.`
           : `Saved review: ${review.candidate_count || 0} candidates · ${review.status || 'review ready'} · no migration started.`;
         reviewHistory.replaceChildren(summary);
-        if (review.status !== 'review_ready') return;
-        const prompt = document.createElement('p'); prompt.className = 'companion-memory-help';
-        prompt.textContent = 'You may stage only records whose original owner home still matches. This creates no provider records and leaves unresolved entries untouched.';
-        const button = document.createElement('button'); button.type = 'button';
-        button.textContent = 'Stage exact-home assignments';
-        button.addEventListener('click', async () => {
-          button.disabled = true;
-          try {
-            const response = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/stage-exact-assignments`, {
-              method: 'POST', credentials: 'same-origin', cache: 'no-store',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({expected_revision: Number(review.revision), accept_exact_provenance: true}),
-            });
-            const updated = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(updated.detail || 'Could not stage exact-home assignments');
-            summary.textContent = `Saved review: ${updated.assignment_staged_count || 0} exact-home assignments staged · ${updated.assignment_unresolved_count || 0} remain unresolved · no migration started.`;
-            prompt.remove(); button.remove();
-            uiModule.showToast?.('Exact-home assignments were staged. No legacy memory was migrated.', 4200);
-          } catch (error) {
-            uiModule.showError?.(error.message || 'Could not stage exact-home assignments');
-            button.disabled = false;
-          }
-        });
-        reviewHistory.append(prompt, button);
+        if (review.status === 'review_ready') {
+          const prompt = document.createElement('p'); prompt.className = 'companion-memory-help';
+          prompt.textContent = 'You may stage only records whose original owner home still matches. This creates no provider records and leaves unresolved entries untouched.';
+          const button = document.createElement('button'); button.type = 'button';
+          button.textContent = 'Stage exact-home assignments';
+          button.addEventListener('click', async () => {
+            button.disabled = true;
+            try {
+              const response = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/stage-exact-assignments`, {
+                method: 'POST', credentials: 'same-origin', cache: 'no-store',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({expected_revision: Number(review.revision), accept_exact_provenance: true}),
+              });
+              const updated = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(updated.detail || 'Could not stage exact-home assignments');
+              summary.textContent = `Saved review: ${updated.assignment_staged_count || 0} exact-home assignments staged · ${updated.assignment_unresolved_count || 0} remain unresolved · no migration started.`;
+              prompt.remove(); button.remove();
+              uiModule.showToast?.('Exact-home assignments were staged. No legacy memory was migrated.', 4200);
+            } catch (error) {
+              uiModule.showError?.(error.message || 'Could not stage exact-home assignments');
+              button.disabled = false;
+            }
+          });
+          reviewHistory.append(prompt, button);
+        } else if (review.status === 'assignments_staged') {
+          const prompt = document.createElement('p'); prompt.className = 'companion-memory-help';
+          prompt.textContent = 'Apply adds the staged entries only to encrypted local scoped recall. Your native legacy memory remains unchanged; you can roll this local addition back while its records remain unchanged.';
+          const button = document.createElement('button'); button.type = 'button';
+          button.textContent = `Migrate ${review.assignment_staged_count || 0} exact-home entries`;
+          button.addEventListener('click', async () => {
+            if (!window.confirm('Add the staged entries to local scoped recall? Native legacy memory will not be changed.')) return;
+            button.disabled = true;
+            try {
+              const response = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/apply`, {
+                method: 'POST', credentials: 'same-origin', cache: 'no-store',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({expected_revision: Number(review.revision), confirm_additive_local_migration: true}),
+              });
+              const updated = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(updated.detail || 'Could not apply the local migration');
+              summary.textContent = `Saved review: ${updated.migration_applied_count || 0} entries added to local scoped recall. Native legacy memory remains unchanged.`;
+              prompt.remove(); button.remove();
+              uiModule.showToast?.('Local scoped migration applied. Native legacy memory was not changed.', 4200);
+            } catch (error) {
+              uiModule.showError?.(error.message || 'Could not apply the local migration');
+              button.disabled = false;
+            }
+          });
+          reviewHistory.append(prompt, button);
+        } else if (review.status === 'migration_applied') {
+          const button = document.createElement('button'); button.type = 'button';
+          button.textContent = 'Roll back local migration';
+          button.addEventListener('click', async () => {
+            if (!window.confirm('Remove only the local scoped records created by this migration? Native legacy memory remains unchanged.')) return;
+            button.disabled = true;
+            try {
+              const response = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/rollback`, {
+                method: 'POST', credentials: 'same-origin', cache: 'no-store',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({expected_revision: Number(review.revision)}),
+              });
+              const updated = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(updated.detail || 'Could not roll back the local migration');
+              summary.textContent = 'Saved review: local scoped records were rolled back. Native legacy memory remains unchanged.';
+              button.remove();
+              uiModule.showToast?.('Local scoped migration rolled back. Native legacy memory was not changed.', 4200);
+            } catch (error) {
+              uiModule.showError?.(error.message || 'Could not roll back the local migration');
+              button.disabled = false;
+            }
+          });
+          reviewHistory.append(button);
+        }
       })
       .catch(() => {});
   }
