@@ -1,4 +1,5 @@
 import asyncio
+import re
 from pathlib import Path
 
 from src.computer_sandbox import SandboxRunResult
@@ -62,3 +63,14 @@ def test_sandbox_read_is_registered_and_requires_a_capability_gate():
     assert any(item["function"]["name"] == "sandbox_read" for item in FUNCTION_TOOL_SCHEMAS)
     source = Path("routes/chat_routes.py").read_text(encoding="utf-8")
     assert 'disabled_tools.add("sandbox_read")' in source
+
+
+def test_sandbox_read_is_part_of_file_intent_tool_selection_and_prompt_help():
+    source = Path("src/agent_loop.py").read_text(encoding="utf-8")
+    file_tools = re.search(r'"files": \{(?P<tools>[^}]*)\}', source)
+    assert file_tools is not None
+    assert '"sandbox_read"' in file_tools.group("tools")
+    assert '"sandbox_read": "- ```sandbox_read```' in source
+
+    index = Path("src/tool_index.py").read_text(encoding="utf-8")
+    assert '"sandbox_read": "Run a short read-only command pipeline' in index
