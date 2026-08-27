@@ -1,9 +1,11 @@
 # Odysseus G2D Execution Plan — Sandboxed Computer Help
 
-**Status:** G2D-0/1 foundations and the non-executing D2 continuity layer are
-implemented. Command assistance waits for the configured-provider C1/C2
-canary, a reviewed digest-pinned sandbox image, and a passing containment
-qualification report.
+**Status:** the G2D-0 broker implementation and G2D-1 fixed-observation path
+exist, but the containment gate is **not qualified on this host**: the current
+Podman runtime is not rootless and no reviewed digest-pinned image is
+configured locally. The non-executing D2 continuity layer is implemented.
+Command assistance waits for the configured-provider C1/C2 canary, a reviewed
+digest-pinned sandbox image, and a passing containment qualification report.
 
 **Depends on:** G2C C1/C2 validated checkpoints and transfer semantics, plus a
 command-only, rootless Podman execution broker. The rejected Qwen `0.21.3`
@@ -33,12 +35,14 @@ The intended experience is closer to Codex than a command-confirmation loop:
 
 ## Current implementation and sequencing
 
-G2D-0/1 are complete: Odysseus has a server-owned safe diagnostic snapshot and
-a rootless-Podman, command-only read-broker qualification contract. Live
-command admission remains disabled until the image and qualification evidence
-exist. G2D-2 private incident records, long-paste references, verified device
-context, and reviewed create/revision cards are present. The first D3
-configuration primitive is now present: Computer Help can register
+Odysseus has the G2D-0 server-owned, command-only Podman broker *code* and a
+fixed G2D-1 safe diagnostic snapshot. Neither makes `computer_assist` ready:
+the local runtime must still prove rootless Podman, a reviewed digest-pinned
+image, and hostile-fixture containment. Live command admission remains
+disabled until that evidence exists. G2D-2 private incident records,
+long-paste references, verified device context, and reviewed create/revision
+cards are present. The first D3 configuration primitive is now present:
+Computer Help can register
 owner-selected, dedicated directories as encrypted task-root records.
 Registration validates an existing current-user folder under the home directory,
 rejects broad/protected credential locations, returns no absolute path to the
@@ -115,14 +119,19 @@ only.
 
 ### `computer_observe`
 
-Default profile. It may inspect server-owned snapshots of:
+Default profile. The currently implemented server-owned snapshots are limited
+to:
 
-- OS, kernel, CPU, memory, GPU, displays, storage, mounts, and temperatures;
-- running processes and bounded process metadata;
-- systemd unit status and journal excerpts;
-- network interfaces, routes, DNS configuration, and listening-port metadata;
-- installed package inventory and available user-level tools;
-- selected configuration files after path and secret filtering.
+- OS, kernel, architecture, and logical CPU count;
+- bounded CPU topology;
+- mounted filesystem capacity (excluding temporary filesystem mounts);
+- display-adapter inventory lines; and
+- network interface names only.
+
+It does **not** yet collect process data, journal excerpts, routes, DNS,
+listening ports, temperatures, installed packages, configuration files, or
+arbitrary host files. Those are later reviewed source classes, not a promise of
+the current broker.
 
 These reads require no per-command approval. The Process UI still records what
 was inspected and from which safe source class.
@@ -242,10 +251,11 @@ from the incident instead of being copied into every turn.
 
 Add a `DeviceProfileV1` record containing verified, non-secret, relatively
 stable facts such as GPU model, driver family, OS version, filesystem layout,
-and recurring constraints. The first persistence slice is complete: every
-safe diagnostic refresh writes both the existing private Markdown document and
-this typed, hash-linked record, and the continuity compiler injects it only
-into that Computer Help home. Computer incident and paste artifacts likewise
+and recurring constraints. The first persistence slice is complete for the
+implemented Computer Help observation categories: its explicit safe diagnostic
+refresh writes both the existing private Markdown document and this typed,
+hash-linked record, and the continuity compiler injects it only into that
+Computer Help home. Computer incident and paste artifacts likewise
 appear as a private index, with full contents mounted only when the owner
 names one in the request. This compiled context is used by both native Computer
 Help and its future contained worker; it is explicitly labelled as a server
@@ -288,16 +298,17 @@ steps that the executor cannot perform.
 
 ## Delivery gates
 
-1. **G2D-0 — implement and qualify containment first.** Build the
-   server-owned rootless Podman command broker, then run hostile probes against
-   that actual broker. A failure ends before any Computer Help execution; it
+1. **G2D-0 — qualify containment first.** The server-owned Podman broker and
+   hostile-probe contract exist, but the current host has not passed them.
+   Configure rootless Podman and a reviewed digest-pinned image, then run the
+   actual qualification. A failure ends before any Computer Help execution; it
    does not produce a weaker executor. The Codex Desktop sandbox is a product
    implementation rather than an embeddable Odysseus dependency, so the
    compatible boundary is specified, owned, and tested here.
-2. **G2D-1 — observe.** After G2D-0 has a passing qualification report,
-   implement the read-only host observation broker,
-   `computer_observe`, Process records, and safe diagnostic summaries. This is
-   the first independently useful release.
+2. **G2D-1 — observe.** The fixed `computer_observe` broker, Process records,
+   and safe diagnostic summaries are implemented independently of task
+   execution. Expand its reviewed source classes only with matching sanitizing
+   tests; do not mistake it for a generic shell.
 3. **G2D-2 — remember the work.** Add incident artifacts, `DeviceProfileV1`,
    restart-safe task state, and long-paste references. A failed owner step
    updates the same incident instead of restarting the conversation.
