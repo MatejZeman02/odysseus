@@ -278,7 +278,7 @@ class ReadOnlyScopedTurnService:
         if proposal_mode:
             prompt = f"{prompt}\n\n{proposal_instructions()}"
         workspace = Path(scope.workspace_root)
-        before = snapshot_workspace(workspace)
+        before = None
 
         bridge = self.bridge_factory()
         route = bridge.issue_route(
@@ -334,6 +334,11 @@ class ReadOnlyScopedTurnService:
                 if inspect.isawaitable(result):
                     await result
         try:
+            # This lives inside the failure/persistence envelope.  A project
+            # path can disappear or become unsafe after scope resolution; that
+            # must become a durable `workspace_changed` Process outcome, not
+            # an unclassified internal error after the user message was saved.
+            before = snapshot_workspace(workspace)
             bridge_url = await bridge_runtime.start()
             await supervisor.start(
                 workspace_root=workspace, bridge_url=bridge_url,
@@ -358,8 +363,17 @@ class ReadOnlyScopedTurnService:
                 teardown_error = teardown_error or exc
             # Check even on cancellation/failure: a failure must never hide a
             # workspace mutation behind the original worker exception.
-            after = snapshot_workspace(workspace)
-            workspace_unchanged = after == before
+            if before is None:
+                workspace_unchanged = False
+            else:
+                try:
+                    after = snapshot_workspace(workspace)
+                    workspace_unchanged = after == before
+                except BaseException:
+                    # Never persist raw path/OS details from a failed integrity
+                    # check.  The stable failure below explains the safe next
+                    # step to the owner.
+                    workspace_unchanged = False
             # Patch proposals are generated inside the same physically
             # read-only Bubblewrap boundary as normal Qwen turns. An editor or
             # another agent may legitimately change this checkout while the

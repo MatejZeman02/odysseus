@@ -421,3 +421,57 @@ async def test_workspace_mutation_is_unsafe_and_never_persists_an_assistant(monk
 
     assert [(message.role, message.content) for message in session.history] == [("user", "question")]
     assert stopped == ["qwen", "bridge"]
+
+
+@pytest.mark.asyncio
+async def test_workspace_snapshot_failure_is_persisted_as_safe_integrity_failure(monkeypatch, tmp_path):
+    session = Session("s", "chat", "http://x", "m", owner="alice", scope_kind="project", project_id="p")
+
+    class Manager:
+        def get_session(self, _session_id): return session
+        def add_message(self, _session_id, message):
+            message.metadata = {**(message.metadata or {}), "_db_id": f"m{len(session.history) + 1}"}
+            session.history.append(message)
+
+    class Store:
+        def resolve_scope(self, **_kwargs): return ResolvedScope("alice", "s", "project", "p", str(tmp_path))
+        def latest_thread_checkpoint(self, **_kwargs): return None
+        def latest_project_brief(self, **_kwargs): return None
+
+    class Bridge:
+        app = object()
+        def issue_route(self, **_kwargs): return SimpleNamespace(token="ephemeral")
+
+    stopped = []
+    class BridgeRuntime:
+        def __init__(self, _bridge): pass
+        async def start(self): return "http://127.0.0.1:1/v1"
+        async def stop(self): stopped.append("bridge")
+
+    class Supervisor:
+        def __init__(self, **_kwargs): pass
+        async def start(self, **_kwargs): pass
+        async def run_prompt(self, _prompt, **_kwargs): return "unsafe answer", {}
+        async def stop(self): stopped.append("qwen")
+
+    snapshots = iter([("before",), ValueError("protected workspace is unavailable")])
+    def snapshot(_path):
+        value = next(snapshots)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    monkeypatch.setattr(service_module, "ModelBridgeRuntime", BridgeRuntime)
+    monkeypatch.setattr(service_module, "snapshot_workspace", snapshot)
+    service = ReadOnlyScopedTurnService(
+        Manager(), qwen_binary=Path("/qwen"), store=Store(),
+        bridge_factory=Bridge, supervisor_factory=Supervisor,
+    )
+
+    with pytest.raises(RuntimeError, match="protected project changed"):
+        await service.run(owner="alice", session_id="s", request="question", endpoint_id="e", model="m")
+
+    assert [(message.role, message.content) for message in session.history] == [("user", "question")]
+    assert session.history[0].metadata["qwen_process"]["failure_code"] == "workspace_changed"
+    assert session.history[0].metadata["qwen_process"]["workspace_unchanged"] is False
+    assert stopped == ["qwen", "bridge"]
