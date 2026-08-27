@@ -1,9 +1,11 @@
 # Odysseus G2D Execution Plan — Sandboxed Computer Help
 
-**Status:** Active — G2D-0/1 complete; G2D-2 private records implemented
+**Status:** Foundation implemented; task assistance waits for semantic
+continuity C1/C2
 
-**Depends on:** G2C scoped memory/artifacts and a command-only, rootless Podman
-execution broker. The rejected Qwen `0.21.3` Podman sandbox is not reused:
+**Depends on:** G2C C1/C2 validated checkpoints and transfer semantics, plus a
+command-only, rootless Podman execution broker. The rejected Qwen `0.21.3`
+Podman sandbox is not reused:
 Podman is only the candidate containment backend, never the Qwen runtime.
 
 **Parent plan:** [`ODYSSEUS_IMPLEMENTATION_PLAN.md`](ODYSSEUS_IMPLEMENTATION_PLAN.md)
@@ -26,6 +28,29 @@ The intended experience is closer to Codex than a command-confirmation loop:
   mutation are denied or require a separate explicit approval surface;
 - steps that require `sudo`, reboot, firmware UI, repartitioning, or physical
   action become persistent owner TODOs rather than repeated chat instructions.
+
+## Current implementation and sequencing
+
+G2D-0/1 are complete: Odysseus has a server-owned safe diagnostic snapshot and
+a qualified rootless-Podman, command-only read broker. G2D-2 private incident
+records and its basic UI are also present. These capabilities remain
+read-only/contained and do not grant native host shell access.
+
+The next Computer Help stage is intentionally **after G2C C1/C2**. A task plan,
+incident summary, completed-step record, and escalation TODO must be backed by
+validated, attributed semantic state—not the current heuristic checkpoint.
+After that dependency passes, implement in order:
+
+1. server-owned task roots and bounded task artifacts;
+2. scratch-only command execution plus deterministic process/output limits;
+3. separately qualified filtered egress for public repositories, package
+   indexes, and user-requested downloads;
+4. transaction-journaled, reversible writes inside selected roots;
+5. Review changes / Approve for me modes and persistent completed-step/TODO
+   records.
+
+No stage enables `sudo`, system-package installation, arbitrary host shell,
+protected-path writes, raw device access, or automatic reboot.
 
 ## Why a sandbox is mandatory
 

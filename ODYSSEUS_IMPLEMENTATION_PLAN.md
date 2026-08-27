@@ -1,9 +1,10 @@
 # Odysseus Lean MVP Implementation Plan
 
-**Status:** Companion continuity and reviewed project patches implemented;
-semantic continuity closure and normal-use stabilization active
+**Status:** Companion foundations, reviewed patches, scoped working artifacts,
+and the safe read-only broker are implemented. Semantic continuity integrity,
+conversation transfer, and provider-backed scoped recall are the active path.
 
-**Last reconciled with the implementation:** 2026-08-07
+**Last reconciled with the implementation:** 2026-08-27
 
 **Product specification:** [`ODYSSEUS_PRODUCT_SPEC.md`](ODYSSEUS_PRODUCT_SPEC.md)
 
@@ -51,13 +52,88 @@ Progress labels are deliberately non-temporal:
 |---|---|---|
 | G1 persistence/compiler and read-only Qwen harness | **Complete** | Scoped projects, raw history retained during compaction, artifact contracts/store, ModelBridge, pinned Qwen Serve, Bubblewrap, protected Dust canary |
 | G1.5 Companion homes and Qwen UI trial | **Complete** | Deterministic homes, projects/forks, Qwen streaming/Stop/Process/feedback, native comparison, desktop/mobile audit |
-| Semantic checkpoint and project-brief derivation | **Active** | Production turns currently write cursor-only checkpoints; no production path derives and writes `ProjectBriefV1` |
+| Semantic checkpoint and project-brief derivation | **Partial; must be replaced** | Production writes a source-linked checkpoint and brief using a conservative local heuristic. It is not a validated accepted/proposed-state writer and must not be treated as canonical truth. |
 | Normal-use stabilization | **Active** | Use real project conversations, record incorrect/unsafe answers and UI failures, fix regressions without broadening authority |
-| G2C scoped chat memory and working artifacts | **Planned** | Private chat checkpoints, project/personal home memory, permissioned Personal-to-project recall, and revisioned `.artifacts`; provider inventory must precede any writer switch |
-| Computer Help read-only diagnostics | **Deferred** | UI destination exists; Qwen diagnostics and host-read tooling do not |
-| G2A sandboxed project inspection | **Blocked by qualification** | Qwen 0.21.3 Podman shares model/Shell authority and mounts the workspace writable; `project_read` remains enforced pending a separate broker design |
+| G2C scoped chat memory and working artifacts | **Partial** | Local scope-filtered recall, Personal/project briefs, revisioned artifacts, long-paste capture, Documents bridge, and one-request project grants exist. Transfer/synthesis and AgentMemory migration do not. |
+| Computer Help read-only diagnostics | **Partial** | Safe snapshots, private incident records, and the qualified command-only Podman broker exist. User-level task execution, filtered egress, and reversible transactions do not. |
+| G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
 | Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
+
+## Ordered delivery roadmap
+
+The work must now proceed in this order. Earlier stages repair the durable
+state that every later feature depends on; later stages must not use an
+unvalidated checkpoint as their authority.
+
+### Stage C0 — Reconcile and contain the current heuristic
+
+**Outcome:** existing automatically generated checkpoints/briefs remain
+available for debugging but are explicitly labelled `heuristic`, never
+`accepted`, and cannot silently become project truth or personal facts.
+
+- add a derivation version/status and source span to every generated record;
+- migrate existing heuristic records additively, with no transcript rewrite;
+- render their provenance and limitations in the context disclosure;
+- preserve the current local fallback only as an availability aid when the
+  semantic derivation route is unavailable.
+
+### Stage C1 — Validated semantic checkpoints and home briefs
+
+**Outcome:** each compacted conversation can produce a bounded,
+schema-validated proposal separating objective, facts, decisions, proposals,
+failed approaches, questions, actions, and artifact references.
+
+- use a narrowly scoped derivation route with no more authority than the
+  originating chat;
+- make source message IDs/hashes, validation, conflict handling, cancellation,
+  and provider failure first-class;
+- require explicit owner promotion before a record becomes `accepted` project
+  or personal home state; unreviewed content remains derived/provisional;
+- prove a fresh worker and a project fork continue from automatic artifacts,
+  never a different chat's raw tail.
+
+### Stage C2 — Checkpoint transfer and synthesis, not transcript merge
+
+**Outcome:** a finished chat can transfer selected context safely.
+
+- attach an immutable checkpoint to another chat as a labeled read-only mount;
+- selectively promote owner-chosen items to Personal or project home state;
+- create a new synthesis chat from two attributed checkpoints;
+- keep raw transcript interleaving, automatic cross-home promotion, and true
+  project branch merging out of scope.
+
+### Stage C3 — Scoped retrieval provider adoption
+
+**Outcome:** AgentMemory, if retained after inventory, becomes a replaceable
+retrieval backend rather than project authority.
+
+- inventory, export, back up, and dry-run existing native/AgentMemory data;
+- add exact owner/home/project/sensitivity/grant filters and conformance tests;
+- index only approved semantic artifacts and selected artifact metadata;
+- retain the local exact index and make provider outage non-fatal;
+- migrate no real records or writer until the owner approves the inventory.
+
+### Stage C4 — Continuity and project UX closure
+
+**Outcome:** long-running work is understandable and remains fast.
+
+- paginate/virtualize chat history while retaining an explicit older-history
+  action;
+- add project home/related-project editing, `@project` resolution, and explicit
+  related-context caps;
+- provide a concise context inspector for checkpoint, brief, mounted transfer,
+  episodic hits, artifacts, and grants;
+- add native `> [!question]` rendering/export only if it proves useful in
+  normal use.
+
+### Stage D3 — Computer Help task assistance
+
+**Outcome:** begin only after C1/C2 establish trustworthy incident and task
+state. Extend the already-qualified observation/broker foundation with
+owner-selected task roots, filtered egress, transaction journals, rollback,
+and the bounded **Approve for me** mode described in G2D. No `sudo`, raw host
+shell, or system mutation is introduced by this stage.
 
 ## Goal
 
@@ -401,7 +477,7 @@ never part of the continuity contract.
 | One thread's working state | Odysseus `ThreadCheckpointV1` | Local, derived, and source-linked |
 | Shared cross-chat project notebook | Odysseus `ProjectBriefV1` | Compact derived artifact; not canon |
 | Companion identity and approved global profile | Existing personality/profile layer | Shared across chats; no project facts by default |
-| Personal/episodic recall | AgentMemory adapter | Rebuildable recall index, not project truth |
+| Personal/project episodic recall | Local `ScopedMemoryIndex`; AgentMemory later | Rebuildable, exact scope-filtered index; not project truth |
 | Legacy pinned/manual memories | Native `memory.json` during migration | Read/export/delete compatibility only after provider switch |
 | Active worker transcript and compaction | Qwen session/JSONL | Disposable execution state |
 
@@ -675,9 +751,13 @@ The owner kept Qwen and proceeded to the UI trial, completing the Qwen
 retention decision at checkpoint G1. Automatic semantic artifact derivation was
 not exercised by this slice and is deliberately tracked next.
 
-### Phase 2B — Semantic continuity closure — **Active**
+### Phase 2B — Semantic continuity closure — **Partial; replace heuristic**
 
-- [ ] Define a bounded, schema-validated derivation request for
+- [x] Write source-linked checkpoints and project/personal home briefs without
+  rewriting raw messages. Current values are heuristic only.
+- [ ] Add the C0 status/version migration so heuristic output is visible but
+  cannot become accepted truth.
+- [ ] Define the C1 bounded, schema-validated derivation request for
   `ThreadCheckpointV1`; retain all source message IDs/hashes and never rewrite
   raw messages if the derivation fails.
 - [ ] Select the derivation route according to the `[!QUESTION]` above, resolve
@@ -739,15 +819,13 @@ memory stores, changing a writer, or migrating memory data.
 - [ ] Add explicit related-project item/token caps before exposing multi-project
   selection in the UI.
 
-### Phase 5 — Read-only Fedora diagnosis — **Deferred**
+### Phase 5 — Computer Help foundation — **Partial; task assistance deferred**
 
-- [ ] Begin with captured `journalctl`/service/package fixtures.
-- [ ] Add a separately reviewed allowlist of read-only diagnostic operations in
-  stronger containment; do not reuse project Qwen's file-reading policy as host
-  authority.
-- [ ] Prove project and personal context are absent unless explicitly relevant.
-- [ ] Retain per-worker route tokens, one endpoint/model, bounded requests,
-  transparent streaming, redacted logs, teardown, and integrity checks.
+- [x] Add captured safe diagnostic snapshots/private incident records and a
+  separately qualified command-only Podman read broker.
+- [x] Keep project and Personal context absent unless explicitly admitted.
+- [ ] After C1/C2, add owner-selected task roots, scratch execution, filtered
+  egress, reversible transaction journals, and bounded Approve-for-me mode.
 
 **Checkpoint G3:** stop before any real file write, unrestricted shell,
 package/service change, privilege escalation, or host repair. Decide separately
@@ -769,18 +847,16 @@ whether those experiments require a snapshot-capable Fedora VM.
 | Milestone | State | Outcome |
 |---|---|---|
 | Continuity storage/compiler | **Complete** | Stable bindings, retained raw history, artifact contracts/store, deterministic context |
-| Semantic continuity derivation | **Active** | Production checkpoints need meaningful derived fields and production project-brief projection |
+| Semantic continuity derivation | **Partial** | Heuristic checkpoints/briefs are source-linked but not accepted/proposed-state truth; C0/C1 replace them |
 | Qwen + ModelBridge | **Complete** | Provider-neutral credential boundary, disposable Serve lifecycle, read-only Bubblewrap containment |
 | Protected Dust runtime proof | **Complete** | Cited conflict-aware answers, read-only integrity, fresh-worker raw-tail continuation, and scope isolation |
 | Companion UI trial | **Complete** | Testable homes/projects, Qwen/native comparison, Process visibility, feedback and lifecycle controls |
 | Normal-use stabilization | **Active** | Gather real failures and correct regressions without adding authority |
-| AgentMemory integration | **Deferred** | Requires a separate G2 decision and safe inventory/migration design |
-| Computer Help diagnostics | **Deferred** | Requires a separate tool/containment contract |
+| AgentMemory integration | **Deferred until C3** | Requires owner-approved inventory plus scope conformance and migration design |
+| Computer Help diagnostics | **Partial** | Observation, incident records, and broker complete; task assistance follows C1/C2 |
 
-> [!QUESTION]
-> After normal-use stabilization, which contained milestone should become
-> active first: scoped AgentMemory recall, read-only Computer Help diagnostics,
-> or the remaining long-history/related-project UI hardening?
+The ordered C0 → C4 → D3 roadmap above supersedes the former choice among
+unsequenced next milestones.
 
 > [!QUESTION]
 > In a project home, should selecting **Chat** while Qwen is enabled still use

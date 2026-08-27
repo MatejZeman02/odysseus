@@ -1,6 +1,7 @@
 # Odysseus G2C Execution Plan — Scoped Chat Memory and Working Artifacts
 
-**Status:** Draft for owner review
+**Status:** Active, partially implemented; semantic correctness and transfer
+work are next
 
 **Depends on:** the implemented Companion homes, non-destructive continuity
 store/compiler, and reviewed project-patch transaction boundary.
@@ -27,6 +28,28 @@ undifferentiated memory pool.
 This is not a transcript-merging milestone. Conversations remain separate;
 compact checkpoints, home briefs, and selected artifacts are mounted by
 reference when authorized.
+
+## Implemented foundation and correction
+
+The branch already implements a substantial part of this plan:
+
+- Personal and project homes compile private raw tails, scoped checkpoints,
+  briefs, artifact metadata, and a small exact scope-filtered recall index.
+- Personal-to-project grants are owner-scoped, time-limited, and never expose
+  source transcripts, credentials, Qwen state, or arbitrary workspaces.
+- Personal working artifacts are revisioned, recoverable, captured from long
+  pastes, and opened through the established Documents editor; project artifact
+  changes remain behind reviewed patches.
+- Context manifests expose the mounted records and the local index is
+  provider-independent, so retrieval outage does not erase raw history.
+
+There is one material limitation: current automatic checkpoint derivation is a
+local convenience heuristic. It selects recent user/assistant text and writes
+it into fields such as objective and accepted decisions. It preserves source
+hashes and does not rewrite raw history, but it is **not** a trustworthy
+accepted/proposed-state extractor. Its output must remain labelled `heuristic`
+until Stage C1 replaces it. It must not silently establish project canon,
+personal facts, or cross-chat authority.
 
 ## Memory layers
 
@@ -248,28 +271,75 @@ Actual project-state branch merging remains outside G2C.
 - Never display absolute host paths, provider internals, embeddings, or raw
   hidden retrieval logs.
 
-## Implementation order
+## Ordered implementation stages
 
-1. Close semantic checkpoint derivation first. Current production checkpoints
-   preserve cursors and raw tails but do not yet derive meaningful objectives,
-   decisions, questions, actions, or home briefs.
-2. Enable non-destructive continuity by default for Personal Companion chats as
-   well as project chats, with strict scope tests.
-3. Add `PersonalBriefV1`, scoped memory metadata, context manifests, and the
-   project catalog without enabling cross-scope retrieval.
-4. Add the revisioned `.artifacts` service and Personal/project UI, reusing the
-   existing atomic patch/journal primitives where their authority matches.
-5. Add explicit `ContextGrantV1` requests and permissioned project-memory
-   mounts into Personal Advisor.
-6. Inventory providers, add scope-filter conformance tests, and only then route
-   episodic recall through AgentMemory or the native provider.
-7. Run migration, deletion, restart, denial, leakage, and degraded-provider
-   acceptance tests before making the new memory writer the default.
+### C0 — Reconcile existing derived records
+
+Add a derivation status/version (`heuristic`, `proposed`, `accepted`, or
+`rejected`) without mutating payload meaning or raw chats. Mark existing local
+records `heuristic`, retain their provenance, and make the disclosure explain
+that they are a convenience summary rather than accepted truth. Verify this
+migration is additive, restart-safe, owner-isolated, and reversible by simply
+ignoring the derived layer.
+
+### C1 — Validated semantic checkpoint proposals
+
+Replace the heuristic writer with a bounded, schema-validated derivation
+request. It must emit separate fields for facts, owner-accepted decisions,
+proposals, failed approaches, open questions, actions, and artifact references.
+The derivation route inherits no web, shell, patch, or cross-project authority.
+Invalid JSON, cancellation, provider failure, stale source spans, and concurrent
+writes produce no accepted record and never alter raw messages.
+
+An owner approval/promotion action is required before a proposed item becomes
+shared `ProjectBriefV1` or `PersonalBriefV1` state. Automatic home briefs may
+contain only clearly labelled derived/provisional material until promoted.
+
+### C2 — Prove durable continuation
+
+Prove automatic checkpoints survive restart and that a fresh primary worker and
+project fork receive the automatically produced home brief—not an old raw tail.
+Add explicit revision/source-span manifests and regression fixtures for invented
+canon, contradictory proposals, deleted source messages, and source-hash
+conflicts.
+
+### C3 — Transfer and synthesis
+
+Implement the user-facing alternative to transcript merging:
+
+- attach an immutable source checkpoint to a destination chat as visible,
+  read-only context;
+- selectively promote chosen checkpoint entries to a Personal or project home;
+- create a new synthesis chat from two attributed checkpoints;
+- permit project-to-project use only as a labeled read-only mount.
+
+The destination never receives hidden transcript rows. Expiry, detachment,
+ownership, sensitivity, provenance, and context-budget limits are enforced by
+the compiler.
+
+### C4 — Provider adoption
+
+Before changing any real writer, inventory and back up existing `memory.json`,
+vector, and AgentMemory data with owner approval. Add provider conformance tests
+for exact owner/home/project/sensitivity/grant filtering, export, deletion,
+deduplication, outage, and rollback. Only approved semantic artifacts and
+selected working-artifact metadata may be indexed. The local exact index remains
+the non-fatal fallback; AgentMemory never becomes project authority or receives
+raw transcript/auto-memory writes.
+
+### C5 — Long-history and scope UX
+
+Paginate/virtualize history, expose bounded `@project` and related-project
+selection, and show a compact context inspector covering checkpoint state,
+brief, mounts, episodic hits, artifacts, and grants. Add native question-callout
+rendering/export only if ordinary projects use it.
 
 ## Acceptance tests
 
+- Existing heuristic records are labelled and cannot be selected as accepted
+  project or Personal state without owner promotion.
 - A long Personal conversation survives restart and compaction from its own
-  checkpoint plus recent raw tail.
+  automatically derived checkpoint plus recent raw tail.
 - A project primary and fork share the project brief and shared artifacts while
   retaining separate chat checkpoints and transcript tails.
 - Personal Advisor receives no project memory before a grant.
@@ -292,6 +362,10 @@ Actual project-state branch merging remains outside G2C.
   promised recoverability/audit behavior.
 - AgentMemory or vector-store outage leaves exact chat checkpoints, home briefs,
   raw history, and artifact access working.
+- A source checkpoint can be attached to another chat, detached again, and
+  audited without copying or exposing its raw transcript.
+- A synthesis chat records both source checkpoint IDs and keeps disputed claims
+  attributed rather than collapsing them into a single fact.
 
 ## Deferred
 
