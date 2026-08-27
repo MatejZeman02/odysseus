@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from core.database import Base, ComputerTaskRoot, Session as DbSession
@@ -130,3 +131,25 @@ def test_task_root_rejects_a_symlink_even_when_its_target_is_inside_home(monkeyp
             session_id="computer", label="Linked", path=str(link),
         ), SimpleNamespace())
     assert denied.value.status_code == 422
+
+
+def test_task_root_duplicate_insert_race_returns_a_conflict(monkeypatch, tmp_path):
+    router, task_dir, local = _task_root_router(monkeypatch, tmp_path)
+    create = _endpoint(router, "/api/companion/computer/task-roots")
+    original_local = route_module.SessionLocal
+
+    class _RacingSession:
+        def __init__(self, db):
+            self._db = db
+        def __getattr__(self, name):
+            return getattr(self._db, name)
+        def commit(self):
+            raise IntegrityError("INSERT", {}, RuntimeError("unique owner/label"))
+
+    monkeypatch.setattr(route_module, "SessionLocal", lambda: _RacingSession(original_local()))
+    with pytest.raises(HTTPException) as conflict:
+        create(route_module.TaskRootCreate(
+            session_id="computer", label="Build scratch", path=str(task_dir),
+        ), SimpleNamespace())
+    assert conflict.value.status_code == 409
+    assert "already exists" in str(conflict.value.detail)

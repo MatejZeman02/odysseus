@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 
 from core.database import ComputerTaskRoot, Session as DbSession, SessionLocal, utcnow_naive
 from core.models import ChatMessage
@@ -288,6 +289,14 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
                 "task_root": _task_root_payload(row),
                 "notice": "Task root saved. It is not yet an execution permission.",
             }
+        except IntegrityError as exc:
+            # The pre-insert label lookup gives a friendly normal-path error,
+            # but two browser requests can still race it.  The database's
+            # owner/label constraint is authoritative, and a duplicate must
+            # remain a recoverable conflict rather than look like a server
+            # failure to the capability UI.
+            db.rollback()
+            raise HTTPException(409, "A task root with that label already exists") from exc
         except HTTPException:
             db.rollback(); raise
         except Exception as exc:
