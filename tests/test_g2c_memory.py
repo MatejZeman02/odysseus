@@ -91,6 +91,28 @@ def test_personal_artifact_opens_in_native_document_and_editor_save_stays_scoped
     assert memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])["content"].endswith("updated")
 
 
+def test_linked_document_cannot_bypass_private_artifact_secret_policy(store):
+    _continuity, memory = store
+    artifact = memory.write_personal_artifact(
+        owner="alice", session_id="personal", path="drafts/safe.md", content="# Safe\noriginal",
+    )
+    document = memory.open_personal_artifact_document(
+        owner="alice", session_id="personal", artifact_id=artifact["id"],
+    )
+    db = memory_module.SessionLocal()
+    try:
+        with pytest.raises(MemoryScopeError, match="credential-like"):
+            CompanionMemoryStore.sync_personal_artifact_from_document(
+                db, owner="alice", document_id=document["id"], content="api_key=supersecretvalue",
+            )
+        db.rollback()
+    finally:
+        db.close()
+    persisted = memory.get_personal_artifact(owner="alice", artifact_id=artifact["id"])
+    assert persisted["revision"] == 1
+    assert persisted["content"] == "# Safe\noriginal"
+
+
 def test_computer_artifacts_are_private_revisioned_records_and_sync_from_documents(store):
     _continuity, memory = store
     artifact = memory.write_computer_artifact(

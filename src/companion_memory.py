@@ -257,6 +257,14 @@ class CompanionMemoryStore:
         ).first()
         if not artifact or artifact.content == content:
             return artifact
+        if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
+            raise MemoryScopeError("Artifact content must be UTF-8 Markdown up to 512 KiB")
+        if _SECRET_RE.search(content):
+            # Native Documents are an editor surface for the same private
+            # artifact, not a second route around its content policy.  Keep
+            # the document and recall record on their prior revision when a
+            # save is rejected by raising inside the caller's transaction.
+            raise MemoryScopeError("Artifact contains credential-like material and was not saved")
         db.add(WorkingArtifactRevision(
             id=uuid.uuid4().hex, artifact_id=artifact.id, revision=artifact.revision,
             content=artifact.content, content_hash=artifact.content_hash,

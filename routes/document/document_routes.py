@@ -688,10 +688,16 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             # successful document save can never leave stale prompt content.
             artifact = None
             try:
-                from src.companion_memory import CompanionMemoryStore
+                from src.companion_memory import CompanionMemoryStore, MemoryScopeError
                 artifact = CompanionMemoryStore.sync_personal_artifact_from_document(
                     db, owner=doc.owner or user, document_id=doc.id, content=incoming_content,
                 )
+            except MemoryScopeError as exc:
+                # A linked Artifact shares the Document editor but must keep
+                # the artifact's private-memory content policy.  Make this a
+                # direct, non-leaky validation error rather than an opaque
+                # server failure.
+                raise HTTPException(422, str(exc)) from exc
             except Exception:
                 logger.exception("Could not stage linked working artifact for document %s", doc.id)
                 raise
