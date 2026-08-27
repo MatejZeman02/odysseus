@@ -1476,7 +1476,10 @@ import { loadPanel } from './panels.js';
       const activeSession = sessionModule.getSessions().find(
         session => session.id === sessionModule.getCurrentSessionId()
       );
-      if (activeSession && ['personal', 'project'].includes(activeSession.scope_kind)) {
+      // Computer Help needs the same durable-log path as Personal and project
+      // homes: a pasted diagnostic must survive reload and be available to the
+      // incident/task context without bloating the raw chat transcript.
+      if (activeSession && ['personal', 'project', 'computer'].includes(activeSession.scope_kind)) {
         try {
           const captureResponse = await fetch('/api/companion/artifacts/capture-paste', {
             method: 'POST',

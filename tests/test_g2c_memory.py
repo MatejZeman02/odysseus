@@ -780,6 +780,7 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "project material is never searched automatically" in ui.lower()
     chat = open("static/js/chat.js", encoding="utf-8").read()
     assert "LONG_PASTE_ARTIFACT_THRESHOLD = 3000" in chat
+    assert "['personal', 'project', 'computer'].includes(activeSession.scope_kind)" in chat
     assert "Task excerpt:" in chat
     assert "Long paste saved as artifact" in chat
     assert "Create semantic proposal" in ui
