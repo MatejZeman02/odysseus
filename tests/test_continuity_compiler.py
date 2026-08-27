@@ -1,11 +1,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, ChatMessage as DbMessage, Project, Session as DbSession
+from core.database import Base, ChatMessage as DbMessage, Project, ScopedMemoryRecord, Session as DbSession
 from src.continuity import ProjectBriefV1, SemanticCheckpointProposalV1, ThreadCheckpointV1
 from src.continuity.compiler import CheckpointCompactor, ContextCompiler
 from src.continuity.store import ContinuityStore
 import src.continuity.store as continuity_store_module
+import src.scoped_memory as scoped_memory_module
 
 
 def _store(monkeypatch):
@@ -117,6 +118,31 @@ def test_automatic_checkpoint_is_explicitly_heuristic_and_never_promotes_assista
     assert brief.source_message_ids == checkpoint.source_message_ids
     assert brief.source_through_message_id == checkpoint.source_through_message_id
     assert bundle.manifest["continuity_provenance"]["thread_checkpoint"] == "heuristic"
+
+
+def test_heuristic_checkpoint_never_enters_episodic_retrieval_index(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    local_session = sessionmaker(bind=engine)
+    monkeypatch.setattr(continuity_store_module, "SessionLocal", local_session)
+    monkeypatch.setattr(scoped_memory_module, "SessionLocal", local_session)
+    db = local_session()
+    db.add(DbSession(id="session", owner="alice", name="chat", endpoint_url="http://x", model="m"))
+    db.commit(); db.close()
+    store = ContinuityStore()
+    project_id = store.create_project(owner="alice", name="P", workspace_root="/p")
+    store.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=project_id)
+
+    CheckpointCompactor(store, tail_count=1).checkpoint(
+        owner="alice", session_id="session",
+        messages=[_message("user", "make a risky change", 1), _message("assistant", "sure", 2)],
+    )
+
+    db = local_session()
+    try:
+        assert db.query(ScopedMemoryRecord).count() == 0
+    finally:
+        db.close()
 
 
 def test_legacy_checkpoint_payload_is_unclassified_not_accepted():

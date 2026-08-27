@@ -214,6 +214,39 @@ def _scope(owner: str, session_id: str) -> tuple[str, str | None]:
         db.close()
 
 
+def _index_accepted_home_brief(
+    *, owner: str, session_id: str, scope_kind: str, project_id: str | None,
+    source_id: str, brief: PersonalBriefV1 | object,
+) -> None:
+    """Index only an owner-approved brief, never a heuristic checkpoint.
+
+    Failure is deliberately non-fatal. The accepted brief remains exact context
+    in the continuity store; episodic retrieval is merely an accelerator.
+    """
+    if scope_kind not in {"personal", "project"} or not source_id:
+        return
+    try:
+        payload = brief.to_payload() if hasattr(brief, "to_payload") else {}
+        values = [
+            str(payload.get("summary") or ""),
+            *[str(item) for item in payload.get("confirmed_facts", [])],
+            *[str(item) for item in payload.get("ongoing_goals", [])],
+            *[str(item) for item in payload.get("open_questions", [])],
+            *[str(item) for item in payload.get("current_plans", [])],
+        ]
+        content = "\n".join(value for value in values if value.strip())
+        if not content:
+            return
+        from src.scoped_memory import ScopedMemoryIndex
+        ScopedMemoryIndex().index(
+            owner=owner, scope_kind=scope_kind, project_id=project_id,
+            session_id=session_id, source_kind="accepted_home_brief",
+            source_id=source_id, content=content,
+        )
+    except Exception:
+        logger.warning("Accepted home brief could not be added to episodic index", exc_info=True)
+
+
 def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, memory_vector=None) -> APIRouter:
     router = APIRouter(prefix="/api/companion", tags=["companion-memory"])
     memory = CompanionMemoryStore()
@@ -748,9 +781,15 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
     @router.post("/memory/semantic-proposals/{proposal_id}/promote")
     def promote_semantic_proposal(proposal_id: str, payload: SemanticProposalPromotion, request: Request):
         try:
+            owner = _owner(request)
             record, write, brief = ContinuityStore().promote_semantic_proposal(
-                owner=_owner(request), proposal_id=proposal_id,
+                owner=owner, proposal_id=proposal_id,
                 expected_revision=payload.expected_revision, selections=payload.selections,
+            )
+            scope_kind, project_id = _scope(owner, record.proposal.session_id)
+            _index_accepted_home_brief(
+                owner=owner, session_id=record.proposal.session_id, scope_kind=scope_kind,
+                project_id=project_id, source_id=write.id, brief=brief,
             )
             return {
                 "proposal": {"id": record.id, "revision": record.revision, "status": record.status},
@@ -904,6 +943,10 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             result = ContinuityStore().write_personal_brief(owner=owner, session_id=session_id, brief=brief, source_hash=source_hash)
         except Exception as exc:
             raise _error(exc) from exc
+        _index_accepted_home_brief(
+            owner=owner, session_id=session_id, scope_kind="personal", project_id=None,
+            source_id=result.id, brief=brief,
+        )
         return {"revision": result.revision, "brief": brief.to_payload()}
 
     return router

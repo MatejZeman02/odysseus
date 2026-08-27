@@ -6,10 +6,11 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, ChatMessage as DbMessage, Session as DbSession
+from core.database import Base, ChatMessage as DbMessage, ScopedMemoryRecord, Session as DbSession
 import routes.companion_memory_routes as route_module
 import src.continuity.semantic_deriver as deriver_module
 import src.continuity.store as store_module
+import src.scoped_memory as scoped_memory_module
 from src.continuity.semantic_proposals import derivation_messages, parse_semantic_proposal
 from src.continuity.contracts import ThreadCheckpointV1
 from src.continuity.store import ContinuityStore
@@ -44,6 +45,7 @@ def _setup(monkeypatch):
     monkeypatch.setattr(route_module, "SessionLocal", local_session)
     monkeypatch.setattr(store_module, "SessionLocal", local_session)
     monkeypatch.setattr(deriver_module, "SessionLocal", local_session)
+    monkeypatch.setattr(scoped_memory_module, "SessionLocal", local_session)
     monkeypatch.setattr(route_module, "_owner", lambda _request: "alice")
     db = local_session()
     db.add(DbSession(
@@ -98,6 +100,15 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     assert promoted["brief"]["derivation_status"] == "accepted"
     assert promoted["brief"]["confirmed_facts"] == ["The branch is frozen"]
     assert promoted["brief"]["ongoing_goals"] == ["Ask the reviewer"]
+    db = route_module.SessionLocal()
+    try:
+        indexed = db.query(ScopedMemoryRecord).filter(
+            ScopedMemoryRecord.owner == "alice", ScopedMemoryRecord.source_kind == "accepted_home_brief",
+        ).one()
+        assert indexed.scope_kind == "personal"
+        assert "The branch is frozen" in indexed.content
+    finally:
+        db.close()
 
     history = _endpoint(router, "/api/companion/memory/sessions/{session_id}/semantic-proposals", "GET")
     listed = history("session", SimpleNamespace())

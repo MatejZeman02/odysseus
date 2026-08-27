@@ -841,8 +841,9 @@ not exercised by this slice and is deliberately tracked next.
 - [x] Implement the strictly scoped provider contract and local conformance
   adapter/tests. It is not wired as an automatic writer.
 - [ ] Wire normal context recall through `MemoryProviderRegistry`.
-- [ ] Index only approved structured artifacts/tool outcomes in separate
-  Personal, Computer, and project namespaces.
+- [x] Index only owner-approved home briefs and explicit working artifacts in
+  the local Personal/project namespaces. Heuristic checkpoints remain bounded
+  thread context and never become episodic-retrieval records.
 - [x] Provide explicit aggregate inventory and owner-private backup gates.
 - [x] Provide an owner-triggered, backup-bound dry-run report with exact-home
   candidate counts, unresolved legacy counts, and aggregate duplicate counts;

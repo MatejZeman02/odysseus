@@ -155,14 +155,11 @@ class CheckpointCompactor:
             derivation_method=str(values.get("derivation_method") or "local_heuristic_v1"),
         )
         self.store.write_thread_checkpoint(owner=owner, checkpoint=checkpoint)
-        try:
-            from src.scoped_memory import ScopedMemoryIndex
-            ScopedMemoryIndex().index(owner=owner, scope_kind=scope.scope_kind, project_id=scope.project_id,
-                                      session_id=session_id, source_kind="thread_checkpoint",
-                                      source_id=checkpoint.source_hash,
-                                      content="\n".join([checkpoint.objective, *checkpoint.proposals, *checkpoint.open_questions, *checkpoint.next_actions]))
-        except Exception:
-            pass
+        # A heuristic checkpoint is helpful bounded context for *this* thread,
+        # but it is not owner-approved episodic memory.  Do not index it: doing
+        # so would make provisional model output retrievable by later turns as
+        # if it had been accepted.  Semantic-promotion routes index only the
+        # explicit accepted home brief instead.
         # Home briefs are compact shared state, never transcript replacement.
         # Projects can safely refresh their shared brief from a checkpoint;
         # Personal briefs are seeded once and remain owner-inspectable/editable

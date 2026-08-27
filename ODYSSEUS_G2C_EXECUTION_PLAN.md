@@ -312,6 +312,13 @@ strict adapter used for conformance tests only; it is not registered as a
 replacement writer and the legacy `NativeMemoryProvider` remains outside this
 scoped contract until a separately reviewed migration.
 
+**Indexing correction:** automatic heuristic checkpoints remain local compact
+context only. They no longer enter episodic retrieval, where a later prompt
+could mistake provisional model output for memory. The local index receives
+only explicitly owner-promoted home briefs and explicit working artifacts;
+failure to update that optional index cannot affect the accepted brief or raw
+history.
+
 Personal Advisor’s migration preflight now exposes a disabled-until-inventory
 **Create owner-private backup** action. On an explicit authenticated click it
 writes only the current owner’s attributed native entries into a private,
