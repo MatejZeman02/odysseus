@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Optional
 
-from .contracts import ContextBundle, PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
+from .contracts import ContextBundle, DeviceProfileV1, PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
 from .store import ContinuityStore
 
 
@@ -229,6 +229,7 @@ class ContextCompiler:
         checkpoint = self.store.latest_thread_checkpoint(owner=owner, session_id=session_id)
         primary = self.store.latest_project_brief(owner=owner, project_id=scope.project_id) if scope.project_id else None
         personal = self.store.latest_personal_brief(owner=owner, session_id=session_id) if scope.scope_kind == "personal" else None
+        device_profile = self.store.latest_device_profile(owner=owner, session_id=session_id) if scope.scope_kind == "computer" else None
         mount_loader = getattr(self.store, "checkpoint_mounts", None)
         mounts = (
             mount_loader(owner=owner, destination_session_id=session_id)
@@ -380,6 +381,7 @@ class ContextCompiler:
             "thread_checkpoint": bool(checkpoint),
             "primary_project_brief": bool(primary),
             "personal_brief": bool(personal),
+            "device_profile": bool(device_profile),
             "related_project_ids": [brief.project_id for brief in related],
             "episodic_hit_count": len(hits),
             "episodic_hit_kinds": dict(sorted(episodic_hit_kinds.items())),
@@ -394,6 +396,7 @@ class ContextCompiler:
                 "thread_checkpoint": checkpoint.derivation_status if checkpoint else None,
                 "primary_project_brief": primary.derivation_status if primary else None,
                 "personal_brief": personal.derivation_status if personal else None,
+                "device_profile": "verified_server_observation" if device_profile else None,
             },
             "continuity_records": {
                 "thread_checkpoint": self.store.latest_artifact_manifest(
@@ -405,6 +408,9 @@ class ContextCompiler:
                 "personal_brief": self.store.latest_artifact_manifest(
                     owner=owner, kind="personal_brief_v1", session_id=session_id,
                 ) if personal else None,
+                "device_profile": self.store.latest_artifact_manifest(
+                    owner=owner, kind="device_profile_v1", session_id=session_id,
+                ) if device_profile else None,
                 "related_project_briefs": [
                     self.store.latest_artifact_manifest(
                         owner=owner, kind="project_brief_v1", project_id=brief.project_id,
@@ -427,7 +433,7 @@ class ContextCompiler:
         return ContextBundle(
             companion_profile=companion_profile, scope=scope, request=request,
             thread_checkpoint=checkpoint, primary_project_brief=primary,
-            related_project_briefs=tuple(related), personal_brief=personal,
+            related_project_briefs=tuple(related), personal_brief=personal, device_profile=device_profile,
             mounted_checkpoints=mounted_checkpoints,
             working_artifacts=working_artifacts, context_grants=context_grants,
             episodic_hits=hits, transcript_tail=tail, manifest=manifest,

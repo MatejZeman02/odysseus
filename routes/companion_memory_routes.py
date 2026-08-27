@@ -87,6 +87,7 @@ def _last_compiled_context(*, owner: str, session_id: str) -> dict | None:
                 "thread_checkpoint": bool(manifest.get("thread_checkpoint")),
                 "project_brief": bool(manifest.get("primary_project_brief")),
                 "personal_brief": bool(manifest.get("personal_brief")),
+                "device_profile": bool(manifest.get("device_profile")),
                 "related_project_count": min(len(related), 3),
                 "mounted_checkpoint_count": min(len(mounts), 2),
                 "episodic_hit_count": count(manifest.get("episodic_hit_count"), 20),
@@ -1397,6 +1398,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
             project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
             personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
+            device_profile = store.latest_device_profile(owner=owner, session_id=session_id) if scope_kind == "computer" else None
             proposal = store.latest_semantic_proposal_record(owner=owner, session_id=session_id)
             proposal_history = store.semantic_proposal_history(owner=owner, session_id=session_id)
             proposal_attempt = store.latest_semantic_proposal_attempt(owner=owner, session_id=session_id)
@@ -1407,6 +1409,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
                 "project_brief": project_brief.to_payload() if project_brief else None,
                 "personal_brief": personal_brief.to_payload() if personal_brief else None,
+                "device_profile": device_profile.to_payload() if device_profile else None,
                 "semantic_proposal": ({
                     "id": proposal.id,
                     "revision": proposal.revision,

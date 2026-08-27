@@ -1,6 +1,8 @@
 """G2D-1 Computer Help routes: safe host observations, not host execution."""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import stat
 import time
@@ -17,6 +19,8 @@ from src.companion_capabilities import SYSTEM_OBSERVE, normalize
 from src.computer_observe import ObservationError, collect_observations
 from src.computer_sandbox import SandboxQualificationError, qualify_containment, readiness
 from src.companion_memory import CompanionMemoryStore, MemoryScopeError
+from src.continuity.contracts import DeviceProfileV1
+from src.continuity.store import ContinuityStore
 
 
 class ObserveRequest(BaseModel):
@@ -149,6 +153,30 @@ def _device_profile_markdown(observations: list[dict]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _device_profile(owner: str, session_id: str, observations: list[dict]) -> DeviceProfileV1:
+    """Translate already-sanitized fixed observations into verified context.
+
+    The profile is intentionally derived before any model sees it.  Categories
+    preserve the narrow source class, while the source hash permits a durable
+    record to be traced to one exact sanitized observation snapshot.
+    """
+    facts: list[str] = []
+    for item in observations:
+        category = str(item.get("category") or "system").replace("_", " ").title()
+        for fact in list(item.get("facts") or [])[:24]:
+            facts.append(f"{category}: {str(fact)}")
+            if len(facts) >= 120:
+                break
+        if len(facts) >= 120:
+            break
+    encoded = json.dumps(observations, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return DeviceProfileV1(
+        session_id=session_id, facts=facts,
+        source_hash=hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        collected_at=utcnow_naive().isoformat(),
+    )
+
+
 def setup_computer_help_routes(session_manager) -> APIRouter:
     router = APIRouter(prefix="/api/companion/computer", tags=["computer-help"])
 
@@ -179,6 +207,11 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
                     session_id=payload.session_id,
                     path="computer/device-profile.md",
                     content=_device_profile_markdown(observations),
+                )
+                ContinuityStore().write_device_profile(
+                    owner=owner,
+                    session_id=payload.session_id,
+                    profile=_device_profile(owner, payload.session_id, observations),
                 )
         except MemoryScopeError as exc:
             raise HTTPException(409, "The verified device profile could not be updated") from exc

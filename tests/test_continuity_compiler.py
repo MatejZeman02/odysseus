@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.database import Base, ChatMessage as DbMessage, Project, ScopedMemoryRecord, Session as DbSession
-from src.continuity import ProjectBriefV1, SemanticCheckpointProposalV1, ThreadCheckpointV1
+from src.continuity import DeviceProfileV1, ProjectBriefV1, SemanticCheckpointProposalV1, ThreadCheckpointV1
 from src.continuity.compiler import CheckpointCompactor, ContextCompiler
 from src.continuity.store import ContinuityStore
 import src.continuity.store as continuity_store_module
@@ -154,6 +154,43 @@ def test_legacy_checkpoint_payload_is_unclassified_not_accepted():
     assert checkpoint.derivation_status == "legacy_unclassified"
     assert checkpoint.derivation_version == 0
     assert checkpoint.to_payload()["derivation_method"] == "legacy_unclassified"
+
+
+def test_verified_device_profile_is_compiled_only_for_computer_help(monkeypatch):
+    store = _store(monkeypatch)
+    db = continuity_store_module.SessionLocal()
+    try:
+        row = db.query(DbSession).filter_by(id="session").one()
+        row.scope_kind = "computer"
+        db.commit()
+    finally:
+        db.close()
+
+    profile = DeviceProfileV1(
+        session_id="session", facts=["System: OS: Fedora", "Graphics: GPU: Example"],
+        source_hash="sanitized-observation-hash", collected_at="2026-08-27T10:00:00",
+    )
+    store.write_device_profile(owner="alice", session_id="session", profile=profile)
+
+    computer_bundle = ContextCompiler(store).compile(
+        owner="alice", session_id="session", request="help", transcript=[]
+    )
+    assert computer_bundle.device_profile == profile
+    assert computer_bundle.manifest["device_profile"] is True
+    assert computer_bundle.manifest["continuity_provenance"]["device_profile"] == "verified_server_observation"
+
+    db = continuity_store_module.SessionLocal()
+    try:
+        row = db.query(DbSession).filter_by(id="session").one()
+        row.scope_kind = "personal"
+        db.commit()
+    finally:
+        db.close()
+    personal_bundle = ContextCompiler(store).compile(
+        owner="alice", session_id="session", request="help", transcript=[]
+    )
+    assert personal_bundle.device_profile is None
+    assert personal_bundle.manifest["device_profile"] is False
 
 
 def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):

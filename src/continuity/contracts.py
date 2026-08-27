@@ -267,6 +267,47 @@ class PersonalBriefV1:
 
 
 @dataclass(frozen=True)
+class DeviceProfileV1:
+    """Verified, non-secret Computer Help facts from server-owned observation.
+
+    This is not semantic memory and does not contain model prose, raw command
+    output, credentials, or a general host profile.  Each revision is backed
+    by the hash of a bounded sanitized observation snapshot.
+    """
+    session_id: str
+    facts: list[str] = field(default_factory=list)
+    source_hash: str = ""
+    source_kind: str = "server_observation_v1"
+    collected_at: str = ""
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ContractError("unsupported DeviceProfile schema_version")
+        if not self.session_id or not self.source_hash:
+            raise ContractError("device profile requires a session and source hash")
+        if self.source_kind != "server_observation_v1":
+            raise ContractError("device profile source must be a server observation")
+        _bounded_text_list(self.facts, "facts", maximum=120)
+        _bounded_text(self.collected_at, "collected_at", maximum=64)
+
+    def to_payload(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "DeviceProfileV1":
+        data = _mapping(payload, "device profile payload")
+        return cls(
+            session_id=str(data.get("session_id") or ""),
+            facts=_bounded_text_list(data.get("facts"), "facts", maximum=120),
+            source_hash=str(data.get("source_hash") or ""),
+            source_kind=str(data.get("source_kind") or "server_observation_v1"),
+            collected_at=_bounded_text(str(data.get("collected_at") or ""), "collected_at", maximum=64),
+            schema_version=data.get("schema_version", 1),
+        )
+
+
+@dataclass(frozen=True)
 class SemanticCheckpointProposalV1:
     """A source-linked candidate memory extraction awaiting owner promotion.
 
@@ -440,6 +481,7 @@ class ContextBundle:
     primary_project_brief: Optional[ProjectBriefV1] = None
     related_project_briefs: tuple[ProjectBriefV1, ...] = ()
     personal_brief: Optional[PersonalBriefV1] = None
+    device_profile: Optional[DeviceProfileV1] = None
     mounted_checkpoints: tuple[dict[str, Any], ...] = ()
     working_artifacts: tuple[dict[str, Any], ...] = ()
     context_grants: tuple[dict[str, Any], ...] = ()

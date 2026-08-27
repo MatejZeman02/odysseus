@@ -2,6 +2,7 @@
 
 from .contracts import (
     ContextBundle,
+    DeviceProfileV1,
     ProjectBriefV1,
     PersonalBriefV1,
     ResolvedScope,
@@ -13,6 +14,7 @@ from .store import ContinuityStore, ScopeConflictError
 __all__ = [
     "ContextBundle",
     "ContinuityStore",
+    "DeviceProfileV1",
     "ProjectBriefV1",
     "PersonalBriefV1",
     "ResolvedScope",

@@ -15,6 +15,7 @@ from sqlalchemy import text
 from core.database import ChatMessage as DbMessage, ContinuityArtifact, Project, Session as DbSession, SessionLocal
 
 from .contracts import (
+    DeviceProfileV1,
     PersonalBriefV1,
     ProjectBriefV1,
     ResolvedScope,
@@ -345,6 +346,27 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def write_device_profile(
+        self, *, owner: str, session_id: str, profile: DeviceProfileV1,
+    ) -> ArtifactWrite:
+        """Persist only a server-observation profile for Computer Help."""
+        if profile.session_id != session_id:
+            raise ValueError("device profile session does not match its destination")
+        db = SessionLocal()
+        try:
+            session = self._session(db, owner, session_id)
+            if (session.scope_kind or "general") != "computer":
+                raise ScopeConflictError("device profile requires a Computer Help session")
+            return self._write(
+                db, owner=owner, kind="device_profile_v1", session_id=session_id,
+                project_id=None, payload=profile.to_payload(),
+                source_through_message_id=None, source_hash=profile.source_hash,
+            )
+        except Exception:
+            db.rollback(); raise
+        finally:
+            db.close()
+
     def write_semantic_proposal(
         self, *, owner: str, proposal: SemanticCheckpointProposalV1,
     ) -> ArtifactWrite:
@@ -490,6 +512,10 @@ class ContinuityStore:
         finally:
             db.close()
         return PersonalBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
+
+    def latest_device_profile(self, *, owner: str, session_id: str) -> Optional[DeviceProfileV1]:
+        artifact = self._latest(owner=owner, kind="device_profile_v1", session_id=session_id)
+        return DeviceProfileV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
     def latest_artifact_manifest(
         self,

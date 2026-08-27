@@ -133,6 +133,13 @@ def render_context_bundle(bundle: ContextBundle) -> str:
         parts.append("# This thread checkpoint\n" + json.dumps(bundle.thread_checkpoint.to_payload(), sort_keys=True))
     if bundle.primary_project_brief:
         parts.append("# Home project shared brief\n" + json.dumps(bundle.primary_project_brief.to_payload(), sort_keys=True))
+    if bundle.device_profile:
+        parts.append(
+            "# Verified device profile\n"
+            "These are sanitized server-observed computer facts, not model inferences or raw logs. "
+            "Use them only for this Computer Help conversation.\n"
+            + json.dumps(bundle.device_profile.to_payload(), sort_keys=True)
+        )
     for brief in bundle.related_project_briefs:
         parts.append("# Explicit direct-related project brief\n" + json.dumps(brief.to_payload(), sort_keys=True))
     if bundle.episodic_hits:
