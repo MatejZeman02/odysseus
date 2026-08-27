@@ -8529,6 +8529,41 @@ button.hamburger {
 }
 .msg blockquote p { margin: 0.3em 0; }
 
+/* Native Obsidian callouts (`> [!question]`) are rendered by markdown.js in
+ * both chat and document preview.  Keep the source portable; this is only the
+ * presentation layer. */
+.msg .ody-callout,
+.doc-md-preview .ody-callout {
+  --ody-callout-accent: var(--hl-function, #5b8def);
+  border: 1px solid color-mix(in srgb, var(--ody-callout-accent) 50%, var(--border));
+  border-left: 4px solid var(--ody-callout-accent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--ody-callout-accent) 7%, var(--panel));
+  margin: 0.7em 0;
+  overflow: hidden;
+}
+.msg .ody-callout summary,
+.doc-md-preview .ody-callout summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.45em 0.7em;
+  color: var(--fg);
+  list-style: none;
+}
+.msg .ody-callout summary::-webkit-details-marker,
+.doc-md-preview .ody-callout summary::-webkit-details-marker { display: none; }
+.ody-callout-marker { color: var(--ody-callout-accent); transition: transform 120ms ease; }
+.ody-callout[open] > summary .ody-callout-marker { transform: rotate(90deg); }
+.ody-callout-body { padding: 0 0.8em 0.55em; }
+.ody-callout-body > :first-child { margin-top: 0; }
+.ody-callout-body > :last-child { margin-bottom: 0; }
+.ody-callout-question { --ody-callout-accent: var(--hl-function, #5b8def); }
+.ody-callout-warning, .ody-callout-caution { --ody-callout-accent: var(--orange, #d97706); }
+.ody-callout-danger, .ody-callout-failure, .ody-callout-bug { --ody-callout-accent: var(--red, #dc2626); }
+.ody-callout-success, .ody-callout-tip { --ody-callout-accent: var(--green, #22a559); }
+
 /* Horizontal rules */
 .msg hr {
   border: none;

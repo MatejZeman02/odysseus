@@ -611,6 +611,7 @@ export function mdToHtml(src, opts) {
   const codeBlocks = [];
   const inlineCodeBlocks = [];
   const mermaidBlocks = [];
+  const calloutBlocks = [];
   let s = (src ?? '');
 
   // Extract fenced code blocks before any markdown/HTML preservation passes.
@@ -647,6 +648,27 @@ export function mdToHtml(src, opts) {
 
     return placeholder;
   });
+
+  // Obsidian-compatible callouts are deliberately extracted before the normal
+  // blockquote pass.  This keeps the source Markdown portable (documents still
+  // export the original `> [!question]` syntax) while giving chat and the
+  // built-in document preview a useful disclosure with a real title.  The body
+  // is rendered only when restoring the placeholder, so it follows exactly the
+  // same Markdown rules as the rest of the message.
+  //
+  // `[!note]-` starts collapsed; `[!note]+` and an unmarked callout start open,
+  // matching Obsidian's author-friendly convention.
+  s = s.replace(
+    /(^|\n)>[ \t]*\[!([A-Za-z][A-Za-z0-9_-]*)\]([+-])?(?:[ \t]+([^\n]*))?(?:\n|$)((?:>[^\n]*(?:\n|$))*)/g,
+    (match, prefix, rawType, fold, rawTitle, rawBody) => {
+      const placeholder = `___CALLOUT_BLOCK_${calloutBlocks.length}___`;
+      const type = String(rawType).toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'note';
+      const title = String(rawTitle || '').trim();
+      const body = String(rawBody || '').replace(/^>[ \t]?/gm, '');
+      calloutBlocks.push({ type, fold, title, body });
+      return `${prefix}${placeholder}`;
+    },
+  );
 
   // Extract inline code spans before the link/autolink/HTML passes, mirroring
   // the fenced-block handling above. A URL inside `inline code` (e.g.
@@ -863,7 +885,7 @@ export function mdToHtml(src, opts) {
     `<blockquote>${m.trim().replace(/<\/?bq>/g, (t) => t === '<bq>' ? '<p>' : '</p>')}</blockquote>`);
 
   // Paragraphs - but NOT for code block placeholders or allowed HTML
-  s = s.replace(/^(?!<h\d|<ul>|<ol>|<li|<oli>|<\/li>|<pre>|<blockquote>|<bq>|<hr>|___CODE_BLOCK_|___ALLOWED_HTML_|___MATH_BLOCK_|___MERMAID_BLOCK_)([^\n]+)$/gm, '<p>$1</p>');
+  s = s.replace(/^(?!<h\d|<ul>|<ol>|<li|<oli>|<\/li>|<pre>|<blockquote>|<bq>|<hr>|___CODE_BLOCK_|___ALLOWED_HTML_|___MATH_BLOCK_|___MERMAID_BLOCK_|___CALLOUT_BLOCK_)([^\n]+)$/gm, '<p>$1</p>');
 
   // Line breaks within paragraphs
   s = s.replace(/<p>([\s\S]*?)<\/p>/g, (match, content) => {
@@ -907,6 +929,19 @@ export function mdToHtml(src, opts) {
   // <a>/allowed-HTML blocks are resolved too.
   inlineCodeBlocks.forEach((block, index) => {
     s = s.replace(`___INLINE_CODE_${index}___`, () => block);
+  });
+
+  // Restore callouts after the other placeholders.  Calling mdToHtml for the
+  // body is safe here: this renderer owns a fresh placeholder set per call and
+  // can therefore render nested Markdown (including a nested callout) without
+  // leaking raw HTML from the source.
+  calloutBlocks.forEach(({ type, fold, title, body }, index) => {
+    const fallbackTitle = type.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const titleHtml = escapeHtml(title || fallbackTitle);
+    const bodyHtml = mdToHtml(body, opts);
+    const open = fold === '-' ? '' : ' open';
+    const block = `<details class="ody-callout ody-callout-${type}"${open}><summary><span class="ody-callout-marker" aria-hidden="true">▸</span><strong>${titleHtml}</strong></summary><div class="ody-callout-body">${bodyHtml}</div></details>`;
+    s = s.replace(`___CALLOUT_BLOCK_${index}___`, () => block);
   });
 
   return _useSvgEmoji() ? svgifyEmoji(s, opts) : s;

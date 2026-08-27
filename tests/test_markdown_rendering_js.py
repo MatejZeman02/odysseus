@@ -127,6 +127,36 @@ def test_ordered_lists_render_as_one_unwrapped_ol(node_available):
     assert "<p>After</p>" in html
 
 
+def test_obsidian_callout_renders_in_chat_without_changing_source_syntax(node_available):
+    html = _run_markdown_case(
+        "Before\n\n"
+        "> [!question]- Follow-up\n"
+        "> Keep this answer portable for Obsidian.\n"
+        ">\n"
+        "> - [ ] Resolve it\n\n"
+        "After"
+    )
+
+    assert '<details class="ody-callout ody-callout-question">' in html
+    assert "<strong>Follow-up</strong>" in html
+    assert "Keep this answer portable for Obsidian." in html
+    assert 'class="task-item' in html
+    assert "[!question]" not in html
+    assert "<p>Before</p>" in html
+    assert "<p>After</p>" in html
+
+
+def test_obsidian_callout_is_open_by_default_and_escapes_title(node_available):
+    html = _run_markdown_case(
+        "> [!warning] <unsafe title>\n"
+        "> Review this before applying it."
+    )
+
+    assert '<details class="ody-callout ody-callout-warning" open>' in html
+    assert "&lt;unsafe title&gt;" in html
+    assert "<unsafe title>" not in html
+
+
 def test_table_separator_row_not_rendered_as_data(node_available):
     html = _run_markdown_case("| A | B |\n|---|---|\n| 1 | 2 |")
 

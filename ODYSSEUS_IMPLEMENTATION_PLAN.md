@@ -181,8 +181,10 @@ backup path or text; it does not start a migration.
   resolution, and a three-project related-context cap now implemented;
 - provide a concise context inspector for checkpoint, brief, mounted transfer,
   episodic hits, artifacts, and grants;
-- add native `> [!question]` rendering/export only if it proves useful in
-  normal use.
+- render native Obsidian callouts such as `> [!question]` in both chat and the
+  established Documents Markdown preview, while Markdown export preserves the
+  original portable source.  Collapsible `-` and expanded `+` callouts retain
+  their normal Obsidian meaning.
 
 ### Stage D3 — Computer Help task assistance
 
