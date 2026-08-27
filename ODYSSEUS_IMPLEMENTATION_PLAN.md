@@ -126,8 +126,10 @@ The initial read-only attachment primitive is implemented: a compact active
 checkpoint may be mounted into another owner-owned Personal/project home with
 an explicit detach action. It is bounded, attributed, and compiled separately
 from the destination transcript. The owner may promote selected mount entries
-into the destination home with field/index selections only. The remaining work
-is two-checkpoint synthesis, expiry/sensitivity policy, and richer review UI.
+into the destination home with field/index selections only. Mounts expire after
+an owner-selected bounded lifetime (14 days by default), and sensitive context
+requires an explicit acknowledgement before attaching. The remaining work is
+two-checkpoint synthesis and richer review UI.
 
 - attach an immutable checkpoint to another chat as a labeled read-only mount;
 - selectively promote owner-chosen items to Personal or project home state;

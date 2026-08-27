@@ -370,8 +370,11 @@ context and never reads their raw transcript. Checkpoint selection and mount
 metadata are server-resolved; the browser cannot submit replacement content.
 The owner can now select individual mounted checkpoint entries for an atomic
 accepted Personal/project brief promotion; the browser still supplies only
-field/index pairs. Synthesis, expiry, and sensitivity classes remain next C3
-work.
+field/index pairs. Mounts now have a bounded owner-selected expiry (one to 30
+days; 14 by default), expire durably before compilation or promotion, and carry
+a `standard` or explicitly acknowledged `sensitive` label. Expired mounts are
+never compiled or promotable. Two-checkpoint synthesis and richer review remain
+the next C3 work.
 
 Implement the user-facing alternative to transcript merging:
 
