@@ -10,6 +10,7 @@ import re
 import signal
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -27,6 +28,21 @@ from .qwen_harness import (
 
 
 PINNED_QWEN_VERSION = "0.21.3"
+
+
+def _regular_workspace_root(workspace_root: Path) -> Path:
+    """Resolve a launch workspace without accepting a swapped symlink leaf."""
+    candidate = Path(workspace_root)
+    try:
+        info = candidate.lstat()
+    except OSError as exc:
+        raise QwenHarnessError("Qwen workspace is unavailable") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise QwenHarnessError("Qwen workspace must be a regular directory")
+    try:
+        return candidate.resolve(strict=True)
+    except OSError as exc:
+        raise QwenHarnessError("Qwen workspace is unavailable") from exc
 
 
 def verify_qwen_binary(binary: Path, *, expected_version: str = PINNED_QWEN_VERSION) -> None:
@@ -50,7 +66,7 @@ def bubblewrap_command(
     *, qwen_root: Path, private_home: Path, workspace_root: Path,
     port: int, bubblewrap: str = "bwrap",
 ) -> tuple[str, ...]:
-    workspace = workspace_root.resolve(strict=True)
+    workspace = _regular_workspace_root(workspace_root)
     qwen_root = qwen_root.resolve(strict=True)
     private_home = private_home.resolve(strict=True)
     command = [

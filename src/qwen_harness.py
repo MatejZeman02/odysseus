@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -142,7 +143,14 @@ def create_disposable_config(*, root: Path, bridge_url: str, bridge_model: str, 
 
 def build_read_only_launch(*, binary: str, config: DisposableQwenConfig, workspace_root: Path, bridge_token: str, port: int) -> QwenLaunchSpec:
     """Build, but do not run, the isolated Qwen Serve invocation."""
-    workspace = workspace_root.resolve(strict=True)
+    candidate = Path(workspace_root)
+    try:
+        info = candidate.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise ValueError("Qwen workspace must be a regular directory")
+        workspace = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("Qwen workspace is unavailable") from exc
     if port < 1024 or port > 65535:
         raise ValueError("Qwen Serve port must be unprivileged")
     environment = {

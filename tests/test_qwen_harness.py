@@ -54,6 +54,22 @@ def test_launch_spec_is_loopback_private_and_only_exposes_ephemeral_bridge_token
     assert "provider.example" not in " ".join(spec.command)
 
 
+def test_launch_spec_rejects_a_symlinked_workspace_root(tmp_path):
+    config = create_disposable_config(
+        root=tmp_path / "worker", bridge_url="http://127.0.0.1:9191/v1", bridge_model="odysseus-bridge", ephemeral_bridge_token="unused",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    swapped = tmp_path / "workspace-link"
+    swapped.symlink_to(workspace, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="regular directory"):
+        build_read_only_launch(
+            binary="/opt/qwen/bin/qwen", config=config, workspace_root=swapped,
+            bridge_token="ephemeral", port=4170,
+        )
+
+
 @pytest.mark.asyncio
 async def test_qwen_client_fails_closed_when_safe_capabilities_are_missing():
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"features": ["health", "capabilities"]}))

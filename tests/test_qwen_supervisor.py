@@ -29,6 +29,22 @@ def test_bubblewrap_command_exposes_only_read_only_workspace(tmp_path):
     assert "--setenv" not in command
 
 
+def test_bubblewrap_command_rejects_a_symlinked_workspace_root(tmp_path):
+    qwen_root = tmp_path / "qwen"
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    for path in (qwen_root, home, workspace):
+        path.mkdir()
+    swapped = tmp_path / "workspace-link"
+    swapped.symlink_to(workspace, target_is_directory=True)
+
+    with pytest.raises(QwenHarnessError, match="regular directory"):
+        bubblewrap_command(
+            qwen_root=qwen_root, private_home=home, workspace_root=swapped,
+            port=4170,
+        )
+
+
 def test_supervisor_keeps_npm_install_root_when_bin_is_symlink(tmp_path):
     root = tmp_path / "qwen-install"
     package = root / "node_modules" / "@qwen-code" / "qwen-code"
