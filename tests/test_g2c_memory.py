@@ -521,6 +521,49 @@ async def test_executor_backstop_denies_legacy_tools_for_companion_scope(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_executor_backstop_denies_dynamic_legacy_memory_mcp_tool(monkeypatch):
+    """Generated MCP server IDs must not bypass the Companion memory policy."""
+    from collections import namedtuple
+    import src.tool_execution as tool_execution
+
+    block = namedtuple("ToolBlock", ["tool_type", "content"])(
+        "mcp__server_7f3a__memory_save", '{"text": "global fact"}'
+    )
+    monkeypatch.setattr(tool_execution, "_scope_kind_for_session", lambda _session_id: "project")
+
+    desc, result = await tool_execution.execute_tool_block(
+        block,
+        session_id="project-home",
+        security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+    )
+
+    assert desc.endswith(": BLOCKED")
+    assert result["policy"] == "companion_scope"
+
+
+def test_companion_prompt_filters_dynamic_legacy_memory_mcp_schemas():
+    """Companion prompts retain ordinary MCP schemas, but not global memory."""
+    from src.agent_loop import _build_system_prompt
+
+    class FakeMcp:
+        def get_all_openai_schemas(self, _disabled):
+            return [
+                {"type": "function", "function": {"name": "mcp__server_7f3a__memory_save"}},
+                {"type": "function", "function": {"name": "mcp__calendar__list_events"}},
+            ]
+
+    _messages, schemas = _build_system_prompt(
+        [{"role": "user", "content": "help me"}],
+        model="test-model", active_document=None, mcp_mgr=FakeMcp(),
+        suppress_skills=True, companion_scope=True,
+    )
+    names = {schema["function"]["name"] for schema in schemas}
+
+    assert "mcp__server_7f3a__memory_save" not in names
+    assert "mcp__calendar__list_events" in names
+
+
+@pytest.mark.asyncio
 async def test_executor_backstop_keeps_legacy_tools_available_to_general_chats(monkeypatch):
     """The Companion backstop must not change ordinary Odysseus chat policy."""
     from collections import namedtuple

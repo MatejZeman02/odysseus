@@ -25,6 +25,23 @@ _COMPANION_LEGACY_DENIED_TOOLS = frozenset({
     "search_chats",
 })
 
+# Dynamic MCP servers namespace their tools as ``mcp__<server>__<tool>``.  An
+# installed memory server can therefore evade the three stable tool names
+# above (for example, ``mcp__server_uuid__memory_save``).  These names all
+# operate on legacy global memory and have no home/project/grant-aware
+# contract, so Companion homes must never expose or dispatch them either.
+_COMPANION_LEGACY_MEMORY_MCP_ACTIONS = frozenset({
+    "manage_memory",
+    "memory_add",
+    "memory_delete",
+    "memory_edit",
+    "memory_get",
+    "memory_list",
+    "memory_save",
+    "memory_search",
+    "memory_update",
+})
+
 _LABELS = {
     WEB_SEARCH: "Web search",
     WORKSPACE_READ: "Working directory",
@@ -51,6 +68,26 @@ def legacy_tools_denied_for_scope(scope_kind: str) -> frozenset[str]:
     if str(scope_kind or "general") in {"personal", "project", "computer"}:
         return _COMPANION_LEGACY_DENIED_TOOLS
     return frozenset()
+
+
+def legacy_tool_denied_for_scope(tool_name: str, scope_kind: str) -> bool:
+    """Return whether one stable or qualified tool bypasses Companion scope.
+
+    This intentionally applies only to the known legacy global-memory tool
+    family. Other MCP integrations keep their ordinary capability policy;
+    Companion scope does not imply a blanket MCP ban.
+    """
+    if str(scope_kind or "general") not in {"personal", "project", "computer"}:
+        return False
+    normalized = str(tool_name or "").strip().casefold()
+    if normalized in _COMPANION_LEGACY_DENIED_TOOLS:
+        return True
+    if not normalized.startswith("mcp__"):
+        return False
+    # ``split`` rather than a positional server-id assumption: installed MCP
+    # server IDs can themselves be generated identifiers.
+    leaf = normalized.rsplit("__", 1)[-1]
+    return leaf in _COMPANION_LEGACY_MEMORY_MCP_ACTIONS
 
 
 def normalize(raw: Any, *, scope_kind: str) -> dict[str, bool]:

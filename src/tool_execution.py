@@ -867,12 +867,10 @@ async def _execute_tool_block_impl(
     # legacy global memory, learned skills, and raw cross-chat search in the
     # shared executor too, so an alternate caller cannot reopen them merely by
     # omitting the route-level ``disabled_tools`` set.
-    from src.companion_capabilities import legacy_tools_denied_for_scope
+    from src.companion_capabilities import legacy_tool_denied_for_scope
 
-    companion_denied = legacy_tools_denied_for_scope(
-        _scope_kind_for_session(session_id) or "general"
-    )
-    if not policy_names.isdisjoint(companion_denied):
+    companion_scope = _scope_kind_for_session(session_id) or "general"
+    if any(legacy_tool_denied_for_scope(name, companion_scope) for name in policy_names):
         desc = f"{tool}: BLOCKED"
         result = {
             "error": (

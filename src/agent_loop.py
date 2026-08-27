@@ -2371,6 +2371,19 @@ def _build_system_prompt(
     mcp_schemas = []
     if mcp_mgr:
         mcp_schemas = mcp_mgr.get_all_openai_schemas(mcp_disabled_map or {})
+    if companion_scope:
+        # MCP tool names carry an arbitrary installed server id.  Filter the
+        # legacy global-memory family by its stable action leaf so a server
+        # such as ``mcp__uuid__memory_save`` cannot bypass scoped continuity.
+        from src.companion_capabilities import legacy_tool_denied_for_scope
+
+        mcp_schemas = [
+            schema for schema in mcp_schemas
+            if not legacy_tool_denied_for_scope(
+                schema.get("function", {}).get("name") or schema.get("name") or "",
+                "personal",
+            )
+        ]
 
     set_active_model(model)
 
