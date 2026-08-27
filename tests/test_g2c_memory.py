@@ -413,6 +413,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "checkpoint-mounts" in routes
     assert "Read-only checkpoint mounts" in ui
     assert "companion-attach-checkpoint" in ui
+    assert "Personal threads" in ui
+    assert "personalThreads" in ui
 
 
 def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store, monkeypatch):

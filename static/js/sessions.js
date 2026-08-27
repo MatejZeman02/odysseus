@@ -1623,9 +1623,15 @@ function _renderSessionListImpl() {
       uiModule.showToast?.('New project thread · shared brief, fresh transcript', 2600);
     };
     const personal = companion.find(s => s.scope_kind === 'personal' && s.is_scope_primary);
+    const personalThreads = companion.filter(s => s.scope_kind === 'personal' && !s.is_scope_primary);
     const computer = companion.find(s => s.scope_kind === 'computer' && s.is_scope_primary);
     if (personal) appendHome(personal, 'Personal Advisor');
     else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Personal Advisor'; button.onclick = () => openBuiltinHome('personal'); _frag.appendChild(button); }
+    if (personalThreads.length) {
+      const threadsHeading = document.createElement('div');
+      threadsHeading.className = 'date-section-header'; threadsHeading.textContent = 'Personal threads'; _frag.appendChild(threadsHeading);
+      personalThreads.forEach(thread => appendHome(thread, thread.name || 'Personal thread'));
+    }
     if (computer) appendHome(computer, 'Computer Help', ' · diagnostics');
     else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Computer Help · diagnostics'; button.onclick = () => openBuiltinHome('computer'); _frag.appendChild(button); }
     const projectsHeading = document.createElement('div');
