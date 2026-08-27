@@ -16,6 +16,15 @@ SANDBOX_READ = "sandbox_read"
 
 ALL_CAPABILITIES = frozenset({WEB_SEARCH, WORKSPACE_READ, SYSTEM_OBSERVE, SANDBOX_READ})
 
+# These legacy tools have no home/project/grant-aware contract.  Companion
+# homes must use the continuity, artifact, and explicit-transfer APIs instead
+# of being able to read or mutate global native memory/skills or raw chats.
+_COMPANION_LEGACY_DENIED_TOOLS = frozenset({
+    "manage_memory",
+    "manage_skills",
+    "search_chats",
+})
+
 _LABELS = {
     WEB_SEARCH: "Web search",
     WORKSPACE_READ: "Working directory",
@@ -35,6 +44,13 @@ def defaults_for_scope(scope_kind: str) -> dict[str, bool]:
         SYSTEM_OBSERVE: scope == "computer",
         SANDBOX_READ: False,
     }
+
+
+def legacy_tools_denied_for_scope(scope_kind: str) -> frozenset[str]:
+    """Return tools that would bypass Companion scope and provenance rules."""
+    if str(scope_kind or "general") in {"personal", "project", "computer"}:
+        return _COMPANION_LEGACY_DENIED_TOOLS
+    return frozenset()
 
 
 def normalize(raw: Any, *, scope_kind: str) -> dict[str, bool]:

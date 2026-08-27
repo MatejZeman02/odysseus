@@ -836,9 +836,15 @@ def setup_chat_routes(
         tool_policy = build_effective_tool_policy(last_user_message=message)
         allow_tool_preprocessing = not tool_policy.block_all_tool_calls
 
-        # Inline memory command
+        # Inline legacy-memory commands are unavailable to scoped Companion
+        # homes. Their durable state is handled by continuity proposals and
+        # working artifacts, never the global native memory manager.
         memory_response = None
-        if not tool_policy.blocks("manage_memory"):
+        from src.companion_capabilities import legacy_tools_denied_for_scope
+        _companion_legacy_denied = legacy_tools_denied_for_scope(
+            getattr(sess, "scope_kind", "general") or "general",
+        )
+        if not tool_policy.blocks("manage_memory") and "manage_memory" not in _companion_legacy_denied:
             memory_response = await chat_handler.handle_memory_command(sess, message)
         if memory_response:
             return {"response": memory_response}
@@ -1558,11 +1564,20 @@ def setup_chat_routes(
         # browser bash switch.  It is a new, broker-owned capability and stays
         # absent until this chat has explicitly enabled it *and* readiness has
         # admitted the qualified Podman profile.
+        from src.companion_capabilities import (
+            SANDBOX_READ,
+            legacy_tools_denied_for_scope,
+            normalize as normalize_chat_capabilities,
+        )
+        _chat_scope_kind = getattr(sess, "scope_kind", "general") or "general"
+        # This denial is independent of any optional sandbox metadata. A
+        # malformed/legacy capability record must not re-enable global memory
+        # or raw-chat tooling in a Companion home.
+        disabled_tools.update(legacy_tools_denied_for_scope(_chat_scope_kind))
         try:
-            from src.companion_capabilities import SANDBOX_READ, normalize as normalize_chat_capabilities
             _chat_capabilities = normalize_chat_capabilities(
                 getattr(sess, "capability_grants", None),
-                scope_kind=getattr(sess, "scope_kind", "general") or "general",
+                scope_kind=_chat_scope_kind,
             )
             if not _chat_capabilities.get(SANDBOX_READ, False):
                 disabled_tools.add("sandbox_read")

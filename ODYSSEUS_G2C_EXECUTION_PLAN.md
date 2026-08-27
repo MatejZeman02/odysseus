@@ -280,7 +280,10 @@ Implementation sequence:
 
 Do not enable Qwen auto-memory or AgentMemory's unscoped free-form `remember`
 path. The context compiler remains the only component that admits recalled
-records into a model prompt.
+records into a model prompt. Personal, project, and Computer Help homes also
+server-disable the legacy global `manage_memory`, `manage_skills`, and
+`search_chats` tools; the browser cannot regain those cross-scope paths by
+switching from Chat to native Agent mode.
 
 ### C4 preflight audit (2026-08)
 

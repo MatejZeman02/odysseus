@@ -45,6 +45,16 @@ def test_companion_agent_turns_suppress_global_skills_without_disabling_normal_a
     assert _suppress_global_skills(low_signal_turn=False, companion_scope=True) is True
 
 
+def test_companion_capabilities_deny_unscoped_legacy_memory_skill_and_chat_tools():
+    from src.companion_capabilities import legacy_tools_denied_for_scope
+
+    expected = {"manage_memory", "manage_skills", "search_chats"}
+    assert legacy_tools_denied_for_scope("personal") == expected
+    assert legacy_tools_denied_for_scope("project") == expected
+    assert legacy_tools_denied_for_scope("computer") == expected
+    assert legacy_tools_denied_for_scope("general") == frozenset()
+
+
 def test_personal_turn_does_not_schedule_global_auto_memory(monkeypatch):
     """The gate protects the actual post-response dispatch, not just a helper."""
     import routes.chat_helpers as helpers
