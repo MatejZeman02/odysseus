@@ -15,6 +15,7 @@ import logging
 import os
 import pathlib
 import re
+import stat
 import sys
 import time
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
@@ -333,7 +334,19 @@ def vet_workspace(raw: str) -> Optional[str]:
     raw = (raw or "").strip()
     if not raw:
         return None
-    resolved = os.path.realpath(os.path.expanduser(raw))
+    expanded = os.path.expanduser(raw)
+    # A workspace is an authority boundary.  ``realpath`` would silently turn
+    # a symlink selected in the browser into whichever directory it currently
+    # targets, including after a replacement.  Companion project, Qwen, and
+    # patch paths already reject their leaf binding when it is a symlink; the
+    # shared native-tool binding must provide the same guarantee.
+    try:
+        metadata = os.lstat(expanded)
+    except OSError:
+        return None
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        return None
+    resolved = os.path.realpath(expanded)
     if not os.path.isdir(resolved) or _is_sensitive_path(resolved):
         return None
     # Reject filesystem roots: binding / (or a Windows drive/UNC root) as the
@@ -768,7 +781,20 @@ async def execute_tool_block(
                 decision.reason or "Tool blocked by external-context policy.",
             )
 
-    token = _active_workspace.set(workspace or None)
+    bound_workspace = None
+    if workspace:
+        bound_workspace = vet_workspace(workspace)
+        if not bound_workspace:
+            return (
+                f"{getattr(block, 'tool_type', None)}: BLOCKED",
+                {
+                    "error": "The requested working directory is not a safe regular directory.",
+                    "exit_code": 1,
+                    "blocked": True,
+                    "policy": "workspace_binding",
+                },
+            )
+    token = _active_workspace.set(bound_workspace)
     try:
         output = await _execute_tool_block_impl(
             block,

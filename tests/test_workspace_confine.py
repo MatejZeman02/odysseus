@@ -474,11 +474,66 @@ def test_vet_workspace_rejects_nondir_and_empty(ws):
     assert vet_workspace("   ") is None
 
 
+def test_vet_workspace_rejects_a_symlinked_leaf(tmp_path):
+    from src.tool_execution import vet_workspace
+
+    target = tmp_path / "target"
+    target.mkdir()
+    linked = tmp_path / "workspace-link"
+    linked.symlink_to(target, target_is_directory=True)
+
+    assert vet_workspace(str(linked)) is None
+
+
 def test_vet_workspace_rejects_filesystem_root():
     # Binding / would make every absolute path "inside" the workspace,
     # collapsing confinement into host-wide file access.
     from src.tool_execution import vet_workspace
     assert vet_workspace("/") is None
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_block_rejects_an_unsafe_workspace_before_dispatch(monkeypatch, tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    linked = tmp_path / "workspace-link"
+    linked.symlink_to(target, target_is_directory=True)
+
+    async def should_not_dispatch(*args, **kwargs):
+        raise AssertionError("unsafe workspace reached tool implementation")
+
+    import src.tool_execution as tool_execution
+    monkeypatch.setattr(tool_execution, "_execute_tool_block_impl", should_not_dispatch)
+
+    description, result = await execute_tool_block(
+        _block("ls", ""), owner="a", workspace=str(linked),
+    )
+
+    assert description == "ls: BLOCKED"
+    assert result["policy"] == "workspace_binding"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_block_binds_the_vetted_regular_workspace(monkeypatch, tmp_path):
+    import src.tool_execution as tool_execution
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    captured = {}
+
+    async def fake_dispatch(*args, **kwargs):
+        captured["workspace"] = tool_execution.get_active_workspace()
+        return "ls: OK", {"exit_code": 0}
+
+    monkeypatch.setattr(tool_execution, "_execute_tool_block_impl", fake_dispatch)
+
+    description, result = await execute_tool_block(
+        _block("ls", ""), owner="a", workspace=str(workspace),
+    )
+
+    assert (description, result) == ("ls: OK", {"exit_code": 0})
+    assert captured["workspace"] == str(workspace)
+    assert tool_execution.get_active_workspace() is None
 
 
 def test_browse_marks_root_unselectable_and_vet_endpoint(monkeypatch):
