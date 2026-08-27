@@ -53,6 +53,34 @@ NO_TOOL_SECURITY_CONTEXT = _NoToolSecurityContext()
 _AGENT_WORKDIR = DATA_DIR
 
 
+def _scope_kind_for_session(session_id: Optional[str]) -> Optional[str]:
+    """Return a persisted session scope for executor-level capability checks.
+
+    Route-level tool selection is the ordinary control surface, but tool
+    execution is shared by several callers. This deliberately independent
+    lookup prevents an alternate caller from restoring a global-memory or
+    cross-chat tool merely by omitting it from ``disabled_tools``.
+
+    Failure to read the session is non-authoritative: ordinary route-level
+    denials remain in force, and this helper only adds a deny when the durable
+    Companion scope can be established.
+    """
+    if not session_id:
+        return None
+    try:
+        from core.database import Session as DbSession, SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession.scope_kind).filter(DbSession.id == session_id).first()
+            return str(row[0] or "general") if row else None
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("Could not resolve tool executor session scope", exc_info=True)
+        return None
+
+
 
 # ---------------------------------------------------------------------------
 # Path confinement for read_file / write_file
@@ -833,6 +861,29 @@ async def _execute_tool_block_impl(
         desc = f"{tool}: BLOCKED"
         result = {"error": f"Tool '{tool}' is disabled by user.", "exit_code": 1}
         logger.info(f"Tool blocked by user: {tool}")
+        return desc, result
+
+    # Companion homes have a dedicated continuity/artifact contract. Deny
+    # legacy global memory, learned skills, and raw cross-chat search in the
+    # shared executor too, so an alternate caller cannot reopen them merely by
+    # omitting the route-level ``disabled_tools`` set.
+    from src.companion_capabilities import legacy_tools_denied_for_scope
+
+    companion_denied = legacy_tools_denied_for_scope(
+        _scope_kind_for_session(session_id) or "general"
+    )
+    if not policy_names.isdisjoint(companion_denied):
+        desc = f"{tool}: BLOCKED"
+        result = {
+            "error": (
+                f"Tool '{tool}' is unavailable in this Companion home. Use scoped continuity, "
+                "approved context grants, or working artifacts instead."
+            ),
+            "exit_code": 1,
+            "blocked": True,
+            "policy": "companion_scope",
+        }
+        logger.warning("Companion scope blocked tool=%s session_id=%s", tool, session_id)
         return desc, result
 
     if tool_policy and any(tool_policy.blocks(name) for name in policy_names):

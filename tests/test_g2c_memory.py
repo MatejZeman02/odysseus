@@ -500,6 +500,49 @@ def test_companion_agent_prompt_explains_scoped_legacy_tool_boundary():
     assert "working artifacts" in prompt
 
 
+@pytest.mark.asyncio
+async def test_executor_backstop_denies_legacy_tools_for_companion_scope(monkeypatch):
+    """A bypassed route-level disabled set must not reopen global memory."""
+    from collections import namedtuple
+    import src.tool_execution as tool_execution
+
+    block = namedtuple("ToolBlock", ["tool_type", "content"])("manage_memory", "list")
+    monkeypatch.setattr(tool_execution, "_scope_kind_for_session", lambda _session_id: "personal")
+
+    desc, result = await tool_execution.execute_tool_block(
+        block,
+        session_id="personal-home",
+        security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+    )
+
+    assert desc == "manage_memory: BLOCKED"
+    assert result["policy"] == "companion_scope"
+    assert result["blocked"] is True
+
+
+@pytest.mark.asyncio
+async def test_executor_backstop_keeps_legacy_tools_available_to_general_chats(monkeypatch):
+    """The Companion backstop must not change ordinary Odysseus chat policy."""
+    from collections import namedtuple
+    import src.tool_execution as tool_execution
+
+    block = namedtuple("ToolBlock", ["tool_type", "content"])("manage_memory", "list")
+    monkeypatch.setattr(tool_execution, "_scope_kind_for_session", lambda _session_id: "general")
+
+    async def fake_impl(*_args, **_kwargs):
+        return "manage_memory", {"exit_code": 0}
+
+    monkeypatch.setattr(tool_execution, "_execute_tool_block_impl", fake_impl)
+    desc, result = await tool_execution.execute_tool_block(
+        block,
+        session_id="ordinary-chat",
+        security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+    )
+
+    assert desc == "manage_memory"
+    assert result["exit_code"] == 0
+
+
 def test_default_companion_recall_never_constructs_legacy_native_provider(store, monkeypatch):
     """Companion prompt assembly must stay independent of native auto-memory."""
     from src.memory_provider import NativeMemoryProvider
