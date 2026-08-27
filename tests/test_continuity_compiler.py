@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, Session as DbSession
-from src.continuity import ProjectBriefV1, ThreadCheckpointV1
+from core.database import Base, ChatMessage as DbMessage, Session as DbSession
+from src.continuity import ProjectBriefV1, SemanticCheckpointProposalV1, ThreadCheckpointV1
 from src.continuity.compiler import CheckpointCompactor, ContextCompiler
 from src.continuity.store import ContinuityStore
 import src.continuity.store as continuity_store_module
@@ -192,3 +192,41 @@ def test_project_fork_receives_shared_brief_but_not_primary_raw_tail_or_checkpoi
     assert computer.primary_project_brief is None
     assert computer.related_project_briefs == ()
     assert "Dust" not in str(computer.manifest)
+
+
+def test_project_fork_receives_owner_promoted_semantic_brief_not_primary_transcript(monkeypatch):
+    store = _store(monkeypatch)
+    _add_session(continuity_store_module.SessionLocal, "fork")
+    project = store.create_project(owner="alice", name="Dust", workspace_root="/dust")
+    store.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=project)
+    store.bind_session(owner="alice", session_id="fork", scope_kind="project", project_id=project)
+    db = continuity_store_module.SessionLocal()
+    db.add_all([
+        DbMessage(id="semantic-1", session_id="session", role="user", content="Keep the crystal conflict unresolved", meta_data="{}"),
+        DbMessage(id="semantic-2", session_id="session", role="assistant", content="The documents disagree about its origin", meta_data="{}"),
+    ])
+    db.commit()
+    source_hash = ContinuityStore._source_message_hash(
+        db, session_id="session", source_ids=["semantic-1", "semantic-2"],
+    )
+    db.close()
+    proposal = SemanticCheckpointProposalV1(
+        session_id="session", scope_kind="project", project_id=project,
+        objective="Resolve the crystal conflict", facts=["The documents disagree about its origin"],
+        source_message_ids=["semantic-1", "semantic-2"], source_through_message_id="semantic-2",
+        source_hash=source_hash, derivation_model="model-a",
+    )
+    written = store.write_semantic_proposal(owner="alice", proposal=proposal)
+    store.promote_semantic_proposal(
+        owner="alice", proposal_id=written.id, expected_revision=written.revision,
+        selections={"objective": [0], "facts": [0]},
+    )
+
+    fork = ContextCompiler(store, tail_count=1).compile(
+        owner="alice", session_id="fork", request="what remains?", transcript=[_message("user", "fork question", 9)],
+    )
+    assert fork.thread_checkpoint is None
+    assert fork.primary_project_brief.derivation_status == "accepted"
+    assert fork.primary_project_brief.summary == "Resolve the crystal conflict"
+    assert fork.primary_project_brief.confirmed_facts == ["The documents disagree about its origin"]
+    assert "crystal conflict" not in str(fork.transcript_tail)

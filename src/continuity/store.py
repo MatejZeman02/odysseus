@@ -50,6 +50,14 @@ class SemanticProposalRecord:
     proposal: SemanticCheckpointProposalV1
 
 
+@dataclass(frozen=True)
+class SemanticProposalAttemptRecord:
+    id: str
+    revision: int
+    outcome: str
+    code: str
+
+
 def _settings(project: Project) -> dict:
     try:
         value = json.loads(project.settings_json or "{}")
@@ -303,6 +311,47 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def write_semantic_proposal_attempt(
+        self, *, owner: str, session_id: str, outcome: str, code: str,
+    ) -> SemanticProposalAttemptRecord:
+        """Persist one safe background outcome, never provider output or text.
+
+        This record is observability for the owner, not semantic context. Its
+        payload has only a stable code; diagnostics and raw model output stay
+        in server logs. A new attempt supersedes the previous status for the
+        same session while revision history remains available to operators.
+        """
+        if outcome not in {"ready", "failed", "cancelled"}:
+            raise ValueError("invalid semantic proposal attempt outcome")
+        if not code or len(code) > 64 or not code.replace("_", "").isalnum():
+            raise ValueError("invalid semantic proposal attempt code")
+        db = SessionLocal()
+        try:
+            session = self._session(db, owner, session_id)
+            scope = self._resolved(db, session, owner)
+            if scope.scope_kind not in {"personal", "project"}:
+                raise ScopeConflictError("semantic proposal attempts require a Companion home")
+            payload = {"schema_version": 1, "outcome": outcome, "code": code}
+            source_hash = hashlib.sha256(
+                f"semantic-proposal-attempt:{session_id}:{outcome}:{code}:{uuid.uuid4().hex}".encode("utf-8")
+            ).hexdigest()
+            write = self._write(
+                db,
+                owner=owner,
+                kind="semantic_checkpoint_attempt_v1",
+                session_id=session_id,
+                project_id=scope.project_id,
+                payload=payload,
+                source_through_message_id=None,
+                source_hash=source_hash,
+            )
+            return SemanticProposalAttemptRecord(write.id, write.revision, outcome, code)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def latest_thread_checkpoint(self, *, owner: str, session_id: str) -> Optional[ThreadCheckpointV1]:
         artifact = self._latest(owner=owner, kind="thread_checkpoint_v1", session_id=session_id)
         return ThreadCheckpointV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
@@ -329,6 +378,20 @@ class ContinuityStore:
             status=artifact.status,
             proposal=SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json)),
         )
+
+    def latest_semantic_proposal_attempt(
+        self, *, owner: str, session_id: str,
+    ) -> Optional[SemanticProposalAttemptRecord]:
+        artifact = self._latest(owner=owner, kind="semantic_checkpoint_attempt_v1", session_id=session_id)
+        if artifact is None:
+            return None
+        try:
+            payload = json.loads(artifact.payload_json)
+            outcome = str(payload["outcome"])
+            code = str(payload["code"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ContinuityError("stored semantic proposal attempt is invalid") from exc
+        return SemanticProposalAttemptRecord(artifact.id, artifact.revision, outcome, code)
 
     def semantic_proposal(self, *, owner: str, proposal_id: str) -> SemanticProposalRecord:
         db = SessionLocal()

@@ -156,6 +156,24 @@ def test_semantic_proposal_rejects_invalid_scope_or_promotion_status(store):
         continuity.write_semantic_proposal(owner="alice", proposal=mismatch)
 
 
+def test_semantic_proposal_attempts_are_safe_revisioned_observability(store):
+    continuity, _ = store
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="personal")
+
+    failed = continuity.write_semantic_proposal_attempt(
+        owner="alice", session_id="alice-session", outcome="failed", code="provider_failed",
+    )
+    cancelled = continuity.write_semantic_proposal_attempt(
+        owner="alice", session_id="alice-session", outcome="cancelled", code="newer_turn",
+    )
+
+    assert (failed.revision, failed.outcome, failed.code) == (1, "failed", "provider_failed")
+    assert (cancelled.revision, cancelled.outcome, cancelled.code) == (2, "cancelled", "newer_turn")
+    assert continuity.latest_semantic_proposal_attempt(
+        owner="alice", session_id="alice-session",
+    ) == cancelled
+
+
 def _source_hash(local_session, session_id, source):
     db = local_session()
     for message_id, role, content in source:

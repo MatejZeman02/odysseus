@@ -1,7 +1,7 @@
 # Odysseus G2C Execution Plan — Scoped Chat Memory and Working Artifacts
 
-**Status:** C0 complete; C1 proposal/promotion foundation implemented; C2
-continuation proof is next after the remaining C1 integration checks
+**Status:** C0 complete; C1 implementation complete pending a configured-model
+canary; C2 continuation proof is next.
 
 **Depends on:** the implemented Companion homes, non-destructive continuity
 store/compiler, and reviewed project-patch transaction boundary.
@@ -65,10 +65,15 @@ rehashes cited messages inside the transaction and rejects stale, deleted, or
 scope-mismatched source material. Provider or schema failure persists no
 proposal and never changes home memory.
 
-Still required before calling C1 complete: an automatic/scheduled proposal
-trigger that cannot delay a foreground turn, cancellation/concurrency and
-restart coverage for that trigger, and an owner-visible proposal history rather
-than only the current proposal card.
+C1 now also has a debounced owner/session scheduler: after a completed
+Companion turn it waits for quiet time, runs outside the foreground request,
+and is cancelled as soon as a newer foreground turn starts. A keyed admission
+rule prevents a late background result from replacing a proposal the owner is
+already reviewing. The Context panel exposes compact proposal history and the
+last safe background outcome (`ready`, `cancelled`, or a stable failure code),
+without storing provider output. These rows survive restart; a shutdown merely
+abandons an in-flight derivation before it can write. The only C1 qualification
+still outstanding is a manual canary against a real configured provider.
 
 ## Memory layers
 
@@ -302,7 +307,7 @@ context explain that these are convenience background rather than accepted
 truth. The migration is additive, restart-safe, owner-isolated, and reversible
 by ignoring the derived layer.
 
-### C1 — Validated semantic checkpoint proposals — in progress
+### C1 — Validated semantic checkpoint proposals — implementation complete
 
 Replace the heuristic writer with a bounded, schema-validated derivation
 request. It must emit separate fields for facts, owner-accepted decisions,
@@ -333,10 +338,12 @@ calls it with a no-tools extraction prompt. The Context panel offers explicit
 per-entry review and promotion. The transaction marks the proposal `promoted`
 only after it has revalidated the source span and written the accepted brief.
 
-**Remaining integration gate:** run proposal derivation off the foreground
-request path with one-at-a-time admission; make cancellation and provider
-failure visible in the Context panel; retain/browse source-linked historical
-proposals; and verify clean restart/replay against a real configured provider.
+**Implemented integration:** the derivation is debounced off the foreground
+path, cancellation is triggered by a newer foreground turn, active proposals
+win over late background work, and safe attempt outcomes plus proposal history
+are owner-visible after restart. The outstanding operational gate is a manual
+canary against a configured provider; it must confirm no foreground latency
+regression and correct Context disclosure before C1 is declared fully shipped.
 
 ### C2 — Prove durable continuation
 

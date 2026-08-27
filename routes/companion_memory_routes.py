@@ -110,6 +110,7 @@ def setup_companion_memory_routes() -> APIRouter:
             personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
             proposal = store.latest_semantic_proposal_record(owner=owner, session_id=session_id)
             proposal_history = store.semantic_proposal_history(owner=owner, session_id=session_id)
+            proposal_attempt = store.latest_semantic_proposal_attempt(owner=owner, session_id=session_id)
             return {
                 "scope_kind": scope_kind, "project_id": project_id,
                 "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
@@ -130,6 +131,11 @@ def setup_companion_memory_routes() -> APIRouter:
                     }
                     for record in proposal_history
                 ],
+                "semantic_proposal_attempt": ({
+                    "revision": proposal_attempt.revision,
+                    "outcome": proposal_attempt.outcome,
+                    "code": proposal_attempt.code,
+                } if proposal_attempt else None),
                 "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
                 "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
                 "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],

@@ -215,14 +215,32 @@ def _schedule_semantic_proposal(owner: str | None, session_id: str, message_coun
                 owner=str(owner), session_id=session_id, only_if_absent=True,
             )
             if result.created:
+                from src.continuity.store import ContinuityStore
+                ContinuityStore().write_semantic_proposal_attempt(
+                    owner=str(owner), session_id=session_id, outcome="ready", code="proposal_ready",
+                )
                 logger.info("[semantic-proposal] created bounded proposal for session %s", session_id)
         except asyncio.CancelledError:
+            try:
+                from src.continuity.store import ContinuityStore
+                ContinuityStore().write_semantic_proposal_attempt(
+                    owner=str(owner), session_id=session_id, outcome="cancelled", code="newer_turn",
+                )
+            except Exception:
+                logger.debug("[semantic-proposal] could not persist cancellation for %s", session_id, exc_info=True)
             logger.debug("[semantic-proposal] cancelled for session %s", session_id)
             raise
         except Exception as exc:
             # The safe failure is intentionally not injected into chat or
             # accepted memory. The owner still has the explicit Context action.
             code = getattr(exc, "code", "unknown")
+            try:
+                from src.continuity.store import ContinuityStore
+                ContinuityStore().write_semantic_proposal_attempt(
+                    owner=str(owner), session_id=session_id, outcome="failed", code=code,
+                )
+            except Exception:
+                logger.debug("[semantic-proposal] could not persist failure for %s", session_id, exc_info=True)
             logger.info("[semantic-proposal] skipped for session %s (%s)", session_id, code)
         finally:
             current = _SEMANTIC_PROPOSAL_TASKS.get(key)
