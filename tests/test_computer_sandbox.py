@@ -176,6 +176,8 @@ def test_readonly_pipeline_is_structured_allowlisted_and_never_uses_caller_shell
     assert "--network=none" in built
     assert "--read-only" in built
     assert any("relabel=private" in value for value in built)
+    assert built.count("--workdir") == 1
+    assert built[built.index("--workdir") + 1] == "/inputs"
     assert built[-1] == "set -f; find . -name '*.md'"
 
 

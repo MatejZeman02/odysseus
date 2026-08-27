@@ -374,7 +374,14 @@ def readiness() -> ComputerSandboxReadiness:
     return ComputerSandboxReadiness(podman, configured, image_local, qualified, reason)
 
 
-def _podman_task_command(image: str, *, input_dir: Path, script: str, name: str | None = None) -> list[str]:
+def _podman_task_command(
+    image: str,
+    *,
+    input_dir: Path,
+    script: str,
+    name: str | None = None,
+    workdir: str = "/task",
+) -> list[str]:
     """The non-negotiable command-only container boundary."""
     command = [
         "podman", "run", "--rm", "--pull=never", "--network=none", "--read-only",
@@ -391,7 +398,7 @@ def _podman_task_command(image: str, *, input_dir: Path, script: str, name: str 
         # This is a fresh server-created temporary input tree, never a user
         # workspace, so private relabeling cannot relabel user data.
         "--mount", f"type=bind,src={input_dir},dst=/inputs,ro=true,relabel=private",
-        "--workdir", "/task", "--env", "HOME=/home/sandbox", "--env", "TMPDIR=/tmp",
+        "--workdir", workdir, "--env", "HOME=/home/sandbox", "--env", "TMPDIR=/tmp",
         "--env", "PATH=/usr/bin:/bin", "--env", "LC_ALL=C",
     ]
     if name:
@@ -412,10 +419,10 @@ def _podman_readonly_pipeline_command(image: str, *, input_dir: Path, commands: 
     command into this string.
     """
     rendered = _render_pipeline(commands)
-    base = _podman_task_command(image, input_dir=input_dir, script="true")
+    base = _podman_task_command(image, input_dir=input_dir, script="true", workdir="/inputs")
     # Strip ``--entrypoint /bin/sh IMAGE -ec SCRIPT`` and replace it with the
     # controlled pipeline.  Keep every isolation flag from the base command.
-    return base[:-5] + ["--workdir", "/inputs", "--entrypoint", "/bin/sh", image, "-ec", f"set -f; {rendered}"]
+    return base[:-5] + ["--entrypoint", "/bin/sh", image, "-ec", f"set -f; {rendered}"]
 
 
 def _container_exists(name: str) -> bool:
