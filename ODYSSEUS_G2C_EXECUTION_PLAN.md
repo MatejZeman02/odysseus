@@ -289,11 +289,15 @@ session metadata, but has no first-class home, project, sensitivity, grant,
 retention, expiry, or provenance constraints. It must not be treated as a
 scoped AgentMemory adapter yet.
 
-Consequently, the next C4 change is an owner-confirmed, read-only inventory and
-export/backup report. It must report counts, validity, owner/scope coverage and
-provider availability without leaking memory text into a browser response. No
-legacy record, vector collection, or AgentMemory backend may be read for
-migration, re-indexed, or written until that inventory is explicitly approved.
+An owner-confirmed, read-only inventory is now available from Personal
+Advisor’s Context panel. It reports only the current owner's aggregate entry
+count/category/provenance coverage, ownerless compatibility count, a boolean
+that foreign owner records exist, and vector readiness. It deliberately uses
+the strict native-memory reader, returns no memory text or filesystem paths,
+and performs no export, backup, vector read/write, provider call, or migration.
+The next C4 gate is a separately approved owner-scoped export/backup report;
+no legacy record, vector collection, or AgentMemory backend may be re-indexed
+or written until that report is reviewed.
 
 ## Conversation attachment, not transcript merging
 

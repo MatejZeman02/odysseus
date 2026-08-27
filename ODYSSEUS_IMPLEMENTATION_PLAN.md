@@ -153,9 +153,9 @@ retrieval backend rather than project authority.
 **Preflight audit:** the current native JSON memory manager has useful
 owner-aware, fail-closed mutation and compatibility/export behavior, but its
 provider abstraction lacks explicit home/project/sensitivity/grant/retention/
-expiry/provenance filters. C4 must first add an owner-confirmed inventory and
-backup report, then extend that contract before attempting AgentMemory recall
-or writes.
+expiry/provenance filters. An owner-confirmed, aggregate-only inventory is now
+available; a separately approved backup report and scoped contract extension
+remain mandatory before attempting AgentMemory recall or writes.
 
 ### Stage C5 — Continuity and project UX closure
 
