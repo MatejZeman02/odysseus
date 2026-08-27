@@ -417,6 +417,39 @@ def test_episodic_recall_excludes_expired_records_and_rejects_ambiguous_scope(st
         )
 
 
+def test_local_scoped_provider_enforces_complete_scope_and_provenance(store):
+    from src.memory_provider import ScopedMemoryQuery, ScopedMemoryScope
+    from src.scoped_memory import LocalScopedMemoryProvider
+
+    provider = LocalScopedMemoryProvider()
+    project_scope = ScopedMemoryScope(
+        owner_id="alice", home_kind="project", project_id="dust", session_id="project",
+        provenance_kind="thread_checkpoint", provenance_id="checkpoint-1",
+    )
+    stored = asyncio.run(provider.remember_scoped("Fish enemy design", scope=project_scope))
+    assert stored.scope == project_scope
+    assert stored.owner == "alice"
+
+    hits = asyncio.run(provider.recall_scoped(ScopedMemoryQuery("fish enemy", project_scope)))
+    assert [hit.memory.id for hit in hits] == [stored.id]
+    assert hits[0].memory.scope.provenance_id == "checkpoint-1"
+
+    personal_scope = ScopedMemoryScope(
+        owner_id="alice", home_kind="personal", project_id=None, session_id="personal",
+        provenance_kind="thread_checkpoint", provenance_id="personal-checkpoint",
+    )
+    assert asyncio.run(provider.recall_scoped(ScopedMemoryQuery("fish enemy", personal_scope))) == []
+    assert asyncio.run(provider.delete_scoped(stored.id, scope=personal_scope)) is False
+    assert asyncio.run(provider.delete_scoped(stored.id, scope=project_scope)) is True
+
+    with pytest.raises(ValueError, match="provenance"):
+        asyncio.run(provider.remember_scoped(
+            "must fail", scope=ScopedMemoryScope(
+                owner_id="alice", home_kind="project", project_id="dust", session_id="project",
+            ),
+        ))
+
+
 def test_g2c_routes_and_ui_keep_scopes_explicit():
     routes = open("routes/companion_memory_routes.py", encoding="utf-8").read()
     ui = open("static/js/sessions.js", encoding="utf-8").read()

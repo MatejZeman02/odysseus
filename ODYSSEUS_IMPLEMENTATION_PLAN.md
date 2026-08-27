@@ -161,6 +161,11 @@ The local fallback index already rejects mismatched home/project bindings and
 filters expired episodic records before ranking. This is a containment fix, not
 approval to migrate legacy records or enable AgentMemory.
 
+The provider-neutral scoped contract now fixes owner, home/project binding,
+session/source provenance, sensitivity, expiry, and opaque grant audit IDs
+before a provider operates. Its local adapter is conformance-only and is not
+registered as a replacement for the existing native-memory writer.
+
 ### Stage C5 — Continuity and project UX closure
 
 **Outcome:** long-running work is understandable and remains fast.

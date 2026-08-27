@@ -304,6 +304,14 @@ bindings and excludes expired records before ranking. It is still only the
 rebuildable local fallback, not an AgentMemory migration or a general-purpose
 auto-memory writer.
 
+`ScopedMemoryScope` and `ScopedMemoryQuery` now define the required C4
+provider boundary: owner, home, project binding, session provenance,
+sensitivity, expiry, source provenance, and opaque grant audit references are
+fixed before a provider can read or write. `LocalScopedMemoryProvider` is a
+strict adapter used for conformance tests only; it is not registered as a
+replacement writer and the legacy `NativeMemoryProvider` remains outside this
+scoped contract until a separately reviewed migration.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to

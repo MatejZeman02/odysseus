@@ -4,7 +4,60 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
+
+
+@dataclass(frozen=True)
+class ScopedMemoryScope:
+    """Non-optional tenancy and provenance contract for episodic memory.
+
+    This contract is intentionally separate from the legacy ``MemoryProvider``
+    methods.  Existing native memory has only owner/session metadata and must
+    not masquerade as a scoped continuity provider until it passes these
+    constraints.  Grant IDs are deliberately opaque audit references: callers
+    decide whether a grant is valid before building this scope; providers never
+    infer authority from arbitrary model text.
+    """
+
+    owner_id: str
+    home_kind: str
+    project_id: Optional[str]
+    session_id: Optional[str]
+    sensitivity: str = "normal"
+    expires_at: Optional[datetime] = None
+    provenance_kind: str = ""
+    provenance_id: str = ""
+    grant_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.owner_id:
+            raise ValueError("scoped memory requires an owner")
+        if self.home_kind not in {"personal", "project"}:
+            raise ValueError("scoped memory home kind is invalid")
+        if self.home_kind == "project" and not self.project_id:
+            raise ValueError("project scoped memory requires a project")
+        if self.home_kind == "personal" and self.project_id is not None:
+            raise ValueError("personal scoped memory cannot carry a project")
+        if self.sensitivity not in {"normal", "sensitive"}:
+            raise ValueError("scoped memory sensitivity is invalid")
+        if any(not grant_id for grant_id in self.grant_ids):
+            raise ValueError("scoped memory grant IDs must be non-empty")
+
+
+@dataclass(frozen=True)
+class ScopedMemoryQuery:
+    """A provider request with its scope fixed before recall starts."""
+
+    text: str
+    scope: ScopedMemoryScope
+    top_k: int = 5
+
+    def __post_init__(self) -> None:
+        if not str(self.text or "").strip():
+            raise ValueError("scoped memory query is empty")
+        if self.top_k < 1 or self.top_k > 20:
+            raise ValueError("scoped memory query limit is invalid")
 
 
 @dataclass
@@ -18,6 +71,7 @@ class MemoryRecord:
     source: str = "unknown"
     owner: Optional[str] = None
     session_id: Optional[str] = None
+    scope: Optional[ScopedMemoryScope] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -91,6 +145,41 @@ class MemoryProvider(ABC):
     async def handle_tool_call(self, name: str, arguments: Dict[str, Any]) -> Any:
         """Handle a provider-defined tool call."""
         raise KeyError(f"Provider {self.provider_id} does not expose tool {name}")
+
+
+class ScopedMemoryProvider(ABC):
+    """Provider-neutral contract for continuity-safe episodic retrieval.
+
+    Implementations are opt-in.  They must verify the exact scope *before*
+    ranking, store provenance with each record, honour expiry, and return no
+    sensitive record unless the calling policy built a matching sensitive scope.
+    The compiler remains the sole prompt-admission point.
+    """
+
+    scoped_provider_id = "unknown-scoped"
+
+    @abstractmethod
+    async def remember_scoped(
+        self,
+        text: str,
+        *,
+        scope: ScopedMemoryScope,
+        category: str = "fact",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> MemoryRecord:
+        """Store a source-validated episodic record within exactly one scope."""
+
+    @abstractmethod
+    async def recall_scoped(self, query: ScopedMemoryQuery) -> List[MemorySearchHit]:
+        """Return only records matching the complete query scope."""
+
+    @abstractmethod
+    async def list_scoped(self, *, scope: ScopedMemoryScope, limit: int = 100) -> List[MemoryRecord]:
+        """List non-expired records from exactly one owner/home/project scope."""
+
+    @abstractmethod
+    async def delete_scoped(self, memory_id: str, *, scope: ScopedMemoryScope) -> bool:
+        """Delete one record only when its complete stored scope matches."""
 
 
 class NativeMemoryProvider(MemoryProvider):
