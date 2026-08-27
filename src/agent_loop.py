@@ -3508,6 +3508,11 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
+def _suppress_global_skills(*, low_signal_turn: bool, companion_scope: bool) -> bool:
+    """Decide whether global learned skills may enter the agent prompt."""
+    return bool(low_signal_turn or companion_scope)
+
+
 async def stream_agent_loop(
     endpoint_url: str,
     model: str,
@@ -4426,7 +4431,9 @@ async def stream_agent_loop(
             # context.  Globally learned native skills have no matching
             # home/project/grant boundary, so they must not be injected into
             # those prompts. Explicitly admitted tools still remain available.
-            suppress_skills=_low_signal_turn or companion_scope,
+            suppress_skills=_suppress_global_skills(
+                low_signal_turn=_low_signal_turn, companion_scope=companion_scope,
+            ),
             active_email=active_email,
             workspace=workspace,
         )

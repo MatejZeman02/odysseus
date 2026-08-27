@@ -37,6 +37,14 @@ def test_companion_homes_never_queue_legacy_auto_memory_or_skill_extraction():
     assert _legacy_background_extraction_allowed(SimpleNamespace(scope_kind="general"), False) is False
 
 
+def test_companion_agent_turns_suppress_global_skills_without_disabling_normal_agents():
+    from src.agent_loop import _suppress_global_skills
+
+    assert _suppress_global_skills(low_signal_turn=False, companion_scope=False) is False
+    assert _suppress_global_skills(low_signal_turn=True, companion_scope=False) is True
+    assert _suppress_global_skills(low_signal_turn=False, companion_scope=True) is True
+
+
 def test_personal_turn_does_not_schedule_global_auto_memory(monkeypatch):
     """The gate protects the actual post-response dispatch, not just a helper."""
     import routes.chat_helpers as helpers
