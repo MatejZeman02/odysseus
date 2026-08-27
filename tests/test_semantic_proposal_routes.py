@@ -253,3 +253,19 @@ def test_legacy_memory_inventory_is_owner_aggregate_only_and_never_returns_text(
     assert inventory["agentmemory"] == {"configured": False, "migration_enabled": False}
     assert "private draft" not in str(inventory)
     assert "other owner's text" not in str(inventory)
+
+
+def test_project_relation_route_persists_owner_allowlist_without_project_content(monkeypatch):
+    router = _setup(monkeypatch)
+    continuity = ContinuityStore()
+    home = continuity.create_project(owner="alice", name="Home", workspace_root="/home")
+    related = continuity.create_project(owner="alice", name="Related", workspace_root="/related")
+    continuity.bind_session(owner="alice", session_id="session", scope_kind="project", project_id=home, force=True)
+    update = _endpoint(router, "/api/companion/memory/projects/{project_id}/relations", "PUT")
+    result = update(home, route_module.ProjectRelationWrite(related_project_ids=[related]), SimpleNamespace())
+
+    assert result["project_id"] == home
+    assert result["related_projects"] == [{"id": related, "name": "Related", "related": True}]
+    catalog = continuity.related_project_catalog(owner="alice", project_id=home)
+    assert catalog == [{"id": related, "name": "Related", "related": True}]
+    assert "summary" not in str(catalog)

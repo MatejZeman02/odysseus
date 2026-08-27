@@ -106,6 +106,12 @@ class CheckpointSynthesisCreate(BaseModel):
     source_checkpoint_ids: list[str] = Field(min_length=2, max_length=2)
 
 
+class ProjectRelationWrite(BaseModel):
+    """Owner-selected direct relations; IDs are validated against project rows."""
+    model_config = ConfigDict(extra="forbid")
+    related_project_ids: list[str] = Field(default_factory=list, max_length=3)
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, ArtifactConflict):
         return HTTPException(409, str(exc))
@@ -325,6 +331,10 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                     for mount in mounts
                 ],
                 "checkpoint_catalog": store.checkpoint_catalog(owner=owner) if scope_kind in {"personal", "project"} else [],
+                "related_project_catalog": (
+                    store.related_project_catalog(owner=owner, project_id=project_id)
+                    if scope_kind == "project" and project_id else []
+                ),
                 "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
                 "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
                 "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
@@ -347,6 +357,22 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory inventory failed")
             raise HTTPException(503, "Legacy memory inventory could not be completed safely. No data was changed.") from exc
+
+    @router.put("/memory/projects/{project_id}/relations")
+    def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):
+        try:
+            owner = _owner(request)
+            store = ContinuityStore()
+            store.set_related_projects(
+                owner=owner, project_id=project_id, related_project_ids=payload.related_project_ids,
+            )
+            return {"project_id": project_id, "related_projects": store.related_project_catalog(
+                owner=owner, project_id=project_id,
+            )}
+        except NotFoundError as exc:
+            raise HTTPException(404, "Project was not found") from exc
+        except (ScopeConflictError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
         except Exception as exc:
             logger.exception("Companion memory could not load for session %s", session_id)
             raise HTTPException(

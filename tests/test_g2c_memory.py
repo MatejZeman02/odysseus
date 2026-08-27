@@ -419,6 +419,9 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "/api/companion/memory/legacy-inventory" in ui
     assert "history-load-older-btn" in ui
     assert "Load older messages" in ui
+    assert "Related project access" in ui
+    assert "@Project Name" in ui
+    assert "companion-save-related-projects" in ui
 
 
 def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store, monkeypatch):

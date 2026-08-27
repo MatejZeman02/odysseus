@@ -290,10 +290,17 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const legacyInventoryHtml = payload.scope_kind === 'personal'
     ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
     : '';
+  const relatedProjectCatalog = Array.isArray(payload.related_project_catalog) ? payload.related_project_catalog : [];
+  const relatedProjectChoices = relatedProjectCatalog.length
+    ? `${relatedProjectCatalog.map(project => `<label><input type="checkbox" data-related-project-id="${esc(project.id)}"${project.related ? ' checked' : ''}> ${esc(project.name)}</label>`).join('')}<button type="button" class="companion-save-related-projects">Save related projects</button>`
+    : '<p class="companion-memory-help">No other owner-owned project is available.</p>';
+  const relatedProjectHtml = payload.scope_kind === 'project'
+    ? `<details class="companion-related-projects"><summary>Related project access</summary><p class="companion-memory-help">Choose at most three projects that this project may consult. They remain private unless you explicitly mention <code>@Project Name</code> in a message; only that project’s accepted brief may then be included.</p>${relatedProjectChoices}</details>`
+    : '';
   modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
     <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
-    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${checkpointMountHtml}${proposalHtml}${proposalAction}${proposalAttemptText ? `<p class="companion-memory-help">${esc(proposalAttemptText)}</p>` : ''}${proposalHistoryHtml}${legacyInventoryHtml}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
+    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${checkpointMountHtml}${relatedProjectHtml}${proposalHtml}${proposalAction}${proposalAttemptText ? `<p class="companion-memory-help">${esc(proposalAttemptText)}</p>` : ''}${proposalHistoryHtml}${legacyInventoryHtml}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
@@ -335,6 +342,26 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       resultNode.append(next);
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not inspect legacy memory');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelector('.companion-save-related-projects')?.addEventListener('click', async (event) => {
+    const selected = Array.from(modal.querySelectorAll('input[data-related-project-id]:checked'))
+      .map(input => input.dataset.relatedProjectId)
+      .filter(Boolean);
+    if (selected.length > 3) {
+      uiModule.showError?.('Choose at most three directly related projects.');
+      return;
+    }
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/memory/projects/${encodeURIComponent(meta.project_id)}/relations`, {method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({related_project_ids: selected})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not save related projects');
+      uiModule.showToast?.('Related-project allowlist saved. Use @Project Name when you want its brief in one message.', 3400);
+      close(); openCompanionMemory(meta, 'context');
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not save related projects');
       event.currentTarget.disabled = false;
     }
   });

@@ -243,7 +243,18 @@ class ContextCompiler:
         } for mount in mounts)
         related: list[ProjectBriefV1] = []
         if scope.project_id:
-            for project_id in dict.fromkeys(related_project_ids):
+            # Direct relations are an owner-managed allowlist. A related
+            # brief is still admitted only when the owner names that project
+            # in the current request with ``@Project Name``. The optional
+            # argument remains for trusted server-side callers and tests;
+            # browser requests never submit raw project IDs into this path.
+            relation_resolver = getattr(self.store, "explicit_related_project_ids", None)
+            named_related = (
+                relation_resolver(owner=owner, project_id=scope.project_id, request=request)
+                if callable(relation_resolver) else []
+            )
+            requested_related = list(dict.fromkeys([*related_project_ids, *named_related]))[:3]
+            for project_id in requested_related:
                 brief = self.store.related_project_brief(
                     owner=owner, home_project_id=scope.project_id, requested_project_id=project_id
                 )

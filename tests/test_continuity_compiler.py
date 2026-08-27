@@ -147,6 +147,19 @@ def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):
     assert [brief.summary for brief in bundle.related_project_briefs] == ["allowed"]
     assert bundle.episodic_hits == ({"id": "memory-1", "text": "a hit"},)
 
+    named = ContextCompiler(store).compile(
+        owner="alice", session_id="session", request="Compare @Allowed with the current plan",
+        transcript=[_message("user", "hello", 2)],
+    )
+    assert [brief.summary for brief in named.related_project_briefs] == ["allowed"]
+    assert named.manifest["related_project_ids"] == [allowed]
+
+    not_named = ContextCompiler(store).compile(
+        owner="alice", session_id="session", request="Compare Allowed with the current plan",
+        transcript=[_message("user", "hello", 3)],
+    )
+    assert not_named.related_project_briefs == ()
+
     from src.continuity.store import ScopeConflictError
     import pytest
     with pytest.raises(ScopeConflictError):

@@ -183,6 +183,42 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def related_project_catalog(self, *, owner: str, project_id: str) -> list[dict[str, object]]:
+        """Return owner-selected direct-relation metadata, never project content."""
+        db = SessionLocal()
+        try:
+            project = self._project(db, owner, project_id)
+            selected = _direct_relations(project)
+            rows = db.query(Project).filter(
+                Project.owner == owner,
+                Project.id != project_id,
+            ).order_by(Project.name.asc()).all()
+            return [
+                {"id": row.id, "name": row.name, "related": row.id in selected}
+                for row in rows
+            ]
+        finally:
+            db.close()
+
+    def explicit_related_project_ids(self, *, owner: str, project_id: str, request: str, limit: int = 3) -> list[str]:
+        """Resolve explicit ``@Project Name`` mentions against direct relations.
+
+        Relation storage is an allowlist, not an automatic sharing rule. This
+        parser only returns directly related owner projects that the owner
+        named in this exact request. It never accepts IDs from the browser.
+        """
+        if not 1 <= limit <= 10:
+            raise ValueError("related project request limit must be between 1 and 10")
+        folded_request = str(request or "").casefold()
+        if "@" not in folded_request:
+            return []
+        related = self.related_project_catalog(owner=owner, project_id=project_id)
+        matches = [
+            str(row["id"]) for row in related
+            if row["related"] and f"@{str(row['name']).casefold()}" in folded_request
+        ]
+        return matches[:limit]
+
     def bind_session(
         self,
         *,
