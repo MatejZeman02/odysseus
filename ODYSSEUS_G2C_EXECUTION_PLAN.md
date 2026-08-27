@@ -304,6 +304,14 @@ hidden them. It does not grant any new capability; future permission UI must
 pass an exact, server-authorized selection rather than relying on browser state
 or heuristic expansion.
 
+**MCP inventory correction (2026-08):** Companion filtering now fails closed
+for dynamically named MCP memory actions, not only the original fixed set of
+`memory_save`/`memory_search` names. A newly installed AgentMemory action whose
+leaf name contains `memory` or is a direct `remember`/`recall`/`forget` verb is
+neither shown in the native Agent schema nor executable in Personal, project,
+or Computer homes. Connecting an AgentMemory MCP server therefore does not
+adopt it as Companion memory; it remains a future C4 provider decision.
+
 ### C4 preflight audit (2026-08)
 
 The active native store is `src/memory.MemoryManager`, backed by the owner's
