@@ -484,6 +484,22 @@ def test_context_compiler_uses_scoped_provider_contract_for_normal_recall(store)
     },)
 
 
+def test_companion_agent_prompt_explains_scoped_legacy_tool_boundary():
+    from src.agent_loop import _build_system_prompt
+
+    messages, _schemas = _build_system_prompt(
+        [{"role": "user", "content": "remember this forever"}],
+        model="test-model", active_document=None, mcp_mgr=None,
+        disabled_tools={"manage_memory", "manage_skills", "search_chats"},
+        suppress_skills=True, companion_scope=True,
+    )
+    prompt = "\n".join(str(message.get("content") or "") for message in messages)
+
+    assert "COMPANION SCOPE" in prompt
+    assert "Global native memory" in prompt
+    assert "working artifacts" in prompt
+
+
 def test_default_companion_recall_never_constructs_legacy_native_provider(store, monkeypatch):
     """Companion prompt assembly must stay independent of native auto-memory."""
     from src.memory_provider import NativeMemoryProvider

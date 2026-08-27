@@ -2312,6 +2312,7 @@ def _build_system_prompt(
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
     suppress_skills: bool = False,
+    companion_scope: bool = False,
     active_email: Optional[Dict[str, str]] = None,
     workspace: Optional[str] = None,
 ) -> List[Dict]:
@@ -2330,7 +2331,7 @@ def _build_system_prompt(
         _ov_sig = _hl.sha256(_json.dumps(get_builtin_overrides() or {}, sort_keys=True).encode()).hexdigest()
     except Exception:
         _ov_sig = ""
-    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context, suppress_skills)
+    cache_key = (frozenset(disabled_tools or []), bool(mcp_mgr), needs_admin, _rt_key, compact, _ov_sig, owner, suppress_local_context, suppress_skills, companion_scope)
     if _cached_base_prompt and _cached_base_prompt_key == cache_key and not active_document:
         agent_prompt = _cached_base_prompt
         # Skill index is user-editable (name + description), so it must never
@@ -2357,6 +2358,14 @@ def _build_system_prompt(
         if not active_document:
             _cached_base_prompt = agent_prompt
             _cached_base_prompt_key = cache_key
+
+    if companion_scope:
+        agent_prompt += (
+            "\n\nCOMPANION SCOPE: this is a scoped Personal, project, or Computer Help home. "
+            "Global native memory, globally learned skills, and raw cross-chat search are unavailable. "
+            "Use the supplied continuity context, approved context grants, and working artifacts instead; "
+            "never claim that a global memory or another chat was read."
+        )
 
     # Dynamic parts that change per request
     mcp_schemas = []
@@ -4434,6 +4443,7 @@ async def stream_agent_loop(
             suppress_skills=_suppress_global_skills(
                 low_signal_turn=_low_signal_turn, companion_scope=companion_scope,
             ),
+            companion_scope=companion_scope,
             active_email=active_email,
             workspace=workspace,
         )
