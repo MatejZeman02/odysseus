@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, ChatMessage as DbMessage, Session as DbSession
+from core.database import Base, ChatMessage as DbMessage, Project, Session as DbSession
 from src.continuity import ProjectBriefV1, SemanticCheckpointProposalV1, ThreadCheckpointV1
 from src.continuity.compiler import CheckpointCompactor, ContextCompiler
 from src.continuity.store import ContinuityStore
@@ -230,3 +230,61 @@ def test_project_fork_receives_owner_promoted_semantic_brief_not_primary_transcr
     assert fork.primary_project_brief.summary == "Resolve the crystal conflict"
     assert fork.primary_project_brief.confirmed_facts == ["The documents disagree about its origin"]
     assert "crystal conflict" not in str(fork.transcript_tail)
+
+
+def test_cold_project_fork_reconstructs_promoted_brief_after_file_database_restart(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'continuity-restart.db'}"
+    engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    local = sessionmaker(bind=engine)
+    monkeypatch.setattr(continuity_store_module, "SessionLocal", local)
+    db = local()
+    db.add_all([
+        DbSession(id="primary", owner="alice", name="Primary", endpoint_url="http://x", model="m"),
+        DbSession(id="fork", owner="alice", name="Fork", endpoint_url="http://x", model="m"),
+        Project(id="dust", owner="alice", name="Dust", workspace_root="/dust"),
+        DbMessage(id="origin-1", session_id="primary", role="user", content="Decide the crystal history", meta_data="{}"),
+        DbMessage(id="origin-2", session_id="primary", role="assistant", content="The two documents conflict", meta_data="{}"),
+    ])
+    db.commit()
+    source_hash = ContinuityStore._source_message_hash(
+        db, session_id="primary", source_ids=["origin-1", "origin-2"],
+    )
+    db.close()
+
+    before_restart = ContinuityStore()
+    before_restart.bind_session(owner="alice", session_id="primary", scope_kind="project", project_id="dust")
+    before_restart.bind_session(owner="alice", session_id="fork", scope_kind="project", project_id="dust")
+    proposal = SemanticCheckpointProposalV1(
+        session_id="primary", scope_kind="project", project_id="dust",
+        objective="Resolve the crystal-history conflict", facts=["Two source documents conflict"],
+        source_message_ids=["origin-1", "origin-2"], source_through_message_id="origin-2",
+        source_hash=source_hash, derivation_model="model-a",
+    )
+    written = before_restart.write_semantic_proposal(owner="alice", proposal=proposal)
+    before_restart.promote_semantic_proposal(
+        owner="alice", proposal_id=written.id, expected_revision=written.revision,
+        selections={"objective": [0], "facts": [0]},
+    )
+    engine.dispose()
+
+    restarted_engine = create_engine(database_url)
+    restarted_local = sessionmaker(bind=restarted_engine)
+    monkeypatch.setattr(continuity_store_module, "SessionLocal", restarted_local)
+    cold_fork = ContextCompiler(ContinuityStore(), tail_count=1).compile(
+        owner="alice", session_id="fork", request="what should we do next?",
+        transcript=[_message("user", "new fork request", 99)],
+    )
+
+    assert cold_fork.thread_checkpoint is None
+    assert cold_fork.primary_project_brief.derivation_status == "accepted"
+    assert cold_fork.primary_project_brief.summary == "Resolve the crystal-history conflict"
+    assert cold_fork.primary_project_brief.source_message_ids == ["origin-1", "origin-2"]
+    assert cold_fork.manifest["primary_project_brief"] is True
+    record = cold_fork.manifest["continuity_records"]["primary_project_brief"]
+    assert record["artifact_revision"] == 1
+    assert record["source_through_message_id"] == "origin-2"
+    assert record["source_message_count"] == 2
+    assert record["source_hash"]
+    assert "Decide the crystal history" not in str(cold_fork.transcript_tail)
+    restarted_engine.dispose()

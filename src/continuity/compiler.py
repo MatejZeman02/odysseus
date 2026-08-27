@@ -333,6 +333,23 @@ class ContextCompiler:
                 "primary_project_brief": primary.derivation_status if primary else None,
                 "personal_brief": personal.derivation_status if personal else None,
             },
+            "continuity_records": {
+                "thread_checkpoint": self.store.latest_artifact_manifest(
+                    owner=owner, kind="thread_checkpoint_v1", session_id=session_id,
+                ) if checkpoint else None,
+                "primary_project_brief": self.store.latest_artifact_manifest(
+                    owner=owner, kind="project_brief_v1", project_id=scope.project_id,
+                ) if primary and scope.project_id else None,
+                "personal_brief": self.store.latest_artifact_manifest(
+                    owner=owner, kind="personal_brief_v1", session_id=session_id,
+                ) if personal else None,
+                "related_project_briefs": [
+                    self.store.latest_artifact_manifest(
+                        owner=owner, kind="project_brief_v1", project_id=brief.project_id,
+                    )
+                    for brief in related
+                ],
+            },
         }
         return ContextBundle(
             companion_profile=companion_profile, scope=scope, request=request,

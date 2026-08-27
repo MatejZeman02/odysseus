@@ -364,6 +364,33 @@ class ContinuityStore:
         artifact = self._latest(owner=owner, kind="personal_brief_v1", session_id=session_id)
         return PersonalBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
+    def latest_artifact_manifest(
+        self,
+        *,
+        owner: str,
+        kind: str,
+        session_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> Optional[dict[str, object]]:
+        """Return safe provenance for one active artifact, never its content."""
+        artifact = self._latest(
+            owner=owner, kind=kind, session_id=session_id, project_id=project_id,
+        )
+        if artifact is None:
+            return None
+        try:
+            payload = json.loads(artifact.payload_json)
+            source_ids = payload.get("source_message_ids") or []
+        except (TypeError, json.JSONDecodeError):
+            source_ids = []
+        return {
+            "artifact_revision": artifact.revision,
+            "artifact_status": artifact.status,
+            "source_through_message_id": artifact.source_through_message_id,
+            "source_message_count": len(source_ids) if isinstance(source_ids, list) else 0,
+            "source_hash": artifact.source_hash,
+        }
+
     def latest_semantic_proposal(self, *, owner: str, session_id: str) -> Optional[SemanticCheckpointProposalV1]:
         record = self.latest_semantic_proposal_record(owner=owner, session_id=session_id)
         return record.proposal if record else None
