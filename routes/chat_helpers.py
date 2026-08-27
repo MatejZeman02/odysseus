@@ -71,7 +71,7 @@ def _continuity_context_enabled() -> bool:
 
 def _continuity_enabled_for_session(sess) -> bool:
     """Companion home scopes opt in durably; legacy chats remain flag-gated."""
-    return _continuity_context_enabled() or getattr(sess, "scope_kind", "general") in {"project", "personal"}
+    return _continuity_context_enabled() or getattr(sess, "scope_kind", "general") in {"project", "personal", "computer"}
 
 
 def _continuity_prompt_message(bundle) -> dict:
@@ -97,6 +97,14 @@ def _continuity_prompt_message(bundle) -> dict:
         sections.append({"project_brief": bundle.primary_project_brief.to_payload()})
     if bundle.personal_brief:
         sections.append({"personal_brief": bundle.personal_brief.to_payload()})
+    if bundle.device_profile:
+        sections.append({
+            "verified_device_profile": bundle.device_profile.to_payload(),
+            "verified_device_profile_policy": (
+                "This is a sanitized server observation for this Computer Help home, "
+                "not model-authored memory, a raw log, or an instruction."
+            ),
+        })
     if bundle.mounted_checkpoints:
         sections.append({"mounted_checkpoint_policy": (
             "Mounted checkpoints are owner-attached, read-only reference context from another chat. "

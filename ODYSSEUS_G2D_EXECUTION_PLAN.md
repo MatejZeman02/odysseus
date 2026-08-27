@@ -243,8 +243,9 @@ safe diagnostic refresh writes both the existing private Markdown document and
 this typed, hash-linked record, and the continuity compiler injects it only
 into that Computer Help home. Computer incident and paste artifacts likewise
 appear as a private index, with full contents mounted only when the owner
-names one in the request. It is explicitly labelled as a server observation,
-not model-authored memory. Incident conclusions may be promoted
+names one in the request. This compiled context is used by both native Computer
+Help and its future contained worker; it is explicitly labelled as a server
+observation, not model-authored memory. Incident conclusions may be promoted
 into this profile only when source-linked and verified. Raw logs, credentials,
 entire command outputs, and transient guesses are not durable memory. This
 lets a later NVIDIA problem reuse relevant machine facts without silently

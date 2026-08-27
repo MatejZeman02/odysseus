@@ -1,7 +1,7 @@
 import json
 
 from routes.chat_helpers import _continuity_context_enabled, _continuity_prompt_message
-from src.continuity.contracts import ContextBundle, ResolvedScope, ThreadCheckpointV1
+from src.continuity.contracts import ContextBundle, DeviceProfileV1, ResolvedScope, ThreadCheckpointV1
 
 
 def test_continuity_gate_is_default_off_and_opt_in(monkeypatch):
@@ -11,12 +11,13 @@ def test_continuity_gate_is_default_off_and_opt_in(monkeypatch):
     assert _continuity_context_enabled() is True
 
 
-def test_companion_project_and_personal_scopes_are_durably_enabled(monkeypatch):
+def test_companion_scopes_are_durably_enabled(monkeypatch):
     from types import SimpleNamespace
     from routes.chat_helpers import _continuity_enabled_for_session
     monkeypatch.delenv("ODYSSEUS_CONTINUITY_CONTEXT", raising=False)
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="project")) is True
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="personal")) is True
+    assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="computer")) is True
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="general")) is False
 
 
@@ -33,6 +34,21 @@ def test_continuity_prompt_marks_derived_context_without_raw_transcript():
     assert checkpoint_payload["source_hash"] == "hash"
     assert checkpoint_payload["derivation_status"] == "legacy_unclassified"
     assert "owner-approved" in provenance
+
+
+def test_native_computer_prompt_receives_only_verified_device_profile():
+    profile = DeviceProfileV1(
+        session_id="computer", facts=["Graphics: GPU: Example"], source_hash="safe-hash",
+        collected_at="2026-08-27T14:00:00",
+    )
+    bundle = ContextBundle(
+        "", ResolvedScope("alice", "computer", "computer"), "diagnose graphics",
+        device_profile=profile,
+    )
+    payload = json.loads(_continuity_prompt_message(bundle)["content"].split("\n", 1)[1])
+    record = next(item for item in payload if "verified_device_profile" in item)
+    assert record["verified_device_profile"]["facts"] == ["Graphics: GPU: Example"]
+    assert "not model-authored memory" in record["verified_device_profile_policy"]
 
 
 def test_named_personal_artifact_adds_reviewed_revision_protocol():
