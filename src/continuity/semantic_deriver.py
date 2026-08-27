@@ -28,14 +28,18 @@ class SemanticDerivationResult:
 
 
 async def derive_semantic_proposal(
-    *, owner: str, session_id: str, only_if_absent: bool = False,
+    *, owner: str, session_id: str, only_if_absent: bool = False, workload: str = "foreground",
 ) -> SemanticDerivationResult:
     """Derive a bounded no-tools proposal from the server-owned session route.
 
     Neither callers nor the model can select an endpoint, source transcript,
-    scope, or storage target.  ``only_if_absent`` is for the background path:
+    scope, or storage target. ``workload`` is server-selected: the explicit
+    Context action is foreground while the scheduler is background.
+    ``only_if_absent`` is for the background path:
     it makes an active owner-review item win over a late queued derivation.
     """
+    if workload not in {"foreground", "background"}:
+        raise ValueError("unsupported semantic proposal workload")
     db = SessionLocal()
     try:
         session = db.query(DbSession).filter(
@@ -83,7 +87,7 @@ async def derive_semantic_proposal(
         response = await llm_call_async(
             url, resolved_model, derivation_messages(source), temperature=0, max_tokens=3_000,
             headers=headers, timeout=90, max_retries=0, session_id=session_id,
-            workload="foreground",
+            workload=workload,
         )
         proposal: SemanticCheckpointProposalV1 = parse_semantic_proposal(
             response, session_id=session_id, scope_kind=scope_kind, project_id=project_id,

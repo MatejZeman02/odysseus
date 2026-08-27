@@ -27,7 +27,9 @@ async def test_semantic_proposal_scheduler_derives_after_quiet_period(monkeypatc
     helpers._schedule_semantic_proposal("alice", "session-1", 4)
     await asyncio.sleep(0.02)
 
-    assert seen == [{"owner": "alice", "session_id": "session-1", "only_if_absent": True}]
+    assert seen == [{
+        "owner": "alice", "session_id": "session-1", "only_if_absent": True, "workload": "background",
+    }]
     assert helpers._SEMANTIC_PROPOSAL_TASKS == {}
 
 

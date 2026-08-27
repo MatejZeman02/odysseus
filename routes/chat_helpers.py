@@ -219,7 +219,7 @@ def _schedule_semantic_proposal(owner: str | None, session_id: str, message_coun
                 return
             from src.continuity.semantic_deriver import derive_semantic_proposal
             result = await derive_semantic_proposal(
-                owner=str(owner), session_id=session_id, only_if_absent=True,
+                owner=str(owner), session_id=session_id, only_if_absent=True, workload="background",
             )
             if result.created:
                 from src.continuity.store import ContinuityStore

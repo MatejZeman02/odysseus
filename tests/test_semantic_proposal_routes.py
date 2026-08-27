@@ -81,6 +81,7 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     assert result["proposal"]["source_message_ids"] == ["m1", "m2"]
     assert result["proposal"]["derivation_status"] == "proposed"
     assert seen["kwargs"]["max_retries"] == 0
+    assert seen["kwargs"]["workload"] == "foreground"
     assert seen["messages"][0]["role"] == "system"
     assert "no tools" in seen["messages"][0]["content"]
     assert "untrusted" in seen["messages"][0]["content"]
