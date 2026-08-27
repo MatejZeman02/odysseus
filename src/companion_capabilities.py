@@ -58,6 +58,25 @@ _LABELS = {
     SANDBOX_READ: "Sandboxed read-only commands",
 }
 
+# Readiness reasons are deliberately stable and contain no host paths,
+# container arguments, credentials, or image references.  Keeping their
+# owner-facing wording here lets the API and the capability drawer explain an
+# unavailable sandbox without exposing implementation details.
+_SANDBOX_UNAVAILABLE_REASONS = {
+    "podman_unavailable": "Rootless Podman is unavailable on this computer.",
+    "podman_not_rootless": "Podman must run rootlessly and pass containment qualification.",
+    "pinned_sandbox_image_required": "A reviewed digest-pinned sandbox image must be configured and qualified.",
+    "sandbox_image_not_local": "The reviewed sandbox image must be present locally and qualified.",
+    "containment_probe_incomplete": "The sandbox containment check has not passed yet.",
+}
+
+
+def sandbox_unavailable_reason(reason: str | None) -> str:
+    """Return a safe, actionable reason why contained reads stay disabled."""
+    return _SANDBOX_UNAVAILABLE_REASONS.get(
+        str(reason or ""), "The qualified Podman sandbox is unavailable.",
+    )
+
 
 def defaults_for_scope(scope_kind: str) -> dict[str, bool]:
     """Return conservative initial grants for a newly-created session."""
@@ -129,6 +148,7 @@ def capability_payload(
     scope_kind: str,
     workspace_attached: bool,
     sandbox_ready: bool,
+    sandbox_reason: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Safe UI/API representation of requested versus effective grants."""
     grants = normalize(raw, scope_kind=scope_kind)
@@ -139,7 +159,7 @@ def capability_payload(
         if name == WORKSPACE_READ and not workspace_attached:
             available, reason = False, "Attach a registered project or working directory first"
         elif name == SANDBOX_READ and not sandbox_ready:
-            available, reason = False, "The qualified Podman sandbox is unavailable"
+            available, reason = False, sandbox_unavailable_reason(sandbox_reason)
         details[name] = {
             "name": name,
             "label": _LABELS[name],
@@ -151,12 +171,19 @@ def capability_payload(
     return details
 
 
-def can_change(name: str, *, scope_kind: str, workspace_attached: bool, sandbox_ready: bool) -> tuple[bool, str]:
+def can_change(
+    name: str,
+    *,
+    scope_kind: str,
+    workspace_attached: bool,
+    sandbox_ready: bool,
+    sandbox_reason: str | None = None,
+) -> tuple[bool, str]:
     """Validate an owner-requested capability change without trusting the UI."""
     if name not in ALL_CAPABILITIES:
         return False, "Unknown chat capability"
     if name == WORKSPACE_READ and not workspace_attached:
         return False, "Attach a registered project or working directory first"
     if name == SANDBOX_READ and not sandbox_ready:
-        return False, "The qualified Podman sandbox is unavailable"
+        return False, sandbox_unavailable_reason(sandbox_reason)
     return True, ""

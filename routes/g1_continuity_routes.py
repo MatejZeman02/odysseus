@@ -152,6 +152,7 @@ def _session_payload(row: DbSession, project_name: str | None = None, workspace_
             scope_kind=scope_kind,
             workspace_attached=bool(resolved_workspace),
             sandbox_ready=sandbox.qualified,
+            sandbox_reason=sandbox.reason,
         ),
         "is_scope_primary": bool(row.is_scope_primary),
     }
@@ -453,6 +454,7 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
             if not row:
                 raise HTTPException(404, "Session not found")
             requested = getattr(row, "capability_profile", None) or "project_read"
+            sandbox = computer_sandbox_readiness()
             return {
                 "scope_kind": row.scope_kind or "general",
                 "harness_kind": row.harness_kind or "native",
@@ -504,6 +506,7 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                 raise HTTPException(404, "Session not found")
             project = db.query(Project).filter(Project.id == row.project_id).first() if row.project_id else None
             workspace_attached = bool(project and project.workspace_root)
+            sandbox = computer_sandbox_readiness()
             return {
                 "session_id": row.id,
                 "scope_kind": row.scope_kind or "general",
@@ -511,7 +514,8 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                     getattr(row, "capability_grants", None),
                     scope_kind=row.scope_kind or "general",
                     workspace_attached=workspace_attached,
-                    sandbox_ready=computer_sandbox_readiness().qualified,
+                    sandbox_ready=sandbox.qualified,
+                    sandbox_reason=sandbox.reason,
                 ),
             }
         finally:
@@ -528,11 +532,13 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                 raise HTTPException(404, "Session not found")
             project = db.query(Project).filter(Project.id == row.project_id).first() if row.project_id else None
             workspace_attached = bool(project and project.workspace_root)
+            sandbox = computer_sandbox_readiness()
             allowed, reason = can_change(
                 payload.name,
                 scope_kind=row.scope_kind or "general",
                 workspace_attached=workspace_attached,
-                sandbox_ready=computer_sandbox_readiness().qualified,
+                sandbox_ready=sandbox.qualified,
+                sandbox_reason=sandbox.reason,
             )
             if not allowed:
                 raise HTTPException(409, reason)
@@ -548,7 +554,8 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                 "session_id": row.id,
                 "capabilities": capability_payload(
                     grants, scope_kind=row.scope_kind or "general", workspace_attached=workspace_attached,
-                    sandbox_ready=computer_sandbox_readiness().qualified,
+                    sandbox_ready=sandbox.qualified,
+                    sandbox_reason=sandbox.reason,
                 ),
             }
         finally:

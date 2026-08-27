@@ -27,10 +27,11 @@ def test_payload_distinguishes_requested_from_effective_readiness():
     payload = capability_payload(
         {SANDBOX_READ: True, WORKSPACE_READ: True},
         scope_kind="personal", workspace_attached=False, sandbox_ready=False,
+        sandbox_reason="pinned_sandbox_image_required",
     )
     assert payload[SANDBOX_READ]["requested"] is True
     assert payload[SANDBOX_READ]["effective"] is False
-    assert "Podman" in payload[SANDBOX_READ]["reason"]
+    assert "digest-pinned" in payload[SANDBOX_READ]["reason"]
     assert payload[WORKSPACE_READ]["requested"] is True
     assert payload[WORKSPACE_READ]["effective"] is False
 
@@ -42,6 +43,19 @@ def test_malformed_grants_are_discarded_and_changes_are_server_validated():
     assert can_change("made_up", scope_kind="general", workspace_attached=False, sandbox_ready=False)[0] is False
     assert can_change(WORKSPACE_READ, scope_kind="general", workspace_attached=False, sandbox_ready=True)[0] is False
     assert can_change(SYSTEM_OBSERVE, scope_kind="general", workspace_attached=False, sandbox_ready=False)[0] is True
+
+
+def test_sandbox_reason_is_safe_and_explains_qualification_state():
+    allowed, reason = can_change(
+        SANDBOX_READ,
+        scope_kind="project",
+        workspace_attached=True,
+        sandbox_ready=False,
+        sandbox_reason="containment_probe_incomplete",
+    )
+    assert allowed is False
+    assert reason == "The sandbox containment check has not passed yet."
+    assert "/" not in reason
 
 
 def test_companion_ui_uses_one_capability_drawer_and_native_documents_for_artifacts():
