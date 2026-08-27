@@ -8,6 +8,12 @@ The non-executing D2 continuity layer is implemented.
 Command assistance waits for the configured-provider C1/C2 canary, a reviewed
 digest-pinned sandbox image, and a passing containment qualification report.
 
+**Candidate-image audit (2026-08):** the already cached Qwen image is not a
+candidate for this command broker: a network-disabled, read-only probe found
+that it lacks the broker's declared `fd` and `file` utilities. It must not be
+configured as the Computer Help image. Qualification now proves the complete
+declared command inventory before any image can become ready.
+
 **Depends on:** G2C C1/C2 validated checkpoints and transfer semantics, plus a
 command-only, rootless Podman execution broker. The rejected Qwen `0.21.3`
 Podman sandbox is not reused:
