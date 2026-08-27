@@ -1,8 +1,9 @@
 # Odysseus G2C Execution Plan — Scoped Chat Memory and Working Artifacts
 
 **Status:** C0 complete; C1/C2 implementation proof complete pending one
-configured-model canary; C3 bounded transfer is implemented; C4 is at the
-owner-review-only migration preflight.
+configured-model canary; C3 bounded transfer is implemented; C4 supports
+owner-reviewed, additive local migration for every non-duplicate legacy entry.
+Duplicate-policy and external-provider adoption remain deliberately gated.
 
 **Depends on:** the implemented Companion homes, non-destructive continuity
 store/compiler, and reviewed project-patch transaction boundary.

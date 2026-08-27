@@ -54,7 +54,7 @@ Progress labels are deliberately non-temporal:
 | G1.5 Companion homes and Qwen UI trial | **Complete** | Deterministic homes, projects/forks, Qwen streaming/Stop/Process/feedback, native comparison, desktop/mobile audit |
 | Semantic checkpoint and project-brief derivation | **Implementation complete; provider canary pending** | Source-linked, schema-validated semantic proposals and owner-selected promotions now establish accepted briefs. Heuristic checkpoints remain provisional thread context and never become canonical home state. |
 | Normal-use stabilization | **Active** | Use real project conversations, record incorrect/unsafe answers and UI failures, fix regressions without broadening authority |
-| G2C scoped chat memory and working artifacts | **Active** | C1/C2 implementation proof, local scope-filtered recall, revisioned artifacts, long-paste capture, Documents bridge, grants, bounded checkpoint transfer/synthesis, and owner-confirmed exact-home legacy migration with rollback exist. Unresolved legacy assignment and any external-provider switch remain gated. |
+| G2C scoped chat memory and working artifacts | **Active** | C1/C2 implementation proof, local scope-filtered recall, revisioned artifacts, long-paste capture, Documents bridge, grants, bounded checkpoint transfer/synthesis, and owner-confirmed exact/manual-home legacy migration with rollback exist. Duplicate-policy and any external-provider switch remain gated. |
 | Computer Help read-only diagnostics | **Partial** | Safe snapshots, private incident records, and the qualified command-only Podman broker exist. User-level task execution, filtered egress, and reversible transactions do not. |
 | G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
@@ -875,11 +875,12 @@ not exercised by this slice and is deliberately tracked next.
   candidate counts, unresolved legacy counts, and aggregate duplicate counts;
   it cannot write to any memory provider. Persist an encrypted owner-private
   review record, bound to that backup digest, with opaque candidates and an
-  empty rollback journal. The owner may stage only still-valid exact-home
-  assignments; unscoped/duplicate/changing-home entries remain unresolved and
-  no legacy entry is read or migrated. A separate explicit action may
-  additively copy those exact-home entries into encrypted local scoped recall,
-  retaining native memory unchanged and allowing conditional rollback.
+  empty rollback journal. The owner may stage still-valid exact-home
+  assignments, or explicitly reveal one unresolved non-duplicate entry and
+  select a Personal/project destination; duplicate/changing-home entries remain
+  unresolved. A separate explicit action may additively copy staged entries
+  into encrypted local scoped recall, retaining native memory unchanged and
+  allowing conditional rollback.
 - [ ] Decide whether duplicate legacy entries should remain excluded or gain a
   separately reviewed merge/deduplication flow; only then consider an
   AgentMemory provider switch.
