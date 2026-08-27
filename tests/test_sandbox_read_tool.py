@@ -76,6 +76,23 @@ def test_snapshot_descriptor_copy_rejects_a_symlink_source(tmp_path):
     assert not target.exists()
 
 
+def test_snapshot_rejects_a_symlinked_workspace_root(tmp_path):
+    import src.agent_tools.sandbox_tools as module
+
+    source = tmp_path / "workspace"
+    source.mkdir()
+    (source / "README.md").write_text("must not be copied", encoding="utf-8")
+    swapped = tmp_path / "workspace-link"
+    swapped.symlink_to(source, target_is_directory=True)
+
+    try:
+        module._copy_workspace_input(swapped, tmp_path / "snapshot")
+    except ValueError as exc:
+        assert str(exc) == "workspace_unavailable"
+    else:
+        raise AssertionError("a symlinked workspace root must never be snapshotted")
+
+
 def test_sandbox_read_is_registered_and_requires_a_capability_gate():
     from src.agent_tools import TOOL_HANDLERS, TOOL_TAGS
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS

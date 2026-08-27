@@ -100,8 +100,17 @@ def _copy_regular_file(
 
 def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]:
     """Copy ordinary, bounded workspace files without following symlinks."""
+    try:
+        root_info = workspace.lstat()
+    except OSError as exc:
+        raise ValueError("workspace_unavailable") from exc
+    # ``resolve`` would erase a late replacement of the bound project leaf by
+    # a symlink.  Reject it first; otherwise a snapshot could copy files from
+    # an unintended directory before the contained read-only broker starts.
+    if stat.S_ISLNK(root_info.st_mode) or not stat.S_ISDIR(root_info.st_mode):
+        raise ValueError("workspace_unavailable")
     root = workspace.resolve(strict=True)
-    if not root.is_dir() or root.is_symlink():
+    if not root.is_dir():
         raise ValueError("workspace_unavailable")
     # The parent temporary directory is 0700 on the host. The mounted input
     # itself must be traversable by the image's unprivileged user, however,
