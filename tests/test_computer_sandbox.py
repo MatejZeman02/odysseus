@@ -56,6 +56,25 @@ def test_readiness_requires_a_qualified_command_inventory(monkeypatch, tmp_path)
     assert state.reason == "containment_probe_incomplete"
 
 
+def test_readiness_fails_closed_for_a_corrupt_qualification_report(monkeypatch, tmp_path):
+    image = "example.invalid/sandbox@sha256:" + "a" * 64
+    report = tmp_path / "qualification.json"
+    report.write_text(json.dumps({
+        "version": computer_sandbox._REPORT_VERSION, "image": image,
+        "passed": True, "complete": True, "checks": None,
+    }), encoding="utf-8")
+    monkeypatch.setenv("ODYSSEUS_COMPUTER_SANDBOX_IMAGE", image)
+    monkeypatch.setattr(computer_sandbox.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(computer_sandbox, "_is_local", lambda value: True)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: True)
+    monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
+
+    state = computer_sandbox.readiness()
+
+    assert state.qualified is False
+    assert state.reason == "containment_probe_incomplete"
+
+
 def test_qualification_fixture_requires_every_advertised_command(monkeypatch, tmp_path):
     image = "example.invalid/sandbox@sha256:" + "a" * 64
     captured_scripts = []

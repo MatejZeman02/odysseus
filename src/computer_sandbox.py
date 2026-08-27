@@ -320,6 +320,26 @@ def _load_report() -> dict | None:
     return data if isinstance(data, dict) and data.get("version") == _REPORT_VERSION else None
 
 
+def _report_qualifies(report: dict | None, image: str) -> bool:
+    """Accept only a complete, well-shaped report for the active image.
+
+    Qualification evidence is durable state, so a partial write, manual edit,
+    or old report must never turn a readiness/status request into an exception.
+    A malformed report simply revokes admission until a new probe succeeds.
+    """
+    if not isinstance(report, dict):
+        return False
+    checks = report.get("checks")
+    return bool(
+        report.get("image") == image
+        and report.get("passed") is True
+        and report.get("complete") is True
+        and isinstance(checks, list)
+        and all(isinstance(check, str) for check in checks)
+        and _REQUIRED_FINAL_CHECKS.issubset(set(checks))
+    )
+
+
 def readiness() -> ComputerSandboxReadiness:
     image = _image()
     configured = bool(_DIGEST_IMAGE.fullmatch(image))
@@ -327,11 +347,7 @@ def readiness() -> ComputerSandboxReadiness:
     image_local = configured and _is_local(image)
     report = _load_report()
     rootless = podman and _is_rootless_runtime()
-    qualified = bool(
-        rootless and configured and image_local and report and report.get("image") == image
-        and report.get("passed") is True and report.get("complete") is True
-        and _REQUIRED_FINAL_CHECKS.issubset(set(report.get("checks", [])))
-    )
+    qualified = bool(rootless and configured and image_local and _report_qualifies(report, image))
     if qualified:
         reason = "qualified"
     elif not podman:
