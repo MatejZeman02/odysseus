@@ -117,6 +117,12 @@ class LongPasteCapture(BaseModel):
     content: str = Field(min_length=3000, max_length=512 * 1024)
 
 
+class LegacyMigrationDryRun(BaseModel):
+    """Reference one explicit owner-private backup, never a browser path."""
+    model_config = ConfigDict(extra="forbid")
+    backup_id: str = Field(min_length=1, max_length=128)
+
+
 class ArtifactUndo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
@@ -305,6 +311,107 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             ),
         }
 
+    def _legacy_backup_path(*, owner: str, backup_id: str) -> Path:
+        """Resolve only a server-created owner backup, never a client path."""
+        if memory_manager is None or not getattr(memory_manager, "memory_file", None):
+            raise RuntimeError("native_memory_unavailable")
+        if not re.fullmatch(r"native-memory-\d{8}T\d{6}Z-[a-f0-9]{10}", backup_id):
+            raise ValueError("backup reference is invalid")
+        owner_key = hashlib.sha256(owner.encode("utf-8")).hexdigest()[:20]
+        root = (Path(memory_manager.memory_file).resolve().parent / "continuity-backups" / owner_key).resolve()
+        raw_candidate = root / f"{backup_id}.json"
+        candidate = raw_candidate.resolve()
+        if raw_candidate.is_symlink() or candidate.parent != root or not candidate.is_file():
+            raise FileNotFoundError("owner-private backup was not found")
+        return candidate
+
+    def _legacy_memory_dry_run(*, owner: str, backup_id: str) -> dict:
+        """Classify a backed-up legacy store without migrating any record.
+
+        Legacy native memory has owner/session data but no trustworthy home,
+        project, provenance, sensitivity, or expiry binding.  A dry run may
+        therefore identify *candidates* only; it never infers a target scope or
+        writes to a provider.  Reports deliberately omit memory text, IDs, and
+        individual fingerprints.
+        """
+        backup_path = _legacy_backup_path(owner=owner, backup_id=backup_id)
+        try:
+            entries = json.loads(backup_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("owner-private backup could not be read safely") from exc
+        if not isinstance(entries, list):
+            raise ValueError("owner-private backup has an invalid format")
+
+        db = SessionLocal()
+        try:
+            sessions = {
+                row.id: row for row in db.query(DbSession).filter(DbSession.owner == owner).all()
+            }
+        finally:
+            db.close()
+
+        counts = {
+            "entries_considered": 0,
+            "eligible_scope_candidates": 0,
+            "needs_owner_assignment": 0,
+            "duplicate_candidates": 0,
+        }
+        by_scope = {"personal": 0, "project": 0}
+        rejected: dict[str, int] = {}
+        fingerprints: set[str] = set()
+
+        def reject(reason: str) -> None:
+            rejected[reason] = rejected.get(reason, 0) + 1
+
+        for entry in entries:
+            counts["entries_considered"] += 1
+            if not isinstance(entry, dict) or entry.get("owner") != owner:
+                reject("invalid_owner_record")
+                continue
+            text = entry.get("text")
+            if not isinstance(text, str) or not text.strip():
+                reject("missing_text")
+                continue
+            if len(text.encode("utf-8")) > 512 * 1024:
+                reject("text_too_large")
+                continue
+            category = entry.get("category", "fact")
+            if not isinstance(category, str) or len(category) > 64:
+                reject("invalid_category")
+                continue
+            fingerprint = hashlib.sha256(
+                (category + "\x00" + text.strip()).encode("utf-8")
+            ).hexdigest()
+            if fingerprint in fingerprints:
+                counts["duplicate_candidates"] += 1
+            else:
+                fingerprints.add(fingerprint)
+
+            session_id = entry.get("session_id")
+            session = sessions.get(session_id) if isinstance(session_id, str) else None
+            scope_kind = (session.scope_kind or "general") if session else "general"
+            if scope_kind in by_scope:
+                by_scope[scope_kind] += 1
+                counts["eligible_scope_candidates"] += 1
+            else:
+                # Ownerless provenance does not become Personal memory by
+                # default. A later owner review must select a scope/source.
+                counts["needs_owner_assignment"] += 1
+
+        canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return {
+            "format": "native-memory-scoped-dry-run-v1",
+            "backup_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            **counts,
+            "scope_candidates": by_scope,
+            "rejected": dict(sorted(rejected.items())),
+            "migration_started": False,
+            "next_step": (
+                "Review candidate counts and unresolved legacy entries. A future migration must require "
+                "explicit scope/source selection and keep a rollback journal; no record was indexed or changed."
+            ),
+        }
+
     def _create_synthesis_session(*, owner: str, payload: CheckpointSynthesisCreate) -> dict:
         """Create the user-visible alternative to transcript merging.
 
@@ -488,6 +595,19 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory backup failed")
             raise HTTPException(503, "Legacy memory backup could not be completed. No migration was started.") from exc
+
+    @router.post("/memory/legacy-dry-run")
+    def legacy_memory_dry_run(payload: LegacyMigrationDryRun, request: Request):
+        """Owner-requested classification of one already-created private backup."""
+        try:
+            return _legacy_memory_dry_run(owner=_owner(request), backup_id=payload.backup_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Owner-private backup was not found. Create a new backup before previewing migration.") from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory dry run failed")
+            raise HTTPException(503, "Legacy memory migration preview could not be completed safely. No data was changed.") from exc
 
     @router.put("/memory/projects/{project_id}/relations")
     def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):

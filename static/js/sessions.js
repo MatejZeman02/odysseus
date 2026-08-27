@@ -288,7 +288,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const proposalAction = !proposal && (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
     ? '<button type="button" class="companion-create-semantic-proposal">Create semantic proposal</button>' : '';
   const legacyInventoryHtml = payload.scope_kind === 'personal'
-    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><button type="button" class="companion-create-legacy-backup" disabled>Create owner-private backup</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
+    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><button type="button" class="companion-create-legacy-backup" disabled>Create owner-private backup</button><button type="button" class="companion-run-legacy-dry-run" disabled>Preview scoped migration</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
     : '';
   const relatedProjectCatalog = Array.isArray(payload.related_project_catalog) ? payload.related_project_catalog : [];
   const relatedProjectChoices = relatedProjectCatalog.length
@@ -324,6 +324,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
+  let legacyBackupId = '';
   const show = (tab) => modal.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.panel !== tab));
   modal.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => show(button.dataset.tab)); show(initialTab);
   modal.querySelector('.companion-open-documents')?.addEventListener('click', () => {
@@ -382,9 +383,41 @@ async function openCompanionMemory(meta, initialTab = 'context') {
         next.textContent = result.next_step || '';
         resultNode.append(next);
       }
+      legacyBackupId = String(result.backup_id || '');
+      const dryRunButton = modal.querySelector('.companion-run-legacy-dry-run');
+      if (dryRunButton) dryRunButton.disabled = !legacyBackupId;
       uiModule.showToast?.('Owner-private backup created. No migration was started.', 3600);
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not create the owner-private backup');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelector('.companion-run-legacy-dry-run')?.addEventListener('click', async (event) => {
+    const resultNode = modal.querySelector('.companion-legacy-inventory-result');
+    if (!legacyBackupId) {
+      uiModule.showError?.('Create an owner-private backup before previewing migration.');
+      return;
+    }
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch('/api/companion/memory/legacy-dry-run', {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({backup_id: legacyBackupId}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not preview scoped migration');
+      if (resultNode) {
+        const summary = document.createElement('p');
+        const scopes = result.scope_candidates || {};
+        summary.textContent = `${result.eligible_scope_candidates || 0} scope candidates · ${result.needs_owner_assignment || 0} need owner assignment · ${result.duplicate_candidates || 0} possible duplicates. Personal: ${scopes.personal || 0}; projects: ${scopes.project || 0}. No records were changed.`;
+        resultNode.append(summary);
+        const next = document.createElement('p'); next.className = 'companion-memory-help';
+        next.textContent = result.next_step || '';
+        resultNode.append(next);
+      }
+      uiModule.showToast?.('Migration preview completed. No records were changed.', 3600);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not preview scoped migration');
       event.currentTarget.disabled = false;
     }
   });

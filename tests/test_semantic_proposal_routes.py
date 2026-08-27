@@ -332,6 +332,55 @@ def test_legacy_memory_backup_is_owner_private_and_returns_only_audit_data(monke
     assert "ownerless compatibility text" not in content
 
 
+def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypatch, tmp_path):
+    _setup(monkeypatch)
+    db = route_module.SessionLocal()
+    db.add(DbSession(
+        id="source-two", owner="alice", name="Dust", endpoint_url="http://unused", model="model-a",
+        scope_kind="project", project_id="dust",
+    ))
+    db.commit(); db.close()
+
+    class FakeMemory:
+        def __init__(self, root):
+            self.memory_file = root / "memory.json"
+
+        def load_all_for_update(self):
+            return [
+                {"id": "personal", "owner": "alice", "text": "prefers concise updates", "category": "preference", "session_id": "session"},
+                {"id": "project", "owner": "alice", "text": "Dust has a fish enemy", "category": "fact", "session_id": "source-two"},
+                {"id": "unscoped", "owner": "alice", "text": "old note", "category": "fact"},
+                {"id": "duplicate", "owner": "alice", "text": "old note", "category": "fact"},
+            ]
+
+    router = route_module.setup_companion_memory_routes(memory_manager=FakeMemory(tmp_path))
+    backup = _endpoint(router, "/api/companion/memory/legacy-backup", "POST")(SimpleNamespace())
+    dry_run = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")(
+        route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace(),
+    )
+
+    assert dry_run == {
+        "format": "native-memory-scoped-dry-run-v1",
+        "backup_sha256": backup["sha256"],
+        "entries_considered": 4,
+        "eligible_scope_candidates": 2,
+        "needs_owner_assignment": 2,
+        "duplicate_candidates": 1,
+        "scope_candidates": {"personal": 1, "project": 1},
+        "rejected": {},
+        "migration_started": False,
+        "next_step": dry_run["next_step"],
+    }
+    assert "prefers concise" not in str(dry_run)
+    assert "Dust has a fish" not in str(dry_run)
+    assert "session" not in str(dry_run)
+
+    preview = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")
+    with pytest.raises(HTTPException) as raised:
+        preview(route_module.LegacyMigrationDryRun(backup_id="native-memory-20260101T000000Z-0123456789"), SimpleNamespace())
+    assert raised.value.status_code == 404
+
+
 def test_project_relation_route_persists_owner_allowlist_without_project_content(monkeypatch):
     router = _setup(monkeypatch)
     continuity = ContinuityStore()

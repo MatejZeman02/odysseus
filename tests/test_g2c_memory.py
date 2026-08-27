@@ -498,6 +498,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "personalThreads" in ui
     assert "companion-run-legacy-inventory" in ui
     assert "/api/companion/memory/legacy-inventory" in ui
+    assert "companion-run-legacy-dry-run" in ui
+    assert "/api/companion/memory/legacy-dry-run" in ui
     assert "history-load-older-btn" in ui
     assert "Load older messages" in ui
     assert "Related project access" in ui
