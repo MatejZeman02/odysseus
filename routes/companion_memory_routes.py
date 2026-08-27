@@ -4,14 +4,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import Project, Session as DbSession, SessionLocal
+from core.database import ContinuityArtifact, Project, Session as DbSession, SessionLocal, utcnow_naive
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
+from src.companion_capabilities import defaults_for_scope
 from src.continuity.contracts import ContractError, PersonalBriefV1
 from src.continuity.semantic_deriver import SemanticDerivationError, derive_semantic_proposal
 from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictError
@@ -96,6 +98,13 @@ class CheckpointMountPromotion(BaseModel):
     selections: dict[str, list[int]] = Field(min_length=1, max_length=7)
 
 
+class CheckpointSynthesisCreate(BaseModel):
+    """Create a fresh scoped chat with exactly two immutable checkpoint mounts."""
+    model_config = ConfigDict(extra="forbid")
+    destination_session_id: str = Field(min_length=1, max_length=128)
+    source_checkpoint_ids: list[str] = Field(min_length=2, max_length=2)
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, ArtifactConflict):
         return HTTPException(409, str(exc))
@@ -113,9 +122,96 @@ def _scope(owner: str, session_id: str) -> tuple[str, str | None]:
         db.close()
 
 
-def setup_companion_memory_routes() -> APIRouter:
+def setup_companion_memory_routes(session_manager=None) -> APIRouter:
     router = APIRouter(prefix="/api/companion", tags=["companion-memory"])
     memory = CompanionMemoryStore()
+
+    def _create_synthesis_session(*, owner: str, payload: CheckpointSynthesisCreate) -> dict:
+        """Create the user-visible alternative to transcript merging.
+
+        It is intentionally not a provider call. The owner starts a normal turn
+        in the fresh chat after seeing which two immutable checkpoints were
+        attached. This keeps provider routing, message persistence, and all
+        tool/capability policy in the existing chat path.
+        """
+        if session_manager is None:
+            raise HTTPException(503, "Checkpoint synthesis needs the running session service")
+        source_ids = [str(value) for value in payload.source_checkpoint_ids]
+        if len(set(source_ids)) != 2 or any(not value for value in source_ids):
+            raise HTTPException(422, "Choose two different checkpoints to synthesize")
+        db = SessionLocal()
+        try:
+            destination = db.query(DbSession).filter(
+                DbSession.id == payload.destination_session_id, DbSession.owner == owner,
+            ).first()
+            if not destination:
+                raise HTTPException(404, "Companion destination session was not found")
+            scope_kind = destination.scope_kind or "general"
+            if scope_kind not in {"personal", "project"}:
+                raise HTTPException(409, "Checkpoint synthesis requires a Personal or project destination")
+            if not destination.endpoint_url or not destination.model:
+                raise HTTPException(409, "Choose a registered model before creating a synthesis chat")
+            source_rows = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.id.in_(source_ids),
+                ContinuityArtifact.kind == "thread_checkpoint_v1",
+                ContinuityArtifact.status == "active",
+            ).all()
+            if len(source_rows) != 2:
+                raise HTTPException(404, "One or both selected checkpoints are not available")
+            source_sessions = {
+                row.id: db.query(DbSession).filter(
+                    DbSession.id == row.session_id, DbSession.owner == owner,
+                ).first() for row in source_rows
+            }
+            if any(session is None or (session.scope_kind or "general") not in {"personal", "project"}
+                   for session in source_sessions.values()):
+                raise HTTPException(409, "Checkpoint synthesis requires Companion-home sources")
+            source_names = [str(source_sessions[source_id].name or "Checkpoint")[:40] for source_id in source_ids]
+            endpoint_url, model = destination.endpoint_url, destination.model
+            headers = destination.headers or {}
+            endpoint_id = destination.endpoint_id or ""
+            harness_kind = destination.harness_kind or "native"
+            project_id = destination.project_id if scope_kind == "project" else None
+        finally:
+            db.close()
+
+        session_id = str(uuid.uuid4())
+        name = f"Synthesis — {source_names[0]} + {source_names[1]}"[:120]
+        try:
+            session = session_manager.create_session(session_id, name, endpoint_url, model, owner=owner)
+            session.headers = headers
+            db = SessionLocal()
+            try:
+                row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).one()
+                row.headers = headers
+                row.scope_kind, row.project_id = scope_kind, project_id
+                row.endpoint_id, row.harness_kind, row.is_scope_primary = endpoint_id, harness_kind, False
+                row.capability_grants = defaults_for_scope(scope_kind)
+                row.updated_at = utcnow_naive()
+                db.commit()
+            finally:
+                db.close()
+            store = ContinuityStore()
+            for source_id in source_ids:
+                store.attach_checkpoint(
+                    owner=owner, destination_session_id=session_id, source_checkpoint_id=source_id,
+                )
+            return {"id": session_id, "name": name, "scope_kind": scope_kind, "project_id": project_id,
+                    "source_checkpoint_ids": source_ids}
+        except HTTPException:
+            try:
+                session_manager.delete_session(session_id)
+            except Exception:
+                logger.exception("Could not clean up incomplete checkpoint synthesis session %s", session_id)
+            raise
+        except Exception as exc:
+            try:
+                session_manager.delete_session(session_id)
+            except Exception:
+                logger.exception("Could not clean up incomplete checkpoint synthesis session %s", session_id)
+            logger.exception("Checkpoint synthesis creation failed")
+            raise HTTPException(500, "Could not create the checkpoint synthesis chat") from exc
 
     @router.get("/memory/sessions/{session_id}")
     def memory_context(session_id: str, request: Request):
@@ -253,6 +349,10 @@ def setup_companion_memory_routes() -> APIRouter:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    @router.post("/memory/checkpoint-synthesis")
+    def create_checkpoint_synthesis(payload: CheckpointSynthesisCreate, request: Request):
+        return _create_synthesis_session(owner=_owner(request), payload=payload)
 
     @router.delete("/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}")
     def detach_checkpoint_mount(session_id: str, mount_id: str, payload: CheckpointMountDetach, request: Request):

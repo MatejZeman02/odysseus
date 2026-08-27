@@ -273,8 +273,11 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const checkpointAttachControls = checkpointCandidates.length
     ? `<label>Checkpoint <select class="companion-checkpoint-source">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(item.session_name || item.session_id)} · ${esc(item.objective || 'Untitled checkpoint')}</option>`).join('')}</select></label><label>Keep mounted for <select class="companion-checkpoint-expiry"><option value="1">1 day</option><option value="7">7 days</option><option value="14" selected>14 days</option><option value="30">30 days</option></select></label><label class="companion-sensitive-checkpoint"><input type="checkbox" class="companion-checkpoint-sensitive"> Sensitive context — I understand this will be included in the destination chat until it expires or is detached.</label><button type="button" class="companion-attach-checkpoint">Attach checkpoint</button>`
     : '<p class="companion-memory-help">No other active Companion checkpoint is available to attach.</p>';
+  const checkpointSynthesisControls = checkpointCandidates.length >= 2
+    ? `<details class="companion-checkpoint-synthesis"><summary>Create a synthesis chat from two checkpoints</summary><p class="companion-memory-help">This creates a fresh sibling chat with two labeled, immutable mounts. It does not merge transcripts or call a model until you send your synthesis request.</p><label>First checkpoint <select class="companion-synthesis-source-a">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(item.session_name || item.session_id)} · ${esc(item.objective || 'Untitled checkpoint')}</option>`).join('')}</select></label><label>Second checkpoint <select class="companion-synthesis-source-b">${checkpointCandidates.map((item, index) => `<option value="${esc(item.id)}"${index === 1 ? ' selected' : ''}>${esc(item.session_name || item.session_id)} · ${esc(item.objective || 'Untitled checkpoint')}</option>`).join('')}</select></label><button type="button" class="companion-create-checkpoint-synthesis">Create synthesis chat</button></details>`
+    : '';
   const checkpointMountHtml = (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
-    ? `<section class="companion-checkpoint-mounts"><h5>Read-only checkpoint mounts</h5><p class="companion-memory-help">Attach a compact checkpoint from another one of your Companion chats. It is labeled context, never a transcript merge or shared memory write. Mounts expire automatically; sensitive mounts require acknowledgement.</p>${checkpointMounts.length ? checkpointMounts.map(mount => { const item = mount.checkpoint || {}; return `<details class="companion-checkpoint-mount" data-mount-id="${esc(mount.id)}" data-mount-revision="${esc(mount.revision)}"><summary><strong>${esc(mount.objective || 'Untitled checkpoint')}</strong> · ${esc(mount.derivation_status || 'legacy_unclassified')} · ${esc(mount.source_message_count || 0)} source messages</summary><p class="companion-memory-help">${esc(mount.sensitivity || 'standard')} context · ${esc(mountExpiryText(mount.expires_at))}. Select entries only if you want to promote them into this home’s accepted memory.</p>${checkpointPromotionFields.map(([field, label]) => { const values = field === 'objective' ? (item.objective ? [item.objective] : []) : (item[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-mount-field="${esc(field)}" data-mount-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-checkpoint">Promote selected entries</button><button type="button" class="companion-detach-checkpoint">Detach</button></details>`; }).join('') : '<p class="companion-memory-help">No checkpoint is mounted.</p>'}${checkpointAttachControls}</section>`
+    ? `<section class="companion-checkpoint-mounts"><h5>Read-only checkpoint mounts</h5><p class="companion-memory-help">Attach a compact checkpoint from another one of your Companion chats. It is labeled context, never a transcript merge or shared memory write. Mounts expire automatically; sensitive mounts require acknowledgement.</p>${checkpointMounts.length ? checkpointMounts.map(mount => { const item = mount.checkpoint || {}; return `<details class="companion-checkpoint-mount" data-mount-id="${esc(mount.id)}" data-mount-revision="${esc(mount.revision)}"><summary><strong>${esc(mount.objective || 'Untitled checkpoint')}</strong> · ${esc(mount.derivation_status || 'legacy_unclassified')} · ${esc(mount.source_message_count || 0)} source messages</summary><p class="companion-memory-help">${esc(mount.sensitivity || 'standard')} context · ${esc(mountExpiryText(mount.expires_at))}. Select entries only if you want to promote them into this home’s accepted memory.</p>${checkpointPromotionFields.map(([field, label]) => { const values = field === 'objective' ? (item.objective ? [item.objective] : []) : (item[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-mount-field="${esc(field)}" data-mount-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-checkpoint">Promote selected entries</button><button type="button" class="companion-detach-checkpoint">Detach</button></details>`; }).join('') : '<p class="companion-memory-help">No checkpoint is mounted.</p>'}${checkpointAttachControls}${checkpointSynthesisControls}</section>`
     : '';
   const proposalHistoryHtml = proposalHistory.length > 1 ? `<details class="companion-semantic-history"><summary>Proposal history (${proposalHistory.length})</summary>${proposalHistory.map((record) => {
     const item = record.proposal || {};
@@ -316,6 +319,27 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       close(); openCompanionMemory(meta, 'context');
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not attach checkpoint');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelector('.companion-create-checkpoint-synthesis')?.addEventListener('click', async (event) => {
+    const first = modal.querySelector('.companion-synthesis-source-a')?.value;
+    const second = modal.querySelector('.companion-synthesis-source-b')?.value;
+    if (!first || !second || first === second) {
+      uiModule.showError?.('Choose two different checkpoints for the synthesis chat.');
+      return;
+    }
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch('/api/companion/memory/checkpoint-synthesis', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({destination_session_id: meta.id, source_checkpoint_ids: [first, second]})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not create checkpoint synthesis chat');
+      close();
+      await loadSessions();
+      await selectSession(result.id);
+      uiModule.showToast?.('Synthesis chat created with two read-only checkpoints. Send the question you want reconciled.', 3600);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not create checkpoint synthesis chat');
       event.currentTarget.disabled = false;
     }
   });

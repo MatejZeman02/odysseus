@@ -173,3 +173,53 @@ def test_checkpoint_mount_routes_attach_and_detach_owner_checkpoint(monkeypatch)
         "destination", mounted["id"],
         route_module.CheckpointMountDetach(expected_revision=mounted["revision"]), SimpleNamespace(),
     ) == {"detached": True}
+
+
+def test_checkpoint_synthesis_creates_fresh_scoped_chat_with_exactly_two_mounts(monkeypatch):
+    _setup(monkeypatch)
+
+    class FakeSessionManager:
+        def create_session(self, session_id, name, endpoint_url, model, owner=None):
+            db = route_module.SessionLocal()
+            db.add(DbSession(id=session_id, owner=owner, name=name, endpoint_url=endpoint_url, model=model, headers={}))
+            db.commit(); db.close()
+            return SimpleNamespace(headers={})
+
+        def delete_session(self, session_id):
+            db = route_module.SessionLocal()
+            db.query(DbSession).filter(DbSession.id == session_id).delete()
+            db.commit(); db.close()
+
+    db = route_module.SessionLocal()
+    db.add_all([
+        DbSession(id="source-two", owner="alice", name="Second source", endpoint_url="http://unused", model="model-a", endpoint_id="endpoint-a", scope_kind="personal"),
+        DbSession(id="destination", owner="alice", name="Destination", endpoint_url="http://unused", model="model-a", endpoint_id="endpoint-a", scope_kind="personal"),
+    ])
+    db.commit(); db.close()
+    first = ContinuityStore().write_thread_checkpoint(owner="alice", checkpoint=ThreadCheckpointV1(
+        session_id="session", objective="First release option", source_message_ids=["m1"],
+        source_through_message_id="m1", source_hash="first",
+    ))
+    second = ContinuityStore().write_thread_checkpoint(owner="alice", checkpoint=ThreadCheckpointV1(
+        session_id="source-two", objective="Second release option", source_message_ids=["m2"],
+        source_through_message_id="m2", source_hash="second",
+    ))
+    router = route_module.setup_companion_memory_routes(FakeSessionManager())
+    create = _endpoint(router, "/api/companion/memory/checkpoint-synthesis")
+    result = create(route_module.CheckpointSynthesisCreate(
+        destination_session_id="destination", source_checkpoint_ids=[first.id, second.id],
+    ), SimpleNamespace())
+
+    assert result["id"] not in {"session", "source-two", "destination"}
+    db = route_module.SessionLocal()
+    created = db.query(DbSession).filter_by(id=result["id"]).one()
+    db.close()
+    assert (created.scope_kind, created.is_scope_primary, created.endpoint_id) == ("personal", False, "endpoint-a")
+    mounts = ContinuityStore().checkpoint_mounts(owner="alice", destination_session_id=result["id"])
+    assert [mount.source_checkpoint_id for mount in mounts] == [first.id, second.id]
+
+    with pytest.raises(HTTPException) as raised:
+        create(route_module.CheckpointSynthesisCreate(
+            destination_session_id="destination", source_checkpoint_ids=[first.id, first.id],
+        ), SimpleNamespace())
+    assert raised.value.status_code == 422
