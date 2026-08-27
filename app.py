@@ -895,11 +895,13 @@ from src.companion_runs import CompanionRunRegistry
 from routes.g1_continuity_routes import setup_g1_continuity_routes
 from routes.companion_patch_routes import setup_companion_patch_routes
 from routes.companion_memory_routes import setup_companion_memory_routes
+from routes.computer_help_routes import setup_computer_help_routes
 
 companion_run_registry = CompanionRunRegistry()
 app.include_router(setup_g1_continuity_routes(session_manager, companion_run_registry))
 app.include_router(setup_companion_patch_routes(session_manager, companion_run_registry))
 app.include_router(setup_companion_memory_routes())
+app.include_router(setup_computer_help_routes(session_manager))
 
 # ========= ROUTES (kept in app.py) =========
 

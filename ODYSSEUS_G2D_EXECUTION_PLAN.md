@@ -1,9 +1,10 @@
 # Odysseus G2D Execution Plan — Sandboxed Computer Help
 
-**Status:** Draft for owner review
+**Status:** Active — G2D-0/1 complete; G2D-2 private records implemented
 
-**Depends on:** G2C scoped memory/artifacts and a new protocol-neutral
-execution broker. The rejected Qwen `0.21.3` Podman sandbox is not reused.
+**Depends on:** G2C scoped memory/artifacts and a command-only, rootless Podman
+execution broker. The rejected Qwen `0.21.3` Podman sandbox is not reused:
+Podman is only the candidate containment backend, never the Qwen runtime.
 
 **Parent plan:** [`ODYSSEUS_IMPLEMENTATION_PLAN.md`](ODYSSEUS_IMPLEMENTATION_PLAN.md)
 
@@ -45,6 +46,32 @@ The model proposes operations but cannot choose mounts, credentials, network
 destinations, approval mode, or host authority. Failure of the sandbox or
 broker readiness gate disables execution; native unrestricted shell is not a
 fallback.
+
+## G2D-0: concrete containment gate
+
+The concrete candidate is **rootless Podman running a server-owned,
+command-only task container**. Qwen remains outside that container and receives
+only sanitized broker results. No Qwen Serve/ACP process, project mount, or
+ModelBridge route is reused inside it.
+
+Before any `computer_assist` UI or task is admitted, an automated qualification
+probe must prove all of the following with the actual local Podman runtime:
+
+- rootless Podman works with a reviewed digest-pinned image already present
+  locally; no image pull occurs during a task;
+- task commands have no host home, sibling project, Odysseus data, desktop,
+  SSH agent, container socket, host loopback, or ModelBridge access;
+- the sandbox has an isolated private home, explicit read-only inputs, and only
+  its declared scratch/task-root mount writable;
+- network is off for the initial scratch profile; later egress is introduced
+  only through a separate brokered, destination-filtered gate;
+- process, CPU, memory, file-descriptor, output, command-timeout, cancellation,
+  and descendant-cleanup limits hold under hostile fixtures;
+- a failed probe leaves `computer_assist` unavailable. There is no Bubblewrap
+  shell fallback and no less-contained “temporary” executor.
+
+The qualification report is persisted as evidence, not inferred from a CLI
+version string. Until it passes, G2D exposes `computer_observe` only.
 
 ## Capability profiles
 
@@ -90,7 +117,9 @@ Computer Help exposes two owner choices:
   reversible writes inside the task's preselected roots run automatically
   after policy checks and are shown live in Process.
 
-`Approve for me` is not blanket host approval. Every admitted operation must
+`Approve for me` is not blanket host approval. It is introduced only after the
+observation, incident, scratch, and reviewed-transaction canaries pass. Every
+admitted operation must
 still satisfy all of the following:
 
 - destination is inside a server-resolved task root;
@@ -212,20 +241,35 @@ The completed card collapses to its duration and outcome. The incident artifact
 remains the readable source of truth for the evolving plan, including owner
 steps that the executor cannot perform.
 
-## Implementation sequence
+## Delivery gates
 
-1. Freeze capability, task-root, network, transaction, Process, incident, and
-   error contracts.
-2. Build hostile sandbox/broker probes before exposing execution in the UI.
-3. Implement the read-only host observation broker and `computer_observe`.
-4. Add incident artifacts, `DeviceProfileV1`, restart-safe task state, and
-   long-paste references.
-5. Implement `computer_assist` in a protocol-neutral sandbox with scratch-only
-   execution first.
-6. Add filtered web/Git/download access and isolated venv/package workflows.
-7. Add reviewed transaction roots, rollback journals, and **Approve for me**.
-8. Run protected canaries for diagnostics, repository setup, venv creation,
-   media download, cancellation, reboot handoff, and repeated incidents.
+1. **G2D-0 — implement and qualify containment first.** Build the
+   server-owned rootless Podman command broker, then run hostile probes against
+   that actual broker. A failure ends before any Computer Help execution; it
+   does not produce a weaker executor. The Codex Desktop sandbox is a product
+   implementation rather than an embeddable Odysseus dependency, so the
+   compatible boundary is specified, owned, and tested here.
+2. **G2D-1 — observe.** After G2D-0 has a passing qualification report,
+   implement the read-only host observation broker,
+   `computer_observe`, Process records, and safe diagnostic summaries. This is
+   the first independently useful release.
+3. **G2D-2 — remember the work.** Add incident artifacts, `DeviceProfileV1`,
+   restart-safe task state, and long-paste references. A failed owner step
+   updates the same incident instead of restarting the conversation.
+   The first persistence slice is now implemented: safe diagnostics refresh
+   the private `computer/device-profile.md` artifact, and Computer Help can
+   create/revise private incident Markdown records in the existing Documents
+   editor. Long-paste capture accepts the Computer Help scope. Automatic
+   model-authored incident updates wait for the controlled task/turn broker;
+   they must not be bolted onto the unrestricted native chat route.
+4. **G2D-3 — scratch only.** Enable `computer_assist` only after G2D-0 passes,
+   with no network and no owner-root writes.
+5. **G2D-4 — bounded egress and transactions.** Add filtered web/Git/media
+   downloads, venv/package workflows, reviewed task roots, and rollback
+   journals.
+6. **G2D-5 — automatic approval canary.** Enable **Approve for me** only for
+   protected canaries that have passed every preceding gate. The song-download
+   flow is a late end-to-end canary, not the first test.
 
 ## Acceptance tests
 
