@@ -402,6 +402,33 @@ class ScopedMemoryRecord(TimestampMixin, Base):
     expires_at = Column(DateTime, nullable=True)
     __table_args__ = (Index("ix_scoped_memory_scope_source", "owner", "scope_kind", "project_id", "source_kind", "source_id", unique=True),)
 
+
+class LegacyMemoryMigrationReview(TimestampMixin, Base):
+    """Encrypted, owner-reviewed staging record for legacy-memory migration.
+
+    This is deliberately *not* a memory provider and cannot make legacy data
+    retrievable.  It binds a future owner assignment/apply transaction to one
+    immutable owner-private backup digest and records a blank rollback journal
+    up front.  Candidate metadata is encrypted because even categories and
+    historical session references are private context.
+    """
+    __tablename__ = "legacy_memory_migration_reviews"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    backup_id = Column(String, nullable=False)
+    backup_sha256 = Column(String(64), nullable=False)
+    status = Column(String, nullable=False, default="review_ready", index=True)
+    revision = Column(Integer, nullable=False, default=1)
+    plan_json = Column(EncryptedText, nullable=False)
+    journal_json = Column(EncryptedText, nullable=False, default="[]")
+    failure_code = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_legacy_memory_migration_review_owner_backup", "owner", "backup_id", unique=True),
+        Index("ix_legacy_memory_migration_review_owner_status", "owner", "status"),
+    )
+
 class ChatMessage(Base):
     """
     SQLAlchemy model for ChatMessage table.

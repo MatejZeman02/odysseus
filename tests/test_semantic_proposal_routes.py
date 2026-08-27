@@ -6,7 +6,10 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, ChatMessage as DbMessage, Project, ScopedMemoryRecord, Session as DbSession
+from core.database import (
+    Base, ChatMessage as DbMessage, LegacyMemoryMigrationReview, Project,
+    ScopedMemoryRecord, Session as DbSession,
+)
 import routes.companion_memory_routes as route_module
 import src.continuity.semantic_deriver as deriver_module
 import src.continuity.store as store_module
@@ -456,6 +459,8 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
         route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace(),
     )
 
+    review_id = dry_run.pop("review_id")
+    assert len(review_id) == 32
     assert dry_run == {
         "format": "native-memory-scoped-dry-run-v1",
         "backup_sha256": backup["sha256"],
@@ -471,6 +476,41 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     assert "prefers concise" not in str(dry_run)
     assert "Dust has a fish" not in str(dry_run)
     assert "session" not in str(dry_run)
+
+    db = route_module.SessionLocal()
+    review = db.query(LegacyMemoryMigrationReview).filter(
+        LegacyMemoryMigrationReview.id == review_id,
+    ).one()
+    assert review.status == "review_ready"
+    assert review.backup_sha256 == backup["sha256"]
+    assert review.journal_json == "[]"
+    assert "prefers concise" not in review.plan_json
+    assert "Dust has a fish" not in review.plan_json
+    db.close()
+
+    review_endpoint = _endpoint(router, "/api/companion/memory/legacy-migration-reviews/{review_id}", "GET")
+    review_summary = review_endpoint(review_id, SimpleNamespace())
+    assert review_summary == {
+        "review_id": review_id,
+        "revision": 1,
+        "status": "review_ready",
+        "backup_sha256": backup["sha256"],
+        "entries_considered": 4,
+        "eligible_scope_candidates": 2,
+        "needs_owner_assignment": 2,
+        "duplicate_candidates": 1,
+        "scope_candidates": {"personal": 1, "project": 1},
+        "rejected": {},
+        "candidate_count": 4,
+        "journal_entry_count": 0,
+        "migration_started": False,
+    }
+    assert "session" not in str(review_summary)
+
+    repeated = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")(
+        route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace(),
+    )
+    assert repeated["review_id"] == review_id
 
     preview = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")
     with pytest.raises(HTTPException) as raised:

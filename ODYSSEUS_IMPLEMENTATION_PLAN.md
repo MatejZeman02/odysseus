@@ -871,9 +871,11 @@ not exercised by this slice and is deliberately tracked next.
 - [x] Provide explicit aggregate inventory and owner-private backup gates.
 - [x] Provide an owner-triggered, backup-bound dry-run report with exact-home
   candidate counts, unresolved legacy counts, and aggregate duplicate counts;
-  it cannot write to any memory provider.
-- [ ] After the owner reviews that report, add explicit scope assignment,
-  a rollback journal, and only then consider a provider switch.
+  it cannot write to any memory provider. Persist an encrypted owner-private
+  review record, bound to that backup digest, with opaque candidates and an
+  empty rollback journal.
+- [ ] After the owner reviews that record, add explicit scope assignment and
+  only then consider a provider switch.
 
 **Checkpoint G2:** obtain explicit approval before reading the owner's real
 memory stores, changing a writer, or migrating memory data.

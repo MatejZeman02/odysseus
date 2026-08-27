@@ -337,8 +337,13 @@ recorded session is still owner-owned and bound to a Personal/project home,
 reports unresolved legacy entries and possible duplicate counts, and exposes no
 text, record IDs, fingerprints, path, or provider state. The preview does not
 write native memory, the scoped index, vector memory, or AgentMemory. Explicit
-scope assignment, durable rollback, and actual provider writes remain later
-owner-reviewed work.
+scope assignment and actual provider writes remain later owner-reviewed work.
+Each preview now also creates (or reuses for the same immutable backup) an
+encrypted owner-private **migration review** record. It contains opaque
+candidate tokens, aggregate classifications, the backup digest, and an empty
+rollback journal; its read API exposes only aggregate counts/status. It cannot
+assign a target, read legacy text into the browser, index a record, or execute
+a migration.
 
 ## Conversation attachment, not transcript merging
 

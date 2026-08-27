@@ -14,7 +14,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import ChatMessage as DbChatMessage, ContinuityArtifact, Project, Session as DbSession, SessionLocal, utcnow_naive
+from core.database import (
+    ChatMessage as DbChatMessage, ContinuityArtifact, LegacyMemoryMigrationReview,
+    Project, Session as DbSession, SessionLocal, utcnow_naive,
+)
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.companion_capabilities import defaults_for_scope
@@ -445,30 +448,36 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         by_scope = {"personal": 0, "project": 0}
         rejected: dict[str, int] = {}
         fingerprints: set[str] = set()
+        review_candidates: list[dict] = []
 
         def reject(reason: str) -> None:
             rejected[reason] = rejected.get(reason, 0) + 1
 
-        for entry in entries:
+        for ordinal, entry in enumerate(entries):
             counts["entries_considered"] += 1
             if not isinstance(entry, dict) or entry.get("owner") != owner:
                 reject("invalid_owner_record")
+                review_candidates.append({"ordinal": ordinal, "classification": "rejected", "reason": "invalid_owner_record"})
                 continue
             text = entry.get("text")
             if not isinstance(text, str) or not text.strip():
                 reject("missing_text")
+                review_candidates.append({"ordinal": ordinal, "classification": "rejected", "reason": "missing_text"})
                 continue
             if len(text.encode("utf-8")) > 512 * 1024:
                 reject("text_too_large")
+                review_candidates.append({"ordinal": ordinal, "classification": "rejected", "reason": "text_too_large"})
                 continue
             category = entry.get("category", "fact")
             if not isinstance(category, str) or len(category) > 64:
                 reject("invalid_category")
+                review_candidates.append({"ordinal": ordinal, "classification": "rejected", "reason": "invalid_category"})
                 continue
             fingerprint = hashlib.sha256(
                 (category + "\x00" + text.strip()).encode("utf-8")
             ).hexdigest()
-            if fingerprint in fingerprints:
+            duplicate = fingerprint in fingerprints
+            if duplicate:
                 counts["duplicate_candidates"] += 1
             else:
                 fingerprints.add(fingerprint)
@@ -479,15 +488,38 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             if scope_kind in by_scope:
                 by_scope[scope_kind] += 1
                 counts["eligible_scope_candidates"] += 1
+                classification = "eligible"
             else:
                 # Ownerless provenance does not become Personal memory by
                 # default. A later owner review must select a scope/source.
                 counts["needs_owner_assignment"] += 1
+                classification = "needs_owner_assignment"
+            # No memory text or legacy entry ID is persisted in this plan.  A
+            # future explicit assignment step re-reads the digest-bound backup
+            # and maps this opaque candidate token to its current entry.
+            review_candidates.append({
+                "ordinal": ordinal,
+                "candidate_token": hashlib.sha256(
+                    f"{backup_id}\x00{ordinal}\x00{fingerprint}".encode("utf-8")
+                ).hexdigest()[:32],
+                "classification": classification,
+                "duplicate": duplicate,
+                "category": category,
+                "source_scope_kind": scope_kind if scope_kind in by_scope else None,
+                "source_project_id": session.project_id if session and scope_kind == "project" else None,
+            })
 
         canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        backup_sha256 = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        review_id = _persist_legacy_migration_review(
+            owner=owner, backup_id=backup_id, backup_sha256=backup_sha256,
+            counts=counts, scope_candidates=by_scope, rejected=rejected,
+            candidates=review_candidates,
+        )
         return {
             "format": "native-memory-scoped-dry-run-v1",
-            "backup_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+            "backup_sha256": backup_sha256,
+            "review_id": review_id,
             **counts,
             "scope_candidates": by_scope,
             "rejected": dict(sorted(rejected.items())),
@@ -497,6 +529,110 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 "explicit scope/source selection and keep a rollback journal; no record was indexed or changed."
             ),
         }
+
+    def _persist_legacy_migration_review(
+        *, owner: str, backup_id: str, backup_sha256: str, counts: dict,
+        scope_candidates: dict, rejected: dict, candidates: list[dict],
+    ) -> str:
+        """Persist an owner-review record without staging memory text.
+
+        Re-running a dry run against the same immutable backup returns the
+        same review record.  This prevents a browser refresh from silently
+        changing the candidate set between future owner assignment and apply.
+        """
+        db = SessionLocal()
+        try:
+            existing = db.query(LegacyMemoryMigrationReview).filter(
+                LegacyMemoryMigrationReview.owner == owner,
+                LegacyMemoryMigrationReview.backup_id == backup_id,
+            ).first()
+            if existing:
+                if existing.backup_sha256 != backup_sha256:
+                    raise ValueError("owner-private backup integrity check failed")
+                return existing.id
+            plan = {
+                "schema_version": 1,
+                "backup_id": backup_id,
+                "backup_sha256": backup_sha256,
+                "counts": dict(counts),
+                "scope_candidates": dict(scope_candidates),
+                "rejected": dict(sorted(rejected.items())),
+                "candidates": candidates,
+            }
+            review = LegacyMemoryMigrationReview(
+                id=uuid.uuid4().hex, owner=owner, backup_id=backup_id,
+                backup_sha256=backup_sha256, status="review_ready", revision=1,
+                plan_json=json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                journal_json="[]",
+            )
+            db.add(review)
+            db.commit()
+            return review.id
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def _legacy_migration_review_summary(*, owner: str, review_id: str) -> dict:
+        """Return a browser-safe summary of a persisted migration review.
+
+        The encrypted plan is intentionally richer than this response: it has
+        opaque candidate tokens needed by a future owner-assignment flow.  The
+        browser only needs the aggregate decision surface, never those tokens,
+        historical session references, or legacy memory text.
+        """
+        if not re.fullmatch(r"[a-f0-9]{32}", review_id):
+            raise FileNotFoundError("migration review was not found")
+        db = SessionLocal()
+        try:
+            review = db.query(LegacyMemoryMigrationReview).filter(
+                LegacyMemoryMigrationReview.id == review_id,
+                LegacyMemoryMigrationReview.owner == owner,
+            ).first()
+            if not review:
+                raise FileNotFoundError("migration review was not found")
+            try:
+                plan = json.loads(review.plan_json)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("migration review could not be read safely") from exc
+            if not isinstance(plan, dict) or plan.get("schema_version") != 1:
+                raise ValueError("migration review could not be read safely")
+            counts = plan.get("counts") if isinstance(plan.get("counts"), dict) else {}
+            scopes = plan.get("scope_candidates") if isinstance(plan.get("scope_candidates"), dict) else {}
+            rejected = plan.get("rejected") if isinstance(plan.get("rejected"), dict) else {}
+            candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
+
+            def bounded_count(value: object) -> int:
+                try:
+                    return min(max(int(value or 0), 0), 1_000_000)
+                except (TypeError, ValueError):
+                    return 0
+
+            return {
+                "review_id": review.id,
+                "revision": review.revision,
+                "status": review.status,
+                "backup_sha256": review.backup_sha256,
+                "entries_considered": bounded_count(counts.get("entries_considered")),
+                "eligible_scope_candidates": bounded_count(counts.get("eligible_scope_candidates")),
+                "needs_owner_assignment": bounded_count(counts.get("needs_owner_assignment")),
+                "duplicate_candidates": bounded_count(counts.get("duplicate_candidates")),
+                "scope_candidates": {
+                    "personal": bounded_count(scopes.get("personal")),
+                    "project": bounded_count(scopes.get("project")),
+                },
+                "rejected": {
+                    key: bounded_count(value)
+                    for key, value in rejected.items()
+                    if isinstance(key, str) and re.fullmatch(r"[a-z_]{1,64}", key)
+                },
+                "candidate_count": min(len(candidates), 1_000_000),
+                "journal_entry_count": len(json.loads(review.journal_json or "[]")),
+                "migration_started": False,
+            }
+        finally:
+            db.close()
 
     def _resolve_synthesis_sources(*, owner: str, payload: CheckpointSynthesisCreate) -> dict:
         """Resolve exactly two owner checkpoints without exposing transcripts.
@@ -771,6 +907,19 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory dry run failed")
             raise HTTPException(503, "Legacy memory migration preview could not be completed safely. No data was changed.") from exc
+
+    @router.get("/memory/legacy-migration-reviews/{review_id}")
+    def legacy_memory_migration_review(review_id: str, request: Request):
+        """Read aggregate migration-review state; no assignment or apply exists yet."""
+        try:
+            return _legacy_migration_review_summary(owner=_owner(request), review_id=review_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Migration review was not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory migration review lookup failed")
+            raise HTTPException(503, "Migration review could not be read safely. No data was changed.") from exc
 
     @router.put("/memory/projects/{project_id}/relations")
     def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):

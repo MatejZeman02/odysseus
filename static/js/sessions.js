@@ -397,6 +397,11 @@ async function openCompanionMemory(meta, initialTab = 'context') {
         const next = document.createElement('p'); next.className = 'companion-memory-help';
         next.textContent = result.next_step || '';
         resultNode.append(next);
+        if (result.review_id) {
+          const review = document.createElement('p'); review.className = 'companion-memory-help';
+          review.textContent = 'A private migration review record is ready. It contains no copied memory text and no migration has started.';
+          resultNode.append(review);
+        }
       }
       legacyBackupId = String(result.backup_id || '');
       const dryRunButton = modal.querySelector('.companion-run-legacy-dry-run');
