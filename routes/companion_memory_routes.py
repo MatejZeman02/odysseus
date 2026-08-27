@@ -110,13 +110,18 @@ def setup_companion_memory_routes() -> APIRouter:
             checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
             project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
             personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
-            proposal = store.latest_semantic_proposal(owner=owner, session_id=session_id)
+            proposal = store.latest_semantic_proposal_record(owner=owner, session_id=session_id)
             return {
                 "scope_kind": scope_kind, "project_id": project_id,
                 "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
                 "project_brief": project_brief.to_payload() if project_brief else None,
                 "personal_brief": personal_brief.to_payload() if personal_brief else None,
-                "semantic_proposal": proposal.to_payload() if proposal else None,
+                "semantic_proposal": ({
+                    "id": proposal.id,
+                    "revision": proposal.revision,
+                    "status": proposal.status,
+                    "proposal": proposal.proposal.to_payload(),
+                } if proposal else None),
                 "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
                 "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
                 "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],

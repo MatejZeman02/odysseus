@@ -230,6 +230,8 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const modal = document.createElement('div'); modal.id = 'companion-memory-modal'; modal.className = 'modal';
   const brief = payload.personal_brief || payload.project_brief || {};
   const checkpoint = payload.thread_checkpoint || {};
+  const proposalRecord = payload.semantic_proposal || null;
+  const proposal = proposalRecord?.proposal || null;
   const continuityProvenance = (record, label) => {
     const status = record.derivation_status || 'legacy_unclassified';
     if (status === 'accepted') return `${label}: owner-approved home state.`;
@@ -240,10 +242,18 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   };
   const memoryTitle = payload.scope_kind === 'personal' ? 'Personal memory'
     : (payload.scope_kind === 'computer' ? 'Computer Help records' : 'Project memory');
+  const semanticFields = [
+    ['objective', 'Objective'], ['facts', 'Facts'], ['decision_candidates', 'Decision candidates'],
+    ['proposals', 'Proposals'], ['failed_approaches', 'Failed approaches'],
+    ['open_questions', 'Open questions'], ['next_actions', 'Next actions'], ['artifact_refs', 'Artifact references'],
+  ];
+  const proposalHtml = proposal ? `<section class="companion-semantic-proposal" data-proposal-id="${esc(proposalRecord.id)}" data-proposal-revision="${esc(proposalRecord.revision)}"><h5>Semantic proposal</h5><p class="companion-memory-help">Proposed from this chat’s source messages. Check only entries you want to promote into accepted home memory.</p>${semanticFields.map(([field, label]) => { const values = field === 'objective' ? (proposal.objective ? [proposal.objective] : []) : (proposal[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-proposal-field="${esc(field)}" data-proposal-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-proposal">Promote selected entries</button></section>` : '<section class="companion-semantic-proposal"><h5>Semantic proposal</h5><p class="companion-memory-help">Create a source-linked proposal, then review and promote individual entries. It will not change memory automatically.</p></section>';
+  const proposalAction = !proposal && (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
+    ? '<button type="button" class="companion-create-semantic-proposal">Create semantic proposal</button>' : '';
   modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
     <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
-    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p><p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
+    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${proposalHtml}${proposalAction}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
@@ -257,6 +267,42 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     }
     close();
     documentApi.openLibrary({tab: 'documents'});
+  });
+  modal.querySelector('.companion-create-semantic-proposal')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/semantic-proposals`, {method: 'POST', credentials: 'same-origin'});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not create a semantic proposal');
+      uiModule.showToast?.('Semantic proposal ready for review.', 2600);
+      close(); openCompanionMemory(meta, 'context');
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not create a semantic proposal');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelector('.companion-promote-proposal')?.addEventListener('click', async (event) => {
+    const card = event.currentTarget.closest('[data-proposal-id]');
+    const selections = {};
+    card.querySelectorAll('input[data-proposal-field]:checked').forEach(input => {
+      const field = input.dataset.proposalField;
+      (selections[field] ||= []).push(Number(input.dataset.proposalIndex));
+    });
+    if (!Object.keys(selections).length) {
+      uiModule.showError?.('Select at least one proposal entry to promote.');
+      return;
+    }
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/memory/semantic-proposals/${encodeURIComponent(card.dataset.proposalId)}/promote`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected_revision: Number(card.dataset.proposalRevision), selections})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not promote the selected entries');
+      uiModule.showToast?.('Selected entries promoted into accepted home memory.', 3000);
+      close(); openCompanionMemory(meta, 'context');
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not promote the selected entries');
+      event.currentTarget.disabled = false;
+    }
   });
   modal.querySelector('.companion-request-grant')?.addEventListener('click', async () => {
     const project = modal.querySelector('.companion-grant-project')?.value; const purpose = modal.querySelector('.companion-grant-purpose')?.value;

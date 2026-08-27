@@ -394,6 +394,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "/artifacts/personal" in routes
     assert "/artifacts/personal/{artifact_id}/document" in routes
     assert "/artifacts/capture-paste" in routes
+    assert "/semantic-proposals" in routes
+    assert "/semantic-proposals/{proposal_id}/promote" in routes
     assert "overflow-companion-context-btn" in page
     assert "overflow-companion-artifacts-btn" not in page
     assert "deprecated-companion-artifacts-btn" in page
@@ -405,6 +407,9 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "LONG_PASTE_ARTIFACT_THRESHOLD = 3000" in chat
     assert "Task excerpt:" in chat
     assert "Long paste saved as artifact" in chat
+    assert "Create semantic proposal" in ui
+    assert "Promote selected entries" in ui
+    assert "data-proposal-index" in ui
 
 
 def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store, monkeypatch):

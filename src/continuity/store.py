@@ -261,8 +261,19 @@ class ContinuityStore:
         return PersonalBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
     def latest_semantic_proposal(self, *, owner: str, session_id: str) -> Optional[SemanticCheckpointProposalV1]:
+        record = self.latest_semantic_proposal_record(owner=owner, session_id=session_id)
+        return record.proposal if record else None
+
+    def latest_semantic_proposal_record(self, *, owner: str, session_id: str) -> Optional[SemanticProposalRecord]:
         artifact = self._latest(owner=owner, kind="semantic_checkpoint_proposal_v1", session_id=session_id)
-        return SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
+        if artifact is None:
+            return None
+        return SemanticProposalRecord(
+            id=artifact.id,
+            revision=artifact.revision,
+            status=artifact.status,
+            proposal=SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json)),
+        )
 
     def semantic_proposal(self, *, owner: str, proposal_id: str) -> SemanticProposalRecord:
         db = SessionLocal()
