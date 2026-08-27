@@ -10,6 +10,7 @@ import asyncio
 import errno
 import json
 import os
+import shlex
 import stat
 import tempfile
 from pathlib import Path
@@ -177,8 +178,17 @@ def _commands(content: str) -> tuple[ReadOnlyCommand, ...]:
 
 
 def _display(commands: Iterable[ReadOnlyCommand]) -> str:
-    # Only a UI label. Validation happens again in the Podman broker.
-    return " | ".join(" ".join(item.argv) for item in commands)[:512]
+    """Return an unambiguous bounded description of the admitted pipeline.
+
+    This is diagnostic display text rather than the shell transport.  It must
+    still reflect the argv vectors accurately: a bare ``" ".join`` turns a
+    single argument containing spaces into something that looks like several
+    arguments.  Use the same POSIX quoting convention as the broker and make
+    UI truncation explicit, so a reader never mistakes a preview for the full
+    command.  The execution transport is deliberately *not* truncated.
+    """
+    preview = " | ".join(shlex.join(item.argv) for item in commands)
+    return preview if len(preview) <= 512 else f"{preview[:511]}✂"
 
 
 class SandboxedReadTool:

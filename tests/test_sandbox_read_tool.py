@@ -54,6 +54,16 @@ def test_sandbox_read_rejects_shell_text_before_any_workspace_access(monkeypatch
     assert result == {"error": "command_denied", "exit_code": 1}
 
 
+def test_sandbox_read_display_keeps_argv_boundaries_and_marks_a_clamp():
+    import src.agent_tools.sandbox_tools as module
+    from src.computer_sandbox import ReadOnlyCommand
+
+    assert module._display((ReadOnlyCommand(("grep", "two words", "README.md")),)) == "grep 'two words' README.md"
+    preview = module._display((ReadOnlyCommand(("grep", "x" * 600)),))
+    assert preview.endswith("✂")
+    assert len(preview) == 512
+
+
 def test_snapshot_descriptor_copy_rejects_a_symlink_source(tmp_path):
     import src.agent_tools.sandbox_tools as module
 
