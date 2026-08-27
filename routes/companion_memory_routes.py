@@ -525,6 +525,40 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             "artifact_refs": list(checkpoint.artifact_refs),
         }
 
+    def _synthesis_preview_comparison(sources: list[dict]) -> dict:
+        """Compare compact checkpoint claims without reconciling them.
+
+        This is deliberately an owner-review aid, not a provider judgment: an
+        exact match is shown as shared, and every non-match remains attached to
+        its selected source.  Raw messages, checkpoint identifiers, hashes,
+        and route information never leave the existing compact-preview shape.
+        """
+        first, second = (_synthesis_preview_source(source) for source in sources)
+        list_fields = (
+            "accepted_decisions", "proposals", "failures", "open_questions",
+            "next_actions", "artifact_refs",
+        )
+        fields: dict[str, dict] = {}
+        for field in list_fields:
+            first_values = list(first[field])
+            second_values = list(second[field])
+            second_set = set(second_values)
+            first_set = set(first_values)
+            fields[field] = {
+                "shared": [value for value in first_values if value in second_set],
+                "source_one_only": [value for value in first_values if value not in second_set],
+                "source_two_only": [value for value in second_values if value not in first_set],
+            }
+        return {
+            "objectives": {
+                "shared": bool(first["objective"]) and first["objective"] == second["objective"],
+                "source_one": first["objective"],
+                "source_two": second["objective"],
+            },
+            "fields": fields,
+            "policy": "Matching entries are only exact overlaps. Different entries remain source-attributed claims for the synthesis chat to reconcile.",
+        }
+
     def _create_synthesis_session(*, owner: str, payload: CheckpointSynthesisCreate) -> dict:
         """Create the user-visible alternative to transcript merging.
 
@@ -777,6 +811,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         return {
             "destination_scope_kind": resolved["scope_kind"],
             "sources": [_synthesis_preview_source(source) for source in resolved["sources"]],
+            "comparison": _synthesis_preview_comparison(resolved["sources"]),
             "policy": "These are compact owner-selected references, not transcripts. Keep disagreements attributed to their source.",
         }
 

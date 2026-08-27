@@ -274,6 +274,12 @@ def test_checkpoint_synthesis_creates_fresh_scoped_chat_with_exactly_two_mounts(
     assert "source_message_ids" not in json.dumps(reviewed)
     assert "source_hash" not in json.dumps(reviewed)
     assert "not transcripts" in reviewed["policy"]
+    comparison = reviewed["comparison"]
+    assert comparison["objectives"]["shared"] is False
+    assert comparison["objectives"]["source_one"] == "First release option"
+    assert comparison["objectives"]["source_two"] == "Second release option"
+    assert "accepted_decisions" in comparison["fields"]
+    assert "source_hash" not in json.dumps(comparison)
 
     create = _endpoint(router, "/api/companion/memory/checkpoint-synthesis")
     result = create(route_module.CheckpointSynthesisCreate(

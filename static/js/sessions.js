@@ -527,6 +527,42 @@ async function openCompanionMemory(meta, initialTab = 'context') {
         });
         preview.append(card);
       });
+      const comparison = result.comparison;
+      if (comparison && typeof comparison === 'object') {
+        const card = document.createElement('section');
+        card.className = 'companion-synthesis-source-review companion-synthesis-comparison';
+        const heading = document.createElement('strong');
+        heading.textContent = 'Agreement and differences';
+        card.append(heading);
+        const policyLine = document.createElement('p');
+        policyLine.className = 'companion-memory-help';
+        policyLine.textContent = comparison.policy || 'Differences remain attributed to their source.';
+        card.append(policyLine);
+        const objectives = comparison.objectives || {};
+        const objectiveLine = document.createElement('p');
+        objectiveLine.textContent = objectives.shared
+          ? `Shared objective: ${objectives.source_one || 'Untitled checkpoint'}`
+          : `Objectives differ — Source 1: ${objectives.source_one || 'none'} · Source 2: ${objectives.source_two || 'none'}`;
+        card.append(objectiveLine);
+        const labels = {
+          accepted_decisions: 'Decisions', proposals: 'Proposals', failures: 'Failed approaches',
+          open_questions: 'Open questions', next_actions: 'Next actions', artifact_refs: 'Artifact references',
+        };
+        Object.entries(comparison.fields || {}).forEach(([field, value]) => {
+          const shared = Array.isArray(value?.shared) ? value.shared : [];
+          const sourceOneOnly = Array.isArray(value?.source_one_only) ? value.source_one_only : [];
+          const sourceTwoOnly = Array.isArray(value?.source_two_only) ? value.source_two_only : [];
+          if (!shared.length && !sourceOneOnly.length && !sourceTwoOnly.length) return;
+          const line = document.createElement('p');
+          const parts = [];
+          if (shared.length) parts.push(`Shared: ${shared.join(' · ')}`);
+          if (sourceOneOnly.length) parts.push(`Source 1 only: ${sourceOneOnly.join(' · ')}`);
+          if (sourceTwoOnly.length) parts.push(`Source 2 only: ${sourceTwoOnly.join(' · ')}`);
+          line.textContent = `${labels[field] || field}: ${parts.join(' | ')}`;
+          card.append(line);
+        });
+        preview.append(card);
+      }
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not review checkpoint sources');
     } finally {
