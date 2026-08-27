@@ -312,6 +312,13 @@ strict adapter used for conformance tests only; it is not registered as a
 replacement writer and the legacy `NativeMemoryProvider` remains outside this
 scoped contract until a separately reviewed migration.
 
+Personal Advisor’s migration preflight now exposes a disabled-until-inventory
+**Create owner-private backup** action. On an explicit authenticated click it
+writes only the current owner’s attributed native entries into a private,
+atomic, permission-restricted backup and returns a count plus digest—not the
+backup path or any memory text. It never copies ownerless/other-owner entries,
+touches vector/AgentMemory, indexes anything, or begins migration.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to

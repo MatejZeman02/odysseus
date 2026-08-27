@@ -288,7 +288,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const proposalAction = !proposal && (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
     ? '<button type="button" class="companion-create-semantic-proposal">Create semantic proposal</button>' : '';
   const legacyInventoryHtml = payload.scope_kind === 'personal'
-    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
+    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><button type="button" class="companion-create-legacy-backup" disabled>Create owner-private backup</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
     : '';
   const relatedProjectCatalog = Array.isArray(payload.related_project_catalog) ? payload.related_project_catalog : [];
   const relatedProjectChoices = relatedProjectCatalog.length
@@ -352,8 +352,31 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       const next = document.createElement('p'); next.className = 'companion-memory-help';
       next.textContent = result.next_step || '';
       resultNode.append(next);
+      const backupButton = modal.querySelector('.companion-create-legacy-backup');
+      if (backupButton) backupButton.disabled = !result.readable;
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not inspect legacy memory');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelector('.companion-create-legacy-backup')?.addEventListener('click', async (event) => {
+    const resultNode = modal.querySelector('.companion-legacy-inventory-result');
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch('/api/companion/memory/legacy-backup', {method: 'POST', credentials: 'same-origin', cache: 'no-store'});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not create the owner-private backup');
+      if (resultNode) {
+        const summary = document.createElement('p');
+        summary.textContent = `Owner-private backup created: ${result.entry_count || 0} entries · integrity digest ${String(result.sha256 || '').slice(0, 12)}…`;
+        resultNode.append(summary);
+        const next = document.createElement('p'); next.className = 'companion-memory-help';
+        next.textContent = result.next_step || '';
+        resultNode.append(next);
+      }
+      uiModule.showToast?.('Owner-private backup created. No migration was started.', 3600);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not create the owner-private backup');
       event.currentTarget.disabled = false;
     }
   });

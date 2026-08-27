@@ -4,7 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -253,6 +256,45 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             "next_step": "Review this inventory, then explicitly request an owner-scoped export/backup before any provider dry run. No records were changed.",
         }
 
+    def _write_legacy_memory_backup(*, owner: str) -> dict:
+        """Create an owner-private backup only after an explicit owner action.
+
+        Ownerless legacy entries stay unclaimed: inventory reports their count,
+        but this backup never silently copies potentially shared records.  The
+        API response exposes only an audit count and digest, not text or paths.
+        """
+        if memory_manager is None or not getattr(memory_manager, "memory_file", None):
+            raise RuntimeError("native_memory_unavailable")
+        entries = memory_manager.load_all_for_update()
+        owner_entries = [entry for entry in entries if isinstance(entry, dict) and entry.get("owner") == owner]
+        serialized = json.dumps(owner_entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc)
+        owner_key = hashlib.sha256(owner.encode("utf-8")).hexdigest()[:20]
+        backup_id = f"native-memory-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:10]}"
+        backup_dir = Path(memory_manager.memory_file).resolve().parent / "continuity-backups" / owner_key
+        backup_path = backup_dir / f"{backup_id}.json"
+        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(backup_dir, 0o700)
+        temporary = backup_dir / f".{backup_id}.tmp"
+        try:
+            temporary.write_text(serialized, encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, backup_path)
+            os.chmod(backup_path, 0o600)
+        finally:
+            if temporary.exists():
+                temporary.unlink(missing_ok=True)
+        return {
+            "backup_id": backup_id,
+            "format": "native-memory-owner-backup-v1",
+            "entry_count": len(owner_entries),
+            "sha256": digest,
+            "next_step": (
+                "Owner-private backup completed. Review its count with the inventory before separately approving any migration."
+            ),
+        }
+
     def _create_synthesis_session(*, owner: str, payload: CheckpointSynthesisCreate) -> dict:
         """Create the user-visible alternative to transcript merging.
 
@@ -424,6 +466,18 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory inventory failed")
             raise HTTPException(503, "Legacy memory inventory could not be completed safely. No data was changed.") from exc
+
+    @router.post("/memory/legacy-backup")
+    def legacy_memory_backup(request: Request):
+        """Explicit C4 backup gate; it never indexes, recalls, or migrates."""
+        try:
+            return _write_legacy_memory_backup(owner=_owner(request))
+        except MemoryStoreUnreadable as exc:
+            logger.exception("Legacy memory backup was blocked by an unreadable source")
+            raise HTTPException(503, "Legacy memory could not be backed up safely. No migration was started.") from exc
+        except Exception as exc:
+            logger.exception("Legacy memory backup failed")
+            raise HTTPException(503, "Legacy memory backup could not be completed. No migration was started.") from exc
 
     @router.put("/memory/projects/{project_id}/relations")
     def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):

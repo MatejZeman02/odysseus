@@ -300,6 +300,36 @@ def test_legacy_memory_inventory_is_owner_aggregate_only_and_never_returns_text(
     assert "other owner's text" not in str(inventory)
 
 
+def test_legacy_memory_backup_is_owner_private_and_returns_only_audit_data(monkeypatch, tmp_path):
+    _setup(monkeypatch)
+
+    class FakeMemory:
+        def __init__(self, root):
+            self.memory_file = root / "memory.json"
+
+        def load_all_for_update(self):
+            return [
+                {"id": "mine", "owner": "alice", "text": "private draft"},
+                {"id": "legacy", "text": "ownerless compatibility text"},
+                {"id": "other", "owner": "bob", "text": "other owner's text"},
+            ]
+
+    router = route_module.setup_companion_memory_routes(memory_manager=FakeMemory(tmp_path))
+    backup = _endpoint(router, "/api/companion/memory/legacy-backup", "POST")(SimpleNamespace())
+
+    assert backup["format"] == "native-memory-owner-backup-v1"
+    assert backup["entry_count"] == 1
+    assert len(backup["sha256"]) == 64
+    assert "private draft" not in str(backup)
+    assert "continuity-backups" not in str(backup)
+    files = list(tmp_path.glob("continuity-backups/*/*.json"))
+    assert len(files) == 1
+    content = files[0].read_text(encoding="utf-8")
+    assert "private draft" in content
+    assert "other owner's text" not in content
+    assert "ownerless compatibility text" not in content
+
+
 def test_project_relation_route_persists_owner_allowlist_without_project_content(monkeypatch):
     router = _setup(monkeypatch)
     continuity = ContinuityStore()

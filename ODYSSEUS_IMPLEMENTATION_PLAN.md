@@ -166,6 +166,11 @@ session/source provenance, sensitivity, expiry, and opaque grant audit IDs
 before a provider operates. Its local adapter is conformance-only and is not
 registered as a replacement for the existing native-memory writer.
 
+After the owner reviews that aggregate inventory, Personal Advisor offers an
+explicit owner-private native-memory backup. It copies only entries attributed
+to the authenticated owner and returns a count/digest without exposing the
+backup path or text; it does not start a migration.
+
 ### Stage C5 — Continuity and project UX closure
 
 **Outcome:** long-running work is understandable and remains fast.
