@@ -67,6 +67,18 @@ def _scope_kind_for_session(session_id: Optional[str]) -> Optional[str]:
     """
     if not session_id:
         return None
+    try:
+        from core.database import Session as DbSession, SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession.scope_kind).filter(DbSession.id == session_id).first()
+            return str(row[0] or "general") if row else None
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("Could not resolve tool executor session scope", exc_info=True)
+        return None
 
 
 def _session_capability_enabled(session_id: Optional[str], capability: str) -> bool:
@@ -98,18 +110,6 @@ def _session_capability_enabled(session_id: Optional[str], capability: str) -> b
     except Exception:
         logger.warning("Could not resolve tool executor capability grant", exc_info=True)
         return False
-    try:
-        from core.database import Session as DbSession, SessionLocal
-
-        db = SessionLocal()
-        try:
-            row = db.query(DbSession.scope_kind).filter(DbSession.id == session_id).first()
-            return str(row[0] or "general") if row else None
-        finally:
-            db.close()
-    except Exception:
-        logger.warning("Could not resolve tool executor session scope", exc_info=True)
-        return None
 
 
 

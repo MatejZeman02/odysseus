@@ -542,6 +542,33 @@ async def test_executor_backstop_denies_dynamic_legacy_memory_mcp_tool(monkeypat
     assert result["policy"] == "companion_scope"
 
 
+@pytest.mark.asyncio
+async def test_executor_backstop_reads_the_durable_companion_scope(store, monkeypatch):
+    """The shared executor must not depend on route-provided scope hints."""
+    from collections import namedtuple
+    import core.database as database_module
+    import src.tool_execution as tool_execution
+
+    # The fixture owns an isolated in-memory database. The executor imports
+    # SessionLocal lazily from core.database, just as it does in production.
+    monkeypatch.setattr(database_module, "SessionLocal", memory_module.SessionLocal)
+    assert tool_execution._scope_kind_for_session("personal") == "personal"
+    assert tool_execution._session_capability_enabled("computer", "system_observe") is True
+    assert tool_execution._session_capability_enabled("personal", "system_observe") is False
+
+    block = namedtuple("ToolBlock", ["tool_type", "content"])(
+        "mcp__server_7f3a__memory_save", '{"text": "global fact"}'
+    )
+    desc, result = await tool_execution.execute_tool_block(
+        block,
+        session_id="personal",
+        security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+    )
+
+    assert desc.endswith(": BLOCKED")
+    assert result["policy"] == "companion_scope"
+
+
 def test_companion_prompt_filters_dynamic_legacy_memory_mcp_schemas():
     """Companion prompts retain ordinary MCP schemas, but not global memory."""
     from src.agent_loop import _build_system_prompt
