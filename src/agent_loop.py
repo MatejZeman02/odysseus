@@ -4000,9 +4000,12 @@ async def stream_agent_loop(
     # If caller provided a pre-computed set (e.g. task_scheduler), use that.
     _relevant_tools = relevant_tools
     _t1 = time.time()
-    if _relevant_tools:
+    # An explicit empty set is a valid caller policy: it means this turn must
+    # remain tool-less.  Do not treat it as a missing selection and start the
+    # background RAG/index path (which can outlive the request on a timeout).
+    if _relevant_tools is not None:
         logger.info(f"[tool-rag] Using caller-provided relevant_tools ({len(_relevant_tools)} tools)")
-    if not guide_only and not _relevant_tools and _low_signal_turn:
+    if not guide_only and _relevant_tools is None and _low_signal_turn:
         from src.tool_index import ALWAYS_AVAILABLE
         if workspace:
             # An active workspace IS the file-work signal: a vague "look at the
@@ -4019,7 +4022,7 @@ async def stream_agent_loop(
             # Non-English queries are flagged low_signal by the English-only
             # intent classifier, but fastembed retrieval works across languages.
             logger.info("[tool-rag] Low-signal query; will run RAG retrieval")
-    if not guide_only and not _relevant_tools:
+    if not guide_only and _relevant_tools is None:
         try:
             from src.tool_index import get_tool_index, ALWAYS_AVAILABLE
             try:
@@ -4071,7 +4074,7 @@ async def stream_agent_loop(
 
     # Fallback: if RAG unavailable, use keyword-based tool selection
     # instead of sending ALL tools (which overwhelms the model).
-    if not guide_only and not _relevant_tools and _retrieval_query:
+    if not guide_only and _relevant_tools is None and _retrieval_query:
         from src.tool_index import ALWAYS_AVAILABLE, ToolIndex
         _relevant_tools = set(ALWAYS_AVAILABLE)
         ql = _retrieval_query.lower()
