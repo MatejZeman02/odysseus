@@ -287,10 +287,13 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const proposalHtml = proposal ? `<section class="companion-semantic-proposal" data-proposal-id="${esc(proposalRecord.id)}" data-proposal-revision="${esc(proposalRecord.revision)}"><h5>Semantic proposal</h5><p class="companion-memory-help">Proposed from this chat’s source messages. Check only entries you want to promote into accepted home memory.</p>${semanticFields.map(([field, label]) => { const values = field === 'objective' ? (proposal.objective ? [proposal.objective] : []) : (proposal[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-proposal-field="${esc(field)}" data-proposal-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-proposal">Promote selected entries</button></section>` : '<section class="companion-semantic-proposal"><h5>Semantic proposal</h5><p class="companion-memory-help">Create a source-linked proposal, then review and promote individual entries. It will not change memory automatically.</p></section>';
   const proposalAction = !proposal && (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
     ? '<button type="button" class="companion-create-semantic-proposal">Create semantic proposal</button>' : '';
+  const legacyInventoryHtml = payload.scope_kind === 'personal'
+    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
+    : '';
   modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
     <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
-    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${checkpointMountHtml}${proposalHtml}${proposalAction}${proposalAttemptText ? `<p class="companion-memory-help">${esc(proposalAttemptText)}</p>` : ''}${proposalHistoryHtml}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
+    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${checkpointMountHtml}${proposalHtml}${proposalAction}${proposalAttemptText ? `<p class="companion-memory-help">${esc(proposalAttemptText)}</p>` : ''}${proposalHistoryHtml}${legacyInventoryHtml}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
@@ -304,6 +307,36 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     }
     close();
     documentApi.openLibrary({tab: 'documents'});
+  });
+  modal.querySelector('.companion-run-legacy-inventory')?.addEventListener('click', async (event) => {
+    const resultNode = modal.querySelector('.companion-legacy-inventory-result');
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch('/api/companion/memory/legacy-inventory', {credentials: 'same-origin', cache: 'no-store'});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not inspect legacy memory');
+      if (!resultNode) return;
+      resultNode.replaceChildren();
+      const summary = document.createElement('p');
+      if (!result.readable) {
+        summary.textContent = result.next_step || 'Legacy memory could not be read safely. No data was changed.';
+      } else {
+        const native = result.native_memory || {};
+        summary.textContent = `${native.owner_entry_count || 0} of your legacy entries · ${native.entries_with_session_provenance || 0} with chat provenance · ${native.ownerless_entry_count || 0} ownerless compatibility entries. No data was changed.`;
+      }
+      resultNode.append(summary);
+      if (result.readable && result.native_memory?.foreign_owner_entries_present) {
+        const warning = document.createElement('p'); warning.className = 'companion-memory-help';
+        warning.textContent = 'Other owner-scoped legacy entries exist. They were not counted, read, or exposed.';
+        resultNode.append(warning);
+      }
+      const next = document.createElement('p'); next.className = 'companion-memory-help';
+      next.textContent = result.next_step || '';
+      resultNode.append(next);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not inspect legacy memory');
+      event.currentTarget.disabled = false;
+    }
   });
   modal.querySelector('.companion-attach-checkpoint')?.addEventListener('click', async (event) => {
     const sourceCheckpointId = modal.querySelector('.companion-checkpoint-source')?.value;

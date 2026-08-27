@@ -900,7 +900,9 @@ from routes.computer_help_routes import setup_computer_help_routes
 companion_run_registry = CompanionRunRegistry()
 app.include_router(setup_g1_continuity_routes(session_manager, companion_run_registry))
 app.include_router(setup_companion_patch_routes(session_manager, companion_run_registry))
-app.include_router(setup_companion_memory_routes(session_manager))
+app.include_router(setup_companion_memory_routes(
+    session_manager, memory_manager=memory_manager, memory_vector=memory_vector,
+))
 app.include_router(setup_computer_help_routes(session_manager))
 
 # ========= ROUTES (kept in app.py) =========

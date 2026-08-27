@@ -14,6 +14,7 @@ from core.database import ContinuityArtifact, Project, Session as DbSession, Ses
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.companion_capabilities import defaults_for_scope
+from src.memory import MemoryStoreUnreadable
 from src.continuity.contracts import ContractError, PersonalBriefV1
 from src.continuity.semantic_deriver import SemanticDerivationError, derive_semantic_proposal
 from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictError
@@ -122,9 +123,63 @@ def _scope(owner: str, session_id: str) -> tuple[str, str | None]:
         db.close()
 
 
-def setup_companion_memory_routes(session_manager=None) -> APIRouter:
+def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, memory_vector=None) -> APIRouter:
     router = APIRouter(prefix="/api/companion", tags=["companion-memory"])
     memory = CompanionMemoryStore()
+
+    def _legacy_memory_inventory(*, owner: str) -> dict:
+        """Return a consent-triggered migration preflight with no memory text.
+
+        This intentionally takes the strict read path. A lenient empty list
+        would make a broken JSON store look like a successful empty inventory.
+        Nothing in this helper writes, migrates, indexes, or backs up data.
+        """
+        if memory_manager is None:
+            return {
+                "available": False,
+                "readable": False,
+                "reason": "native_memory_unavailable",
+                "next_step": "Native memory is unavailable in this Odysseus process; no migration action is available.",
+            }
+        try:
+            entries = memory_manager.load_all_for_update()
+        except MemoryStoreUnreadable:
+            return {
+                "available": True,
+                "readable": False,
+                "reason": "native_memory_unreadable",
+                "next_step": "The legacy memory store could not be read safely. Repair or restore it before any inventory, export, or migration.",
+            }
+        own_entries = [entry for entry in entries if isinstance(entry, dict) and entry.get("owner") == owner]
+        ownerless_entries = [entry for entry in entries if isinstance(entry, dict) and not entry.get("owner")]
+        foreign_present = any(isinstance(entry, dict) and entry.get("owner") not in {None, "", owner} for entry in entries)
+        categories: dict[str, int] = {}
+        with_session_provenance = 0
+        for entry in own_entries:
+            category = str(entry.get("category") or "fact")[:64]
+            categories[category] = categories.get(category, 0) + 1
+            if entry.get("session_id"):
+                with_session_provenance += 1
+        return {
+            "available": True,
+            "readable": True,
+            "native_memory": {
+                "owner_entry_count": len(own_entries),
+                "ownerless_entry_count": len(ownerless_entries),
+                "foreign_owner_entries_present": foreign_present,
+                "entries_with_session_provenance": with_session_provenance,
+                "category_counts": dict(sorted(categories.items())),
+            },
+            "vector_memory": {
+                "configured": memory_vector is not None,
+                "healthy": bool(getattr(memory_vector, "healthy", False)),
+            },
+            "agentmemory": {
+                "configured": False,
+                "migration_enabled": False,
+            },
+            "next_step": "Review this inventory, then explicitly request an owner-scoped export/backup before any provider dry run. No records were changed.",
+        }
 
     def _create_synthesis_session(*, owner: str, payload: CheckpointSynthesisCreate) -> dict:
         """Create the user-visible alternative to transcript merging.
@@ -283,6 +338,15 @@ def setup_companion_memory_routes(session_manager=None) -> APIRouter:
                 503,
                 "Companion memory storage needs a one-time update. Restart Odysseus, then try again.",
             ) from exc
+
+    @router.get("/memory/legacy-inventory")
+    def legacy_memory_inventory(request: Request):
+        """Owner-triggered C4 preflight; aggregate-only and strictly read-only."""
+        try:
+            return _legacy_memory_inventory(owner=_owner(request))
+        except Exception as exc:
+            logger.exception("Legacy memory inventory failed")
+            raise HTTPException(503, "Legacy memory inventory could not be completed safely. No data was changed.") from exc
         except Exception as exc:
             logger.exception("Companion memory could not load for session %s", session_id)
             raise HTTPException(

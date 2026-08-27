@@ -223,3 +223,33 @@ def test_checkpoint_synthesis_creates_fresh_scoped_chat_with_exactly_two_mounts(
             destination_session_id="destination", source_checkpoint_ids=[first.id, first.id],
         ), SimpleNamespace())
     assert raised.value.status_code == 422
+
+
+def test_legacy_memory_inventory_is_owner_aggregate_only_and_never_returns_text(monkeypatch):
+    _setup(monkeypatch)
+
+    class FakeMemory:
+        def load_all_for_update(self):
+            return [
+                {"id": "mine", "owner": "alice", "text": "private draft", "category": "preference", "session_id": "session"},
+                {"id": "legacy", "text": "ownerless compatibility text", "category": "fact"},
+                {"id": "other", "owner": "bob", "text": "other owner's text", "category": "fact"},
+            ]
+
+    router = route_module.setup_companion_memory_routes(
+        memory_manager=FakeMemory(), memory_vector=SimpleNamespace(healthy=True),
+    )
+    inventory = _endpoint(router, "/api/companion/memory/legacy-inventory", "GET")(SimpleNamespace())
+
+    assert inventory["readable"] is True
+    assert inventory["native_memory"] == {
+        "owner_entry_count": 1,
+        "ownerless_entry_count": 1,
+        "foreign_owner_entries_present": True,
+        "entries_with_session_provenance": 1,
+        "category_counts": {"preference": 1},
+    }
+    assert inventory["vector_memory"] == {"configured": True, "healthy": True}
+    assert inventory["agentmemory"] == {"configured": False, "migration_enabled": False}
+    assert "private draft" not in str(inventory)
+    assert "other owner's text" not in str(inventory)
