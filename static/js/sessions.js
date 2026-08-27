@@ -359,8 +359,35 @@ async function openCompanionMemory(meta, initialTab = 'context') {
         const review = Array.isArray(result?.reviews) ? result.reviews[0] : null;
         if (!review) return;
         const summary = document.createElement('p'); summary.className = 'companion-memory-help';
-        summary.textContent = `Saved review: ${review.candidate_count || 0} candidates · ${review.status || 'review ready'} · no migration started.`;
+        const staged = Number(review.assignment_staged_count || 0);
+        summary.textContent = staged
+          ? `Saved review: ${staged} exact-home assignments staged · ${review.assignment_unresolved_count || 0} remain unresolved · no migration started.`
+          : `Saved review: ${review.candidate_count || 0} candidates · ${review.status || 'review ready'} · no migration started.`;
         reviewHistory.replaceChildren(summary);
+        if (review.status !== 'review_ready') return;
+        const prompt = document.createElement('p'); prompt.className = 'companion-memory-help';
+        prompt.textContent = 'You may stage only records whose original owner home still matches. This creates no provider records and leaves unresolved entries untouched.';
+        const button = document.createElement('button'); button.type = 'button';
+        button.textContent = 'Stage exact-home assignments';
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            const response = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/stage-exact-assignments`, {
+              method: 'POST', credentials: 'same-origin', cache: 'no-store',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({expected_revision: Number(review.revision), accept_exact_provenance: true}),
+            });
+            const updated = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(updated.detail || 'Could not stage exact-home assignments');
+            summary.textContent = `Saved review: ${updated.assignment_staged_count || 0} exact-home assignments staged · ${updated.assignment_unresolved_count || 0} remain unresolved · no migration started.`;
+            prompt.remove(); button.remove();
+            uiModule.showToast?.('Exact-home assignments were staged. No legacy memory was migrated.', 4200);
+          } catch (error) {
+            uiModule.showError?.(error.message || 'Could not stage exact-home assignments');
+            button.disabled = false;
+          }
+        });
+        reviewHistory.append(prompt, button);
       })
       .catch(() => {});
   }

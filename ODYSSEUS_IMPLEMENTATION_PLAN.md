@@ -873,9 +873,11 @@ not exercised by this slice and is deliberately tracked next.
   candidate counts, unresolved legacy counts, and aggregate duplicate counts;
   it cannot write to any memory provider. Persist an encrypted owner-private
   review record, bound to that backup digest, with opaque candidates and an
-  empty rollback journal.
-- [ ] After the owner reviews that record, add explicit scope assignment and
-  only then consider a provider switch.
+  empty rollback journal. The owner may stage only still-valid exact-home
+  assignments; unscoped/duplicate/changing-home entries remain unresolved and
+  no legacy entry is read or migrated.
+- [ ] After the owner reviews those staged assignments, add any remaining
+  explicit scope choices and only then consider a provider switch.
 
 **Checkpoint G2:** obtain explicit approval before reading the owner's real
 memory stores, changing a writer, or migrating memory data.

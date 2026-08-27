@@ -126,6 +126,13 @@ class LegacyMigrationDryRun(BaseModel):
     backup_id: str = Field(min_length=1, max_length=128)
 
 
+class LegacyMigrationStageAssignments(BaseModel):
+    """Explicitly stage only candidates with exact existing-home provenance."""
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    accept_exact_provenance: bool
+
+
 class ArtifactUndo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
@@ -507,6 +514,10 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 "category": category,
                 "source_scope_kind": scope_kind if scope_kind in by_scope else None,
                 "source_project_id": session.project_id if session and scope_kind == "project" else None,
+                # Encrypted internal-only binding: it lets assignment staging
+                # revalidate the current exact home without exposing a legacy
+                # record ID or its text through an API.
+                "source_session_id": session.id if session else None,
             })
 
         canonical = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -574,6 +585,110 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         finally:
             db.close()
 
+    def _load_legacy_migration_review_for_update(
+        *, db, owner: str, review_id: str,
+    ) -> LegacyMemoryMigrationReview:
+        if not re.fullmatch(r"[a-f0-9]{32}", review_id):
+            raise FileNotFoundError("migration review was not found")
+        review = db.query(LegacyMemoryMigrationReview).filter(
+            LegacyMemoryMigrationReview.id == review_id,
+            LegacyMemoryMigrationReview.owner == owner,
+        ).first()
+        if not review:
+            raise FileNotFoundError("migration review was not found")
+        return review
+
+    def _stage_exact_home_assignments(
+        *, owner: str, review_id: str, expected_revision: int,
+    ) -> dict:
+        """Stage exact current-home mappings, without re-reading or migrating data.
+
+        A later apply transaction must re-read the digest-bound backup and
+        independently validate every mapping. This step changes only the
+        encrypted review plan; it never indexes, recalls, or writes a memory.
+        """
+        db = SessionLocal()
+        try:
+            review = _load_legacy_migration_review_for_update(
+                db=db, owner=owner, review_id=review_id,
+            )
+            if review.revision != expected_revision:
+                raise ArtifactConflict("This migration review changed; reload it before staging assignments")
+            if review.status != "review_ready":
+                raise MemoryScopeError("Exact-home assignments have already been staged for this review")
+            try:
+                plan = json.loads(review.plan_json)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("migration review could not be read safely") from exc
+            candidates = plan.get("candidates") if isinstance(plan, dict) else None
+            if not isinstance(plan, dict) or plan.get("schema_version") != 1 or not isinstance(candidates, list):
+                raise ValueError("migration review could not be read safely")
+            session_rows = {
+                row.id: row for row in db.query(DbSession).filter(DbSession.owner == owner).all()
+            }
+            staged = unavailable = unresolved = 0
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                if candidate.get("classification") != "eligible" or candidate.get("duplicate") is True:
+                    unresolved += 1
+                    continue
+                source_session_id = candidate.get("source_session_id")
+                source_scope_kind = candidate.get("source_scope_kind")
+                source_project_id = candidate.get("source_project_id")
+                source = session_rows.get(source_session_id) if isinstance(source_session_id, str) else None
+                current_scope = (source.scope_kind or "general") if source else "general"
+                valid = (
+                    source is not None
+                    and current_scope in {"personal", "project"}
+                    and current_scope == source_scope_kind
+                    and (
+                        current_scope == "personal"
+                        or (source.project_id and source.project_id == source_project_id)
+                    )
+                )
+                if not valid:
+                    unavailable += 1
+                    continue
+                candidate["assignment"] = {
+                    "kind": "exact_source_home_v1",
+                    "scope_kind": current_scope,
+                    "project_id": source.project_id if current_scope == "project" else None,
+                    "source_session_id": source.id,
+                }
+                staged += 1
+            plan["assignment_summary"] = {
+                "schema_version": 1,
+                "staged_count": staged,
+                "unavailable_count": unavailable,
+                "unresolved_count": unresolved,
+            }
+            try:
+                journal = json.loads(review.journal_json or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("migration review could not be read safely") from exc
+            if not isinstance(journal, list):
+                raise ValueError("migration review could not be read safely")
+            review.revision += 1
+            review.status = "assignments_staged"
+            journal.append({
+                "kind": "exact_home_assignments_staged",
+                "revision": review.revision,
+                "staged_count": staged,
+                "unavailable_count": unavailable,
+                "unresolved_count": unresolved,
+                "recorded_at": utcnow_naive().isoformat(),
+            })
+            review.plan_json = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            review.journal_json = json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            db.commit()
+            return _legacy_migration_review_payload(review)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def _legacy_migration_review_payload(review: LegacyMemoryMigrationReview) -> dict:
         """Project a private review row to its aggregate browser-safe surface."""
         try:
@@ -591,6 +706,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         scopes = plan.get("scope_candidates") if isinstance(plan.get("scope_candidates"), dict) else {}
         rejected = plan.get("rejected") if isinstance(plan.get("rejected"), dict) else {}
         candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
+        assignment = plan.get("assignment_summary") if isinstance(plan.get("assignment_summary"), dict) else {}
 
         def bounded_count(value: object) -> int:
             try:
@@ -618,6 +734,9 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             },
             "candidate_count": min(len(candidates), 1_000_000),
             "journal_entry_count": min(len(journal), 1_000_000),
+            "assignment_staged_count": bounded_count(assignment.get("staged_count")),
+            "assignment_unavailable_count": bounded_count(assignment.get("unavailable_count")),
+            "assignment_unresolved_count": bounded_count(assignment.get("unresolved_count")),
             "migration_started": False,
         }
 
@@ -947,6 +1066,30 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             raise HTTPException(503, "Migration reviews could not be read safely. No data was changed.") from exc
         finally:
             db.close()
+
+    @router.post("/memory/legacy-migration-reviews/{review_id}/stage-exact-assignments")
+    def legacy_memory_stage_exact_assignments(
+        review_id: str, payload: LegacyMigrationStageAssignments, request: Request,
+    ):
+        """Persist an explicit exact-provenance decision, without migration."""
+        if not payload.accept_exact_provenance:
+            raise HTTPException(422, "Confirm exact-home provenance before staging assignments")
+        try:
+            return _stage_exact_home_assignments(
+                owner=_owner(request), review_id=review_id,
+                expected_revision=payload.expected_revision,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Migration review was not found.") from exc
+        except ArtifactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except MemoryScopeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory assignment staging failed")
+            raise HTTPException(503, "Migration assignments could not be staged safely. No data was changed.") from exc
 
     @router.put("/memory/projects/{project_id}/relations")
     def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):

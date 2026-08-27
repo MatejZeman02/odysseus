@@ -503,12 +503,45 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
         "rejected": {},
         "candidate_count": 4,
         "journal_entry_count": 0,
+        "assignment_staged_count": 0,
+        "assignment_unavailable_count": 0,
+        "assignment_unresolved_count": 0,
         "migration_started": False,
     }
     assert "session" not in str(review_summary)
 
     review_list = _endpoint(router, "/api/companion/memory/legacy-migration-reviews", "GET")(SimpleNamespace())
     assert review_list == {"reviews": [review_summary]}
+
+    stage = _endpoint(
+        router,
+        "/api/companion/memory/legacy-migration-reviews/{review_id}/stage-exact-assignments",
+        "POST",
+    )
+    staged = stage(
+        review_id,
+        route_module.LegacyMigrationStageAssignments(
+            expected_revision=1, accept_exact_provenance=True,
+        ),
+        SimpleNamespace(),
+    )
+    assert staged["status"] == "assignments_staged"
+    assert staged["revision"] == 2
+    assert staged["assignment_staged_count"] == 2
+    assert staged["assignment_unavailable_count"] == 0
+    assert staged["assignment_unresolved_count"] == 2
+    assert staged["journal_entry_count"] == 1
+    assert "prefers concise" not in str(staged)
+    assert "source-two" not in str(staged)
+    with pytest.raises(HTTPException) as stale:
+        stage(
+            review_id,
+            route_module.LegacyMigrationStageAssignments(
+                expected_revision=1, accept_exact_provenance=True,
+            ),
+            SimpleNamespace(),
+        )
+    assert stale.value.status_code == 409
 
     repeated = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")(
         route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace(),

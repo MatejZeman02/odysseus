@@ -346,6 +346,16 @@ assign a target, read legacy text into the browser, index a record, or execute
 a migration. The Personal Context panel reloads only the latest aggregate
 review status so closing it cannot make the owner believe a preview was lost.
 
+The owner may now explicitly stage **exact-home assignments** for eligible,
+non-duplicate candidates whose original owner-owned Personal/project session
+still has the same scope/project binding. The encrypted review keeps that
+internal session binding only for server-side revalidation; browser payloads
+show aggregate staged/unavailable/unresolved counts. This is still not an
+apply: it does not reopen the backup, expose a legacy entry, create a scoped
+record, select AgentMemory, or change a native-memory writer. Unscoped,
+duplicate, deleted-home, and changed-home candidates remain unresolved for a
+later separately reviewed choice.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to
