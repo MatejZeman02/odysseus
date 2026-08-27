@@ -1142,7 +1142,11 @@ when a measured MVP failure or accepted next milestone requires them.
   `@qwen-code/qwen-code@0.21.3`; the launcher uses the ignored repository-local
   installation and never requires a global Qwen process.
 - [x] Judge the initial Dust answers and retain Qwen for the G1.5 UI trial.
-- [ ] At G2, approve an inventory-only read of the existing AgentMemory/native
-  data before any migration or writer change.
+- [x] Complete an inventory-only read of the existing native-memory data before
+  any migration or writer change. The local store was readable and structurally
+  valid; no record text, identifiers, export, indexing, migration, or writer
+  configuration was exposed or changed. No local AgentMemory configuration was
+  discovered. Dynamic aggregate counts deliberately remain in the owner-only
+  runtime inventory rather than this tracked plan.
 - [ ] Answer the four `[!QUESTION]` callouts above before selecting the next
   capability milestone. They do not block ordinary G1.5 stabilization.
