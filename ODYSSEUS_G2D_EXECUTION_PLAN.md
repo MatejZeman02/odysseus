@@ -22,6 +22,13 @@ working-directory snapshot uses no-follow file descriptors and verifies the
 opened descriptor remains inside the approved root, so a source-file symlink
 swap cannot enter the container input.
 
+**Current repository-metadata boundary (2026-08):** the live `sandbox_read`
+snapshot deliberately omits `.git` (and other source-control metadata) and
+therefore denies `git` outright. Do not describe it as a read-only Git
+inspector. A later Git feature needs a separately designed inert metadata
+snapshot that cannot expose project-controlled hooks, filters, credentials, or
+configuration to the contained command runtime.
+
 **Depends on:** G2C C1/C2 validated checkpoints and transfer semantics, plus a
 command-only, rootless Podman execution broker. The rejected Qwen `0.21.3`
 Podman sandbox is not reused:
