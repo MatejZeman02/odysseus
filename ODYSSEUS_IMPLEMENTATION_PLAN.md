@@ -99,9 +99,11 @@ The proposal contract, bounded no-tools derivation route, owner-selected
 promotion transaction, Context-panel review/history, and debounced
 owner/session background admission are implemented. A newer foreground turn
 cancels pending derivation; a safe persisted result reports ready, cancelled,
-or a stable failure code without storing provider output. The remaining C1
-operational gate is a configured-provider canary. Continuation proof is Stage
-C2.
+or a stable failure code without storing provider output. Context now performs
+a local-only preflight of the stored scope, registered-model configuration, and
+bounded source span without resolving credentials or contacting a provider.
+The remaining C1 operational gate is an explicit configured-provider canary.
+Continuation proof is Stage C2.
 
 C2 additionally enforces the non-negotiable authority boundary: a newly
 derived heuristic checkpoint cannot replace an owner-promoted project or

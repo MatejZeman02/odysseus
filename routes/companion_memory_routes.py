@@ -23,7 +23,9 @@ from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryS
 from src.companion_capabilities import defaults_for_scope
 from src.memory import MemoryStoreUnreadable
 from src.continuity.contracts import ContractError, PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
-from src.continuity.semantic_deriver import SemanticDerivationError, derive_semantic_proposal
+from src.continuity.semantic_deriver import (
+    SemanticDerivationError, derive_semantic_proposal, semantic_proposal_readiness,
+)
 from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictError
 
 
@@ -1398,6 +1400,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             proposal = store.latest_semantic_proposal_record(owner=owner, session_id=session_id)
             proposal_history = store.semantic_proposal_history(owner=owner, session_id=session_id)
             proposal_attempt = store.latest_semantic_proposal_attempt(owner=owner, session_id=session_id)
+            proposal_readiness = semantic_proposal_readiness(owner=owner, session_id=session_id)
             mounts = store.checkpoint_mounts(owner=owner, destination_session_id=session_id) if scope_kind in {"personal", "project"} else []
             return {
                 "scope_kind": scope_kind, "project_id": project_id,
@@ -1424,6 +1427,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                     "outcome": proposal_attempt.outcome,
                     "code": proposal_attempt.code,
                 } if proposal_attempt else None),
+                "semantic_proposal_readiness": proposal_readiness.to_payload(),
                 "checkpoint_mounts": [
                     {
                         "id": mount.id,

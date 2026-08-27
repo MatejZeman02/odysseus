@@ -73,8 +73,12 @@ rule prevents a late background result from replacing a proposal the owner is
 already reviewing. The Context panel exposes compact proposal history and the
 last safe background outcome (`ready`, `cancelled`, or a stable failure code),
 without storing provider output. These rows survive restart; a shutdown merely
-abandons an in-flight derivation before it can write. The only C1 qualification
-still outstanding is a manual canary against a real configured provider.
+abandons an in-flight derivation before it can write. Context now performs a
+local-only canary preflight: it validates the stored scope, selected registered
+model configuration, and bounded source span without resolving credentials,
+refreshing OAuth, probing a provider URL, or making a model call. The only C1
+qualification still outstanding is the explicit manual canary against a real
+configured provider.
 
 **C2 correction:** the compiler's convenience checkpoint writer must never
 supersede an owner-promoted home brief. The store now rejects a heuristic write
@@ -452,8 +456,10 @@ only after it has revalidated the source span and written the accepted brief.
 **Implemented integration:** the derivation is debounced off the foreground
 path, cancellation is triggered by a newer foreground turn, active proposals
 win over late background work, and safe attempt outcomes plus proposal history
-are owner-visible after restart. The outstanding operational gate is a manual
-canary against a configured provider; it must confirm no foreground latency
+are owner-visible after restart. A local-only Context preflight distinguishes
+missing model/source configuration from the real-provider check without
+contacting that provider. The outstanding operational gate is an explicit
+manual canary against a configured provider; it must confirm no foreground latency
 regression and correct Context disclosure before C1 is declared fully shipped.
 The manual response and Context disclosure identify the selected model, bounded
 source-message count, and fixed `no_tools` derivation profile, while excluding

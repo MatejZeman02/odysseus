@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
-from core.database import ChatMessage as DbMessage, Session as DbSession, SessionLocal
+from core.database import ChatMessage as DbMessage, ModelEndpoint, Session as DbSession, SessionLocal
 from src.endpoint_resolver import resolve_endpoint_by_id
 from src.llm_core import llm_call_async
 
@@ -25,6 +26,114 @@ class SemanticDerivationError(RuntimeError):
 class SemanticDerivationResult:
     record: SemanticProposalRecord
     created: bool
+
+
+@dataclass(frozen=True)
+class SemanticProposalReadiness:
+    """A local-only preflight for the owner-visible derivation canary.
+
+    This intentionally validates configuration rather than resolving runtime
+    credentials or contacting the selected provider.  Opening Context must not
+    refresh OAuth, reveal endpoint details, or turn into an unexpected billable
+    model request.
+    """
+
+    eligible: bool
+    code: str
+    message: str
+    model: str | None = None
+    source_message_count: int = 0
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "eligible": self.eligible,
+            "code": self.code,
+            "message": self.message,
+            "model": self.model,
+            "source_message_count": self.source_message_count,
+            "mode": "no_tools",
+            "provider_checked": False,
+        }
+
+
+def semantic_proposal_readiness(*, owner: str, session_id: str) -> SemanticProposalReadiness:
+    """Check whether an explicit semantic-proposal canary may be requested.
+
+    The actual route resolution deliberately happens only on the explicit
+    proposal action.  In particular, this check does *not* resolve a
+    session-backed provider token, probe a URL, or make a model call.
+    """
+    db = SessionLocal()
+    try:
+        session = db.query(DbSession).filter(
+            DbSession.id == session_id, DbSession.owner == owner,
+        ).first()
+        if not session:
+            return SemanticProposalReadiness(
+                False, "session_not_found", "This Companion session is no longer available."
+            )
+        scope_kind = session.scope_kind or "general"
+        if scope_kind not in {"personal", "project"}:
+            return SemanticProposalReadiness(
+                False, "scope_denied", "Semantic proposals are available only for Personal and project homes."
+            )
+        endpoint_id = str(session.endpoint_id or "")
+        model = str(session.model or "")
+        if not endpoint_id or not model:
+            return SemanticProposalReadiness(
+                False, "model_unavailable", "Select a registered model before creating a semantic proposal."
+            )
+        endpoint = db.query(ModelEndpoint).filter(
+            ModelEndpoint.id == endpoint_id,
+            ModelEndpoint.is_enabled == True,  # noqa: E712 - SQLAlchemy comparison
+            (ModelEndpoint.owner == owner) | (ModelEndpoint.owner == None),  # noqa: E711
+        ).first()
+        if not endpoint:
+            return SemanticProposalReadiness(
+                False, "model_unavailable", "The selected model route is unavailable; choose a registered model and try again.",
+                model=model,
+            )
+        try:
+            hidden = set(json.loads(endpoint.hidden_models or "[]"))
+            cached = json.loads(endpoint.cached_models or "[]")
+            pinned = json.loads(endpoint.pinned_models or "[]")
+            configured_models = {
+                item for item in [*(cached if isinstance(cached, list) else []), *(pinned if isinstance(pinned, list) else [])]
+                if isinstance(item, str) and item
+            }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return SemanticProposalReadiness(
+                False, "model_unavailable", "The selected model configuration is invalid; choose a registered model and try again.",
+                model=model,
+            )
+        if model in hidden or (configured_models and model not in configured_models):
+            return SemanticProposalReadiness(
+                False, "model_unavailable", "The selected model route is unavailable; choose a registered model and try again.",
+                model=model,
+            )
+        rows = db.query(DbMessage).filter(DbMessage.session_id == session_id).order_by(
+            DbMessage.timestamp.asc(), DbMessage.id.asc(),
+        ).all()
+        try:
+            source = bounded_source([
+                {"id": row.id, "role": row.role, "content": row.content}
+                for row in rows
+            ])
+        except ContractError:
+            return SemanticProposalReadiness(
+                False, "source_unavailable",
+                "This conversation does not contain a bounded source span for a semantic proposal.",
+                model=model,
+            )
+        return SemanticProposalReadiness(
+            True,
+            "configuration_ready",
+            "Ready to request a no-tools proposal. Provider authentication and availability will be checked only when you create it.",
+            model=model,
+            source_message_count=len(source),
+        )
+    finally:
+        db.close()
 
 
 async def derive_semantic_proposal(

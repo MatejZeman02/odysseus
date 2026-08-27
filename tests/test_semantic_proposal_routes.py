@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.database import (
-    Base, ChatMessage as DbMessage, LegacyMemoryMigrationReview, Project,
+    Base, ChatMessage as DbMessage, LegacyMemoryMigrationReview, ModelEndpoint, Project,
     ScopedMemoryRecord, Session as DbSession,
 )
 import routes.companion_memory_routes as route_module
@@ -54,6 +54,10 @@ def _setup(monkeypatch):
     db.add(DbSession(
         id="session", owner="alice", name="Personal", endpoint_url="http://unused", model="model-a",
         endpoint_id="endpoint-a", scope_kind="personal", is_scope_primary=True,
+    ))
+    db.add(ModelEndpoint(
+        id="endpoint-a", name="Test model", base_url="https://model.invalid/v1", is_enabled=True,
+        cached_models=json.dumps(["model-a"]),
     ))
     db.add_all([
         DbMessage(id="m1", session_id="session", role="user", content="Please plan the release", meta_data="{}"),
@@ -121,6 +125,41 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     assert [(item["id"], item["status"]) for item in listed["proposals"]] == [
         (result["id"], "promoted"),
     ]
+
+
+def test_semantic_proposal_context_preflight_is_local_and_does_not_resolve_provider(monkeypatch):
+    router = _setup(monkeypatch)
+    context = _endpoint(router, "/api/companion/memory/sessions/{session_id}", "GET")
+
+    def unexpected_runtime_resolution(*_args, **_kwargs):
+        raise AssertionError("Context preflight must not resolve runtime provider credentials")
+
+    monkeypatch.setattr(deriver_module, "resolve_endpoint_by_id", unexpected_runtime_resolution)
+    payload = context("session", SimpleNamespace())
+
+    assert payload["semantic_proposal_readiness"] == {
+        "eligible": True,
+        "code": "configuration_ready",
+        "message": "Ready to request a no-tools proposal. Provider authentication and availability will be checked only when you create it.",
+        "model": "model-a",
+        "source_message_count": 2,
+        "mode": "no_tools",
+        "provider_checked": False,
+    }
+
+
+def test_semantic_proposal_context_preflight_rejects_hidden_or_missing_model(monkeypatch):
+    router = _setup(monkeypatch)
+    db = route_module.SessionLocal()
+    endpoint = db.query(ModelEndpoint).filter(ModelEndpoint.id == "endpoint-a").one()
+    endpoint.hidden_models = json.dumps(["model-a"])
+    db.commit(); db.close()
+
+    context = _endpoint(router, "/api/companion/memory/sessions/{session_id}", "GET")
+    payload = context("session", SimpleNamespace())
+
+    assert payload["semantic_proposal_readiness"]["eligible"] is False
+    assert payload["semantic_proposal_readiness"]["code"] == "model_unavailable"
 
 
 @pytest.mark.asyncio
