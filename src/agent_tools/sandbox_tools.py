@@ -7,9 +7,10 @@ tree, then the Podman broker receives already-tokenised argv vectors.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
-import shutil
+import stat
 import tempfile
 from pathlib import Path
 from typing import Iterable
@@ -30,6 +31,71 @@ _MAX_MODEL_OUTPUT = 48 * 1024
 
 class _SnapshotLimit(RuntimeError):
     pass
+
+
+class _SnapshotUnsafe(RuntimeError):
+    pass
+
+
+def _copy_regular_file(
+    source: Path,
+    target: Path,
+    *,
+    workspace_root: Path,
+    remaining_bytes: int,
+) -> int | None:
+    """Copy one source descriptor without following a final-path symlink.
+
+    A project is untrusted input to the snapshotter.  Checking
+    ``Path.is_symlink()`` and subsequently copying by pathname leaves a small
+    replacement window in which a file can become a symlink.  Open the source
+    once with ``O_NOFOLLOW``, verify the opened descriptor is still a regular
+    file inside the bound root, then copy bytes to a newly-created private
+    destination.  The destination is never chmod'ed by pathname.
+    """
+    source_fd = target_fd = -1
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            source_fd = os.open(source, flags)
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise _SnapshotUnsafe("snapshot_symlink") from None
+            raise
+        source_stat = os.fstat(source_fd)
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise _SnapshotUnsafe("snapshot_non_regular")
+        if source_stat.st_size > _MAX_SNAPSHOT_FILE_BYTES:
+            return None
+        if source_stat.st_size > remaining_bytes:
+            raise _SnapshotLimit("snapshot_limited")
+        # Fedora exposes the opened descriptor here.  Check the descriptor,
+        # not the potentially changed source pathname, so an intermediate
+        # directory swap cannot pull a sibling/home file into the snapshot.
+        actual = os.path.realpath(f"/proc/self/fd/{source_fd}")
+        root = os.path.realpath(workspace_root)
+        try:
+            inside_root = os.path.commonpath([actual, root]) == root
+        except ValueError:
+            inside_root = False
+        if not inside_root:
+            raise _SnapshotUnsafe("snapshot_outside_workspace")
+        target_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        bytes_left = source_stat.st_size
+        while bytes_left:
+            chunk = os.read(source_fd, min(1024 * 1024, bytes_left))
+            if not chunk:
+                break
+            offset = 0
+            while offset < len(chunk):
+                offset += os.write(target_fd, chunk[offset:])
+            bytes_left -= len(chunk)
+        return source_stat.st_size - bytes_left
+    finally:
+        if target_fd >= 0:
+            os.close(target_fd)
+        if source_fd >= 0:
+            os.close(source_fd)
 
 
 def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]:
@@ -66,12 +132,22 @@ def _copy_workspace_input(workspace: Path, destination: Path) -> tuple[int, int]
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             os.chmod(target.parent, 0o755)
-            # copyfile follows no symlink because source was checked directly
-            # above and the destination is a private new tree.
-            shutil.copyfile(source, target, follow_symlinks=False)
-            os.chmod(target, 0o644)
+            try:
+                copied = _copy_regular_file(
+                    source,
+                    target,
+                    workspace_root=root,
+                    remaining_bytes=_MAX_SNAPSHOT_BYTES - total,
+                )
+            except FileNotFoundError:
+                # The project changed while a snapshot was being prepared.
+                # Omitting a disappeared file is safe; a replacement with a
+                # link or an out-of-root descriptor is not.
+                continue
+            if copied is None:
+                continue
             files += 1
-            total += size
+            total += copied
     return files, total
 
 
@@ -118,6 +194,11 @@ class SandboxedReadTool:
         except _SnapshotLimit:
             return {
                 "error": "The working directory is too large for a safe sandbox snapshot. Narrow the task or use the structured file tools.",
+                "exit_code": 1,
+            }
+        except _SnapshotUnsafe:
+            return {
+                "error": "The working directory changed unsafely while its sandbox snapshot was being prepared. Try again after it is stable.",
                 "exit_code": 1,
             }
         except SandboxRunError as error:

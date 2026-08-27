@@ -54,6 +54,28 @@ def test_sandbox_read_rejects_shell_text_before_any_workspace_access(monkeypatch
     assert result == {"error": "command_denied", "exit_code": 1}
 
 
+def test_snapshot_descriptor_copy_rejects_a_symlink_source(tmp_path):
+    import src.agent_tools.sandbox_tools as module
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must not be copied", encoding="utf-8")
+    source = workspace / "changed-to-link"
+    source.symlink_to(outside)
+    target = tmp_path / "snapshot.txt"
+
+    try:
+        module._copy_regular_file(
+            source, target, workspace_root=workspace, remaining_bytes=1024,
+        )
+    except module._SnapshotUnsafe as exc:
+        assert str(exc) == "snapshot_symlink"
+    else:
+        raise AssertionError("a symlink source must never be copied into the sandbox snapshot")
+    assert not target.exists()
+
+
 def test_sandbox_read_is_registered_and_requires_a_capability_gate():
     from src.agent_tools import TOOL_HANDLERS, TOOL_TAGS
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
