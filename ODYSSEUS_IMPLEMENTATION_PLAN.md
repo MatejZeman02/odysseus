@@ -491,9 +491,9 @@ Default owner-facing layout:
 
 | Destination | Default conversation behavior | Shared durable context |
 |---|---|---|
-| Personal Advisor | Reopen one ongoing native chat for quick general and personal questions | Companion profile plus existing native personal-recall behavior; scoped AgentMemory is deferred |
-| Computer Help | Reopen one ongoing native chat; show “Qwen coming next” | Its own retained chat history; a reviewed device profile is deferred |
-| A project | Reopen one primary chat; allow a new thread/fork when useful | Compiled project scope and raw tail now; `ProjectBriefV1` across chats after semantic derivation closure |
+| Personal Advisor | Reopen one ongoing native chat for quick general and personal questions | Companion profile, accepted `PersonalBriefV1`, scoped local recall, and revisioned working artifacts; AgentMemory remains deferred |
+| Computer Help | Reopen one ongoing native chat for safe diagnostics and incident follow-up | Its own retained chat history, a server-observed device profile, and private incident/task artifacts; command execution remains gated |
+| A project | Reopen one primary chat; allow a new thread/fork when useful | Compiled project scope, recent raw tail, accepted `ProjectBriefV1`, and revisioned project artifacts |
 
 These are navigation defaults, not uniqueness constraints. An intentional second
 computer chat or project fork must remain possible.

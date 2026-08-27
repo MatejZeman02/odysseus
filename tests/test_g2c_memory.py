@@ -484,6 +484,30 @@ def test_context_compiler_uses_scoped_provider_contract_for_normal_recall(store)
     },)
 
 
+def test_default_companion_recall_never_constructs_legacy_native_provider(store, monkeypatch):
+    """Companion prompt assembly must stay independent of native auto-memory."""
+    from src.memory_provider import NativeMemoryProvider
+    from src.scoped_memory import ScopedMemoryIndex
+    import src.memory_provider as memory_provider_module
+
+    continuity, _memory = store
+    ScopedMemoryIndex().index(
+        owner="alice", scope_kind="project", project_id="dust", session_id="project",
+        source_kind="accepted_home_brief", source_id="brief-current", content="Fish motif is central",
+    )
+
+    class ForbiddenNativeProvider(NativeMemoryProvider):
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("Companion recall must not construct legacy NativeMemoryProvider")
+
+    monkeypatch.setattr(memory_provider_module, "NativeMemoryProvider", ForbiddenNativeProvider)
+    bundle = ContextCompiler(continuity).compile(
+        owner="alice", session_id="project", request="What is the fish motif?", transcript=[],
+    )
+
+    assert [hit["text"] for hit in bundle.episodic_hits] == ["Fish motif is central"]
+
+
 def test_personal_brief_is_separate_from_project_and_checkpoint(store):
     continuity, _memory = store
     brief = PersonalBriefV1(owner_id="alice", summary="Prefers clear concise plans", preferences=["concise"])
