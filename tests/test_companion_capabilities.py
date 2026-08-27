@@ -40,3 +40,17 @@ def test_malformed_grants_are_discarded_and_changes_are_server_validated():
     assert can_change("made_up", scope_kind="general", workspace_attached=False, sandbox_ready=False)[0] is False
     assert can_change(WORKSPACE_READ, scope_kind="general", workspace_attached=False, sandbox_ready=True)[0] is False
     assert can_change(SYSTEM_OBSERVE, scope_kind="general", workspace_attached=False, sandbox_ready=False)[0] is True
+
+
+def test_companion_ui_uses_one_capability_drawer_and_native_documents_for_artifacts():
+    index = open("static/index.html", encoding="utf-8").read()
+    sessions = open("static/js/sessions.js", encoding="utf-8").read()
+    app = open("static/app.js", encoding="utf-8").read()
+    assert 'id="overflow-chat-capabilities-btn"' in index
+    assert "Chat capabilities" in index
+    assert "Working documents" in index
+    assert "/chat-capabilities" in sessions
+    assert "odysseus:tool-toggle" in sessions
+    assert "companion-artifact-editor" not in sessions
+    assert "/document`" in sessions
+    assert "odysseus:tool-toggle" in app

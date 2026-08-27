@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.database import Session as DbSession, SessionLocal
 from core.models import ChatMessage
 from routes.g1_continuity_routes import _owner
+from src.companion_capabilities import SYSTEM_OBSERVE, normalize
 from src.computer_observe import ObservationError, collect_observations
 from src.computer_sandbox import SandboxQualificationError, qualify_containment, readiness
 from src.companion_memory import CompanionMemoryStore, MemoryScopeError
@@ -20,14 +21,24 @@ class ObserveRequest(BaseModel):
     categories: list[str] = Field(default_factory=list, max_length=5)
 
 
-def _computer_session(owner: str, session_id: str) -> None:
+def _observation_session(owner: str, session_id: str) -> str:
+    """Return the scope of a session allowed to inspect safe host facts.
+
+    Computer Help retains the capability by default.  Personal, project, and
+    ordinary chats may use the same broker only after their owner explicitly
+    enables the fixed ``system_observe`` grant.  This is deliberately not a
+    generic host-shell exception.
+    """
     db = SessionLocal()
     try:
         row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
         if not row:
-            raise HTTPException(404, "Computer Help session was not found")
-        if row.scope_kind != "computer":
-            raise HTTPException(409, "Computer diagnostics are available only in Computer Help")
+            raise HTTPException(404, "Session was not found")
+        scope_kind = row.scope_kind or "general"
+        grants = normalize(getattr(row, "capability_grants", None), scope_kind=scope_kind)
+        if not grants[SYSTEM_OBSERVE]:
+            raise HTTPException(409, "Enable System inspection in Chat capabilities first")
+        return scope_kind
     finally:
         db.close()
 
@@ -81,19 +92,20 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
     @router.post("/observe")
     def observe(payload: ObserveRequest, request: Request):
         owner = _owner(request)
-        _computer_session(owner, payload.session_id)
+        scope_kind = _observation_session(owner, payload.session_id)
         started = time.monotonic()
         try:
             observations = collect_observations(payload.categories or None)
         except ObservationError as exc:
             raise HTTPException(400, str(exc)) from exc
         try:
-            CompanionMemoryStore().write_computer_artifact(
-                owner=owner,
-                session_id=payload.session_id,
-                path="computer/device-profile.md",
-                content=_device_profile_markdown(observations),
-            )
+            if scope_kind == "computer":
+                CompanionMemoryStore().write_computer_artifact(
+                    owner=owner,
+                    session_id=payload.session_id,
+                    path="computer/device-profile.md",
+                    content=_device_profile_markdown(observations),
+                )
         except MemoryScopeError as exc:
             raise HTTPException(409, "The verified device profile could not be updated") from exc
         content, process = _observation_message(observations)
@@ -101,13 +113,13 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
         message = ChatMessage("assistant", content, metadata={
             "computer_process": process,
             "computer_profile": "computer_observe",
-            "model": "Computer Help",
+            "model": "Computer Help" if scope_kind == "computer" else "Odysseus · safe inspection",
         })
         session_manager.add_message(payload.session_id, message)
         return {
             "profile": "computer_observe",
             "observations": observations,
-            "summary": "Read-only computer diagnostics completed. No system settings were changed.",
+            "summary": "Read-only system inspection completed. No system settings were changed.",
             "message": {"role": "assistant", "content": content, "metadata": message.metadata},
         }
 

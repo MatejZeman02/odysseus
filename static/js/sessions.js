@@ -42,9 +42,14 @@ function _syncCompanionScopeBanner(meta) {
   const detail = document.getElementById('companion-scope-detail');
   const contextButton = document.getElementById('overflow-companion-context-btn');
   const artifactsButton = document.getElementById('overflow-companion-artifacts-btn');
+  const capabilitiesButton = document.getElementById('overflow-chat-capabilities-btn');
   if (!banner || !title || !detail) return;
   const scope = meta?.scope_kind;
   const closeMoreTools = () => document.getElementById('overflow-menu')?.classList.add('hidden');
+  if (capabilitiesButton) {
+    capabilitiesButton.hidden = !meta?.id;
+    capabilitiesButton.onclick = () => { closeMoreTools(); openChatCapabilities(meta); };
+  }
   if (!['project', 'personal', 'computer'].includes(scope)) {
     banner.hidden = true;
     title.textContent = '';
@@ -86,6 +91,127 @@ function _syncCompanionScopeBanner(meta) {
   }
 }
 
+const _CAPABILITY_ORDER = ['web_search', 'workspace_read', 'system_observe', 'sandbox_read'];
+const _CAPABILITY_HELP = {
+  web_search: 'Search current public information. The assistant may request this when it is off.',
+  workspace_read: 'Read the attached project or working directory without granting writes.',
+  system_observe: 'Read a sanitized snapshot of this computer. It never changes settings.',
+  sandbox_read: 'Run admitted read-only commands inside the qualified Podman sandbox.',
+};
+
+function _syncCapabilityControls(meta, capabilities = null) {
+  const caps = capabilities || meta?.chat_capabilities || {};
+  const webEnabled = !!caps.web_search?.effective;
+  const mode = (Storage.loadToggleState().mode || 'chat');
+  if (typeof window.__odysseusSetToolEnabled === 'function') {
+    window.__odysseusSetToolEnabled('web', webEnabled, mode);
+  } else {
+    const web = document.getElementById('web-toggle');
+    const webButton = document.getElementById('web-toggle-btn');
+    if (web) web.checked = webEnabled;
+    webButton?.classList.toggle('active', webEnabled);
+    webButton?.setAttribute('aria-pressed', String(webEnabled));
+  }
+  const observe = document.getElementById('computer-observe-btn');
+  if (observe) {
+    const enabled = !!caps.system_observe?.effective;
+    observe.hidden = !enabled;
+    observe.style.display = enabled ? '' : 'none';
+    observe.disabled = !enabled;
+    observe.title = enabled ? 'Run safe, read-only system inspection' : 'Enable System inspection in Chat capabilities';
+  }
+}
+
+async function _loadChatCapabilities(meta) {
+  if (!meta?.id) return {};
+  try {
+    const response = await fetch(`/api/g1/sessions/${encodeURIComponent(meta.id)}/chat-capabilities`, {
+      credentials: 'same-origin', cache: 'no-store',
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Could not load chat capabilities');
+    meta.chat_capabilities = data.capabilities || {};
+    _syncCapabilityControls(meta, meta.chat_capabilities);
+    return meta.chat_capabilities;
+  } catch (error) {
+    // Older server instances should not make opening ordinary chats fail.
+    console.warn('Could not load chat capabilities:', error);
+    _syncCapabilityControls(meta, meta.chat_capabilities || {});
+    return meta.chat_capabilities || {};
+  }
+}
+
+async function _persistChatCapability(meta, name, enabled) {
+  const response = await fetch(`/api/g1/sessions/${encodeURIComponent(meta.id)}/chat-capabilities`, {
+    method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, enabled: !!enabled}),
+  });
+  const raw = await response.text();
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch (_) {}
+  if (!response.ok) throw new Error(data.detail || `Could not update capability (server error ${response.status})`);
+  meta.chat_capabilities = data.capabilities || {};
+  _syncCapabilityControls(meta, meta.chat_capabilities);
+  return meta.chat_capabilities;
+}
+
+async function openChatCapabilities(meta) {
+  if (!meta?.id) { uiModule.showToast?.('Open a chat first', 1800); return; }
+  const capabilities = await _loadChatCapabilities(meta);
+  document.getElementById('chat-capabilities-modal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'chat-capabilities-modal'; modal.className = 'modal';
+  const content = document.createElement('div');
+  content.className = 'modal-content companion-memory-modal';
+  content.setAttribute('role', 'dialog'); content.setAttribute('aria-modal', 'true');
+  const header = document.createElement('div'); header.className = 'modal-header';
+  const title = document.createElement('h4'); title.textContent = 'Chat capabilities';
+  const close = document.createElement('button'); close.type = 'button'; close.className = 'close-btn'; close.setAttribute('aria-label', 'Close'); close.textContent = '✖';
+  close.onclick = () => modal.remove(); header.append(title, close); content.append(header);
+  const intro = document.createElement('p');
+  intro.className = 'companion-memory-help';
+  intro.textContent = 'Capabilities belong to this chat. Read-only access does not require per-command approval; unavailable capabilities remain disabled.';
+  content.append(intro);
+  for (const name of _CAPABILITY_ORDER) {
+    const item = capabilities[name]; if (!item) continue;
+    const row = document.createElement('div'); row.className = 'companion-grant-card';
+    const label = document.createElement('strong'); label.textContent = item.label;
+    const detail = document.createElement('span');
+    detail.textContent = item.reason || _CAPABILITY_HELP[name] || '';
+    const button = document.createElement('button'); button.type = 'button';
+    const enabled = !!item.requested;
+    button.textContent = enabled ? 'On' : (item.available ? 'Off' : 'Unavailable');
+    button.setAttribute('aria-pressed', String(enabled));
+    // A stale unavailable grant can always be switched off; only enabling is
+    // blocked by readiness or a missing source.
+    button.disabled = !item.available && !enabled;
+    button.onclick = async () => {
+      button.disabled = true; button.textContent = 'Updating…';
+      try {
+        await _persistChatCapability(meta, name, !enabled);
+        modal.remove();
+        await openChatCapabilities(meta);
+      } catch (error) {
+        uiModule.showError?.(error.message || 'Could not update capability');
+        button.disabled = false; button.textContent = enabled ? 'On' : 'Off';
+      }
+    };
+    row.append(label, detail, button); content.append(row);
+  }
+  modal.append(content); document.body.appendChild(modal);
+}
+
+window.addEventListener('odysseus:tool-toggle', (event) => {
+  const detail = event?.detail || {};
+  if (detail.name !== 'web_search' || !currentSessionId) return;
+  const meta = sessions.find(item => item.id === currentSessionId);
+  if (!meta) return;
+  _persistChatCapability(meta, 'web_search', !!detail.enabled).catch((error) => {
+    uiModule.showError?.(error.message || 'Could not save Web search for this chat');
+    _syncCapabilityControls(meta, meta.chat_capabilities || {});
+  });
+});
+
 async function openCompanionMemory(meta, initialTab = 'context') {
   if (!meta?.id) return;
   let payload;
@@ -111,7 +237,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const memoryTitle = payload.scope_kind === 'personal' ? 'Personal memory'
     : (payload.scope_kind === 'computer' ? 'Computer Help records' : 'Project memory');
   const artifactHelp = payload.scope_kind === 'personal'
-    ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat. Select one to edit it or use it in chat.'
+    ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat. Select one to open it in Documents.'
     : (payload.scope_kind === 'computer'
       ? 'Verified device facts and incident plans live here. They are private Odysseus records, not project files.'
       : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.');
@@ -119,13 +245,12 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button><button type="button" data-tab="artifacts">Artifacts</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
     <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
-    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${artifactHelp}</p><div class="companion-artifact-workspace"><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div>${privateArtifacts ? '<section class="companion-artifact-editor-pane"><p>Select an artifact to edit it.</p></section>' : ''}</div>${privateArtifacts ? `<button type="button" class="companion-new-artifact">${payload.scope_kind === 'computer' ? 'New incident artifact' : 'New Markdown artifact'}</button>` : ''}</section>
+    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${artifactHelp}</p><div class="companion-artifact-workspace"><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div></div>${privateArtifacts ? `<button type="button" class="companion-new-artifact">${payload.scope_kind === 'computer' ? 'New incident document' : 'New Markdown document'}</button>` : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
   const show = (tab) => modal.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.panel !== tab));
   modal.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => show(button.dataset.tab)); show(initialTab);
-  const artifactPane = modal.querySelector('.companion-artifact-editor-pane');
   const readResponse = async (response, fallback) => {
     const raw = await response.text(); let result = {};
     try { result = raw ? JSON.parse(raw) : {}; } catch (_) {
@@ -133,49 +258,6 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     }
     if (!response.ok) throw new Error(result.detail || fallback);
     return result;
-  };
-  const useArtifactInChat = (item) => {
-    const input = document.getElementById('message');
-    if (!input) { uiModule.showToast?.('The message composer is unavailable'); return; }
-    input.value = `Work with my ${payload.scope_kind === 'computer' ? 'Computer Help' : 'Personal'} artifact \`${item.path}\`. Read its supplied content first. `;
-    input.dispatchEvent(new Event('input', {bubbles: true}));
-    close(); input.focus();
-    uiModule.showToast?.('Artifact selected for the next Companion message.', 2400);
-  };
-  const showArtifactEditor = async (artifactId) => {
-    if (!artifactPane) return;
-    artifactPane.textContent = 'Loading artifact…';
-    try {
-      const response = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(artifactId)}`, {credentials: 'same-origin'});
-      const item = await readResponse(response, 'Could not open artifact');
-      artifactPane.replaceChildren();
-      const title = document.createElement('strong'); title.className = 'companion-artifact-editor-title'; title.textContent = item.path;
-      const revision = document.createElement('span'); revision.className = 'companion-artifact-revision'; revision.textContent = `Revision ${item.revision}`;
-      const editor = document.createElement('textarea'); editor.className = 'companion-artifact-editor'; editor.value = item.content || ''; editor.setAttribute('aria-label', `Edit ${item.path}`);
-      const status = document.createElement('p'); status.className = 'companion-artifact-status'; status.setAttribute('role', 'status');
-      const actions = document.createElement('div'); actions.className = 'companion-artifact-editor-actions';
-      const save = document.createElement('button'); save.type = 'button'; save.className = 'companion-artifact-save'; save.textContent = 'Save revision';
-      const useInChat = payload.scope_kind === 'personal' ? document.createElement('button') : null;
-      if (useInChat) { useInChat.type = 'button'; useInChat.className = 'companion-artifact-use-chat'; useInChat.textContent = 'Use in chat'; useInChat.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); useArtifactInChat(item); }); }
-      save.addEventListener('click', async (event) => {
-        event.preventDefault(); event.stopPropagation();
-        save.disabled = true; if (useInChat) useInChat.disabled = true; save.textContent = 'Saving…'; status.textContent = '';
-        try {
-          const result = await fetch(`/api/companion/artifacts/${artifactScope}`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: item.path, content: editor.value, expected_revision: item.revision})});
-          await readResponse(result, 'Could not save artifact');
-          status.textContent = 'Saved as a new revision.'; status.classList.remove('error');
-          uiModule.showToast?.('Artifact revision saved', 1800);
-          setTimeout(() => { close(); openCompanionMemory(meta, 'artifacts'); }, 250);
-        } catch (error) {
-          status.textContent = error.message || 'Could not save artifact'; status.classList.add('error');
-          uiModule.showError?.(status.textContent);
-          save.disabled = false; if (useInChat) useInChat.disabled = false; save.textContent = 'Save revision';
-        }
-      });
-      actions.append(save); if (useInChat) actions.append(useInChat); artifactPane.append(title, revision, editor, actions, status);
-    } catch (error) {
-      artifactPane.textContent = error.message || 'Could not open artifact';
-    }
   };
   modal.querySelectorAll('.companion-artifact-row').forEach(button => button.addEventListener('click', async () => {
     if (!privateArtifacts) {
@@ -206,36 +288,34 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     }
   }));
   modal.querySelector('.companion-new-artifact')?.addEventListener('click', () => {
-    if (!artifactPane) return;
-    artifactPane.replaceChildren();
-    const path = document.createElement('input'); path.placeholder = payload.scope_kind === 'computer' ? 'computer/incidents/nvidia-black-screen.md' : 'drafts/love-letter.md'; path.setAttribute('aria-label', 'Artifact path');
-    const content = document.createElement('textarea'); content.className = 'companion-artifact-editor'; content.placeholder = payload.scope_kind === 'computer' ? 'Describe the symptom, current status, and next steps…' : 'Write the Markdown draft…'; content.setAttribute('aria-label', 'Artifact Markdown content');
-    const save = document.createElement('button'); save.type = 'button'; save.className = 'companion-artifact-save'; save.textContent = 'Create artifact';
-    const status = document.createElement('p'); status.className = 'companion-artifact-status'; status.setAttribute('role', 'status');
-    save.addEventListener('click', async (event) => {
-      event.preventDefault(); save.disabled = true; save.textContent = 'Creating…'; status.textContent = '';
+    (async () => {
+      const placeholder = payload.scope_kind === 'computer'
+        ? 'computer/incidents/nvidia-black-screen.md'
+        : 'drafts/love-letter.md';
+      const path = (await styledPrompt('Choose a Markdown path. You will write it in Documents.', {
+        title: 'New working document', placeholder, confirmText: 'Open document', maxLength: 500,
+      }) || '').trim();
+      if (!path) return;
       try {
-        const response = await fetch(`/api/companion/artifacts/${artifactScope}`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
-        const artifact = await readResponse(response, 'Could not create artifact');
+        // The blank artifact is only a document binding. All authoring and
+        // revisions happen in the native Documents editor from this point on.
+        const response = await fetch(`/api/companion/artifacts/${artifactScope}`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path, content: ''})});
+        const artifact = await readResponse(response, 'Could not create working document');
         const documentResponse = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(artifact.id)}/document`, {
           method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({session_id: meta.id}),
         });
-        const documentRecord = await readResponse(documentResponse, 'Artifact was created but could not open it in Documents');
+        const documentRecord = await readResponse(documentResponse, 'Working document was created but could not open it in Documents');
         const documentApi = window.documentModule;
-        if (!documentApi?.loadDocument) throw new Error('Artifact was created. The Document editor is not ready yet; select it again in a moment.');
+        if (!documentApi?.loadDocument) throw new Error('The Document editor is not ready yet. Try again in a moment.');
         close();
-        if (typeof documentApi.injectFreshDoc === 'function') {
-          documentApi.injectFreshDoc(documentRecord);
-        } else {
-          await documentApi.loadDocument(documentRecord.id);
-        }
-        uiModule.showToast?.('Artifact created in Documents', 1800);
+        if (typeof documentApi.injectFreshDoc === 'function') documentApi.injectFreshDoc(documentRecord);
+        else await documentApi.loadDocument(documentRecord.id);
+        uiModule.showToast?.('Working document opened in Documents', 1800);
       } catch (error) {
-        status.textContent = error.message || 'Could not create artifact'; status.classList.add('error'); save.disabled = false; save.textContent = 'Create artifact';
+        uiModule.showError?.(error.message || 'Could not create working document');
       }
-    });
-    artifactPane.append(path, content, save, status); path.focus();
+    })();
   });
   modal.querySelector('.companion-request-grant')?.addEventListener('click', async () => {
     const project = modal.querySelector('.companion-grant-project')?.value; const purpose = modal.querySelector('.companion-grant-purpose')?.value;
@@ -2280,9 +2360,9 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
         history.replaceState(null, '', `${window.location.pathname}${window.location.search}${nextHash}`);
       }
     }
-    // Scope owns the initial tool posture. Project homes open in Agent with
-    // native web search selected and, when configured, read-only Qwen.
-    // Personal and Computer homes remain native Chat in G1.5.
+    // Scope owns the initial interaction mode, but capabilities are durable
+    // per-chat grants.  Do not silently turn Web/System access on merely
+    // because a different session was opened.
     // Apply it before the first await so a fast send cannot use the previous
     // chat's mode. Harness selection itself is durable server state and is
     // never changed merely by reopening a project.
@@ -2315,13 +2395,6 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
         if (window.__odysseusPatchProposalSessionId === id) window.__odysseusPatchProposalSessionId = null;
       }
     }
-    const computerObserveBtn = document.getElementById('computer-observe-btn');
-    if (computerObserveBtn) {
-      const computerScope = !!meta && meta.scope_kind === 'computer';
-      computerObserveBtn.hidden = !computerScope;
-      computerObserveBtn.style.display = computerScope ? '' : 'none';
-      computerObserveBtn.disabled = !computerScope;
-    }
     const setModeReliably = (mode) => {
       const toggleState = Storage.loadToggleState(); toggleState.mode = mode; Storage.saveToggleState(toggleState);
       const agent = document.getElementById('mode-agent-btn'), chat = document.getElementById('mode-chat-btn');
@@ -2331,16 +2404,17 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     };
     if (meta?.scope_kind === 'project') {
       setModeReliably('agent');
-      const toggleState = Storage.loadToggleState(); toggleState.web_agent = true; Storage.saveToggleState(toggleState);
-      const web = document.getElementById('web-toggle'), webButton = document.getElementById('web-toggle-btn');
-      if (web) web.checked = true; webButton?.classList.add('active'); webButton?.setAttribute('aria-pressed', 'true');
-      if (typeof window.__odysseusSetToolEnabled === 'function') window.__odysseusSetToolEnabled('web', true, 'agent');
       if (meta.workspace_root) workspaceModule.setWorkspace(meta.workspace_root, { projectReadOnly: true });
     } else if (meta && ['personal', 'computer'].includes(meta.scope_kind)) {
       setModeReliably('chat');
-      if (typeof window.__odysseusSetToolEnabled === 'function') window.__odysseusSetToolEnabled('web', false, 'chat');
       workspaceModule.setWorkspace('');
     }
+    // This fetch intentionally happens after scope/mode setup. It lets the
+    // durable grant override old per-mode localStorage without delaying chat
+    // history rendering. A stale response must never mutate another session.
+    _loadChatCapabilities(meta).then(() => {
+      if (currentSessionId === id) _syncCompanionScopeBanner(meta);
+    });
 
     // Restore character preset for persistent chats only after routing state
     // is coherent; the dynamic import yields control to the browser.

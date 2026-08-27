@@ -1941,6 +1941,12 @@ function initializeEventListeners() {
       btn.classList.toggle('active', chk.checked);
       btn.setAttribute('aria-pressed', String(chk.checked));
       saveToolPref(stateKey, curMode, chk.checked);
+      // A session-owned capability layer listens for this event and mirrors
+      // the deliberate Web choice to the server. Existing standalone chat
+      // behavior remains intact when no session is active.
+      window.dispatchEvent(new CustomEvent('odysseus:tool-toggle', {
+        detail: { name: stateKey === 'web' ? 'web_search' : stateKey, enabled: !!chk.checked },
+      }));
       showToolToggleToast(stateKey, chk.checked);
       if (chk.checked) _showToolSplash(stateKey);
       // Web search and Research are mutually exclusive — Research takes priority
@@ -2028,8 +2034,8 @@ function initializeEventListeners() {
     if (computerObserveBtn.disabled || computerObserveBtn.hidden) return;
     const sid = window.sessionModule?.getCurrentSessionId?.();
     const current = window.sessionModule?.getSessions?.().find(session => session.id === sid);
-    if (!sid || current?.scope_kind !== 'computer') {
-      uiModule.showToast?.('Open Computer Help first', 1800); return;
+    if (!sid || !current) {
+      uiModule.showToast?.('Open a chat first', 1800); return;
     }
     computerObserveBtn.disabled = true;
     computerObserveBtn.classList.add('active');
@@ -2039,7 +2045,7 @@ function initializeEventListeners() {
         body: JSON.stringify({session_id: sid}),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || 'Computer diagnostics could not run');
+      if (!response.ok) throw new Error(result.detail || 'System inspection could not run');
       const message = result.message;
       if (!message?.content) throw new Error('Computer diagnostics returned no safe summary');
       chatModule.addMessage('assistant', message.content, 'Computer Help', message.metadata || {});
