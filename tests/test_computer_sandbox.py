@@ -226,6 +226,20 @@ def test_readonly_pipeline_allows_bounded_xargs_readonly_runner():
     assert computer_sandbox._validate_readonly_argv(argv) == argv
 
 
+def test_readonly_pipeline_refuses_execution_rendering_that_would_need_clamping(tmp_path):
+    command = computer_sandbox.ReadOnlyCommand(("grep", "x" * 4096))
+    try:
+        computer_sandbox._podman_readonly_pipeline_command(
+            "example.invalid/sandbox@sha256:" + "a" * 64,
+            input_dir=tmp_path,
+            commands=(command,),
+        )
+    except computer_sandbox.SandboxRunError as exc:
+        assert exc.code == "command_denied"
+    else:
+        raise AssertionError("a clamped execution command must not be launched")
+
+
 def test_readonly_pipeline_never_starts_when_sandbox_is_unqualified(monkeypatch, tmp_path):
     monkeypatch.setattr(
         computer_sandbox, "readiness",

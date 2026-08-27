@@ -227,9 +227,20 @@ def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
     return values
 
 
+def _render_pipeline(commands: Sequence[ReadOnlyCommand]) -> str:
+    """Render exact shell transport from already-validated argv vectors."""
+    rendered = " | ".join(shlex.join(command.argv) for command in commands)
+    # This string is passed to ``sh -ec`` as a transport for structured argv.
+    # Never truncate it: a UI-oriented clamp could otherwise execute a
+    # different (shorter) command than the broker admitted and displayed.
+    if len(rendered) > 4096:
+        raise SandboxRunError("command_denied")
+    return rendered
+
+
 def _display_pipeline(commands: Sequence[ReadOnlyCommand]) -> str:
-    """Render a bounded shell-like preview from already-validated argv."""
-    return " | ".join(shlex.join(command.argv) for command in commands)[:4096]
+    """Render a bounded UI preview from already-validated argv."""
+    return _render_pipeline(commands)[:4096]
 
 
 def _terminate_group(process: subprocess.Popen[bytes]) -> None:
@@ -400,7 +411,7 @@ def _podman_readonly_pipeline_command(image: str, *, input_dir: Path, commands: 
     The user/model cannot inject redirects, substitutions, loops, or a second
     command into this string.
     """
-    rendered = _display_pipeline(commands)
+    rendered = _render_pipeline(commands)
     base = _podman_task_command(image, input_dir=input_dir, script="true")
     # Strip ``--entrypoint /bin/sh IMAGE -ec SCRIPT`` and replace it with the
     # controlled pipeline.  Keep every isolation flag from the base command.
