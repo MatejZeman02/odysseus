@@ -509,6 +509,10 @@ _DOMAIN_RULES = {
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
+    "system": """\
+## System inspection rules
+- `system_observe` collects only fixed, sanitized diagnostic facts. It is not a shell and cannot alter the computer.
+- Use only the smallest relevant category set. If it is unavailable, request the `system_observe` capability; never fall back to host shell access.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -534,6 +538,7 @@ _DOMAIN_TOOL_MAP = {
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "apply_patch", "todowrite", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs", "sandbox_read"},
+    "system": {"system_observe"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
@@ -757,6 +762,7 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
     "ask_user": "- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {\"question\": \"...\", \"options\": [{\"label\": \"...\", \"description\": \"...\"?}, ...], \"multi\": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.",
     "request_capability": "- ```request_capability``` — Ask to enable one disabled chat capability when it is necessary: `web_search`, `workspace_read`, `system_observe`, or `sandbox_read`. Args (JSON): {\"name\":\"web_search\", \"reason\":\"I need current sources.\"}. This shows Enable/Not now buttons, persists only the owner’s choice for this chat, and ends the turn. Request only the one needed.",
     "sandbox_read": "- ```sandbox_read``` — Run a short, read-only command pipeline inside the qualified Podman sandbox against a disposable snapshot of the attached working directory. Args are JSON only: `{\"commands\":[[\"find\",\".\",\"-name\",\"*.md\"],[\"wc\",\"-l\"]]}`. Never use shell text, redirects, loops, absolute paths, or write commands. Prefer structured read/list/search tools for simple requests. If this is unavailable, request the `sandbox_read` capability rather than using host bash.",
+    "system_observe": "- ```system_observe``` — Collect fixed, sanitized, read-only system facts. Args are JSON only: `{\"categories\":[\"system\",\"hardware\",\"storage\",\"graphics\",\"network\"]}`; omit categories for the standard snapshot. This is not shell access: it cannot change settings, install packages, read arbitrary files, or access the network. If unavailable, request the `system_observe` capability.",
     "update_plan": "- ```update_plan``` — While executing an approved plan, write the plan back: tick steps done or revise them. Args (JSON): {\"plan\": \"- [x] done step\\n- [ ] next step\"}. Always pass the COMPLETE checklist, not a diff. Call it after finishing each step (mark it `- [x]`) and whenever the user asks to change the plan. The user's docked plan window updates live. Does nothing if there's no active plan.",
     "list_served_models": "- ```list_served_models``` — Show what the Cookbook (LLM-serving subsystem) is currently running. NO args. Use this for ANY 'what's running' / 'what's serving' / 'show my cookbook' / 'is anything up' query. DO NOT shell out (`ps aux`, `docker ps`, etc.) — this tool is the source of truth. Failed serve tasks include recent logs plus diagnosis/retry suggestions; use those suggestions to call `serve_model` again with an adjusted command when appropriate.",
     "stop_served_model": "- ```stop_served_model``` — Stop a running model server. Args (JSON): {\"session_id\": \"<from list_served_models>\"}. Use for 'kill my cookbook' / 'stop the model' / 'shut down vLLM'.",

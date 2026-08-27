@@ -1566,6 +1566,7 @@ def setup_chat_routes(
         # admitted the qualified Podman profile.
         from src.companion_capabilities import (
             SANDBOX_READ,
+            SYSTEM_OBSERVE,
             legacy_tools_denied_for_scope,
             normalize as normalize_chat_capabilities,
         )
@@ -1581,10 +1582,13 @@ def setup_chat_routes(
             )
             if not _chat_capabilities.get(SANDBOX_READ, False):
                 disabled_tools.add("sandbox_read")
+            if not _chat_capabilities.get(SYSTEM_OBSERVE, False):
+                disabled_tools.add("system_observe")
         except Exception:
             # Never turn a capability metadata failure into an unguarded
             # command runner. This tool did not exist for legacy sessions.
             disabled_tools.add("sandbox_read")
+            disabled_tools.add("system_observe")
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
         # Web search is per-turn opt-in: either the chat pre-search setting

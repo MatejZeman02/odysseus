@@ -35,6 +35,24 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "system_observe",
+            "description": "Collect fixed, read-only diagnostic facts about this computer. It is not shell access and cannot change settings, install software, read files, or reach the network. Use only after System inspection is enabled for this chat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "categories": {
+                        "type": "array",
+                        "maxItems": 5,
+                        "items": {"type": "string", "enum": ["system", "hardware", "storage", "graphics", "network"]},
+                        "description": "Optional diagnostic categories. Omit for the standard system, hardware, storage, and graphics snapshot.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "sandbox_read",
             "description": "Run a short read-only command pipeline inside the qualified Podman sandbox against a disposable snapshot of the attached working directory. This is not host shell access. Provide argv arrays only; no shell syntax, paths outside /inputs, redirects, loops, or write commands. Prefer ordinary structured read/list/search tools for simple requests.",
             "parameters": {

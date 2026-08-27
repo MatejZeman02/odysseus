@@ -106,6 +106,10 @@ _register(
     result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
 )
 _register(
+    {"system_observe"},
+    ToolEffect.READ_PRIVATE,
+)
+_register(
     {"web_search"},
     ToolEffect.BROKERED_NETWORK_READ,
     result_integrity=ResultIntegrity.EXTERNAL_UNTRUSTED,

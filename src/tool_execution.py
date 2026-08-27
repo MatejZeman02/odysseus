@@ -67,6 +67,37 @@ def _scope_kind_for_session(session_id: Optional[str]) -> Optional[str]:
     """
     if not session_id:
         return None
+
+
+def _session_capability_enabled(session_id: Optional[str], capability: str) -> bool:
+    """Read a durable per-chat grant for a brokered capability.
+
+    This is a shared-dispatch backstop for tools such as ``system_observe``.
+    The ordinary chat route hides disabled schemas first, but alternate callers
+    must not gain host observation merely by omitting a disabled-tools set.
+    A lookup failure therefore fails closed for capability-gated tools.
+    """
+    if not session_id:
+        return False
+    try:
+        from core.database import Session as DbSession, SessionLocal
+        from src.companion_capabilities import normalize
+
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession.scope_kind, DbSession.capability_grants).filter(
+                DbSession.id == session_id
+            ).first()
+            if not row:
+                return False
+            scope_kind, raw_grants = row
+            grants = normalize(raw_grants, scope_kind=str(scope_kind or "general"))
+            return bool(grants.get(capability, False))
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("Could not resolve tool executor capability grant", exc_info=True)
+        return False
     try:
         from core.database import Session as DbSession, SessionLocal
 
@@ -884,6 +915,23 @@ async def _execute_tool_block_impl(
         logger.warning("Companion scope blocked tool=%s session_id=%s", tool, session_id)
         return desc, result
 
+    # The route normally removes these schemas while their owner grant is off.
+    # Keep the same constraint here because all callers share this executor.
+    _tool_capability = {
+        "sandbox_read": "sandbox_read",
+        "system_observe": "system_observe",
+    }.get(tool)
+    if _tool_capability and not _session_capability_enabled(session_id, _tool_capability):
+        desc = f"{tool}: BLOCKED"
+        result = {
+            "error": f"Enable {_tool_capability.replace('_', ' ')} in Chat capabilities first.",
+            "exit_code": 1,
+            "blocked": True,
+            "policy": "chat_capability",
+        }
+        logger.info("Chat capability blocked tool=%s session_id=%s", tool, session_id)
+        return desc, result
+
     if tool_policy and any(tool_policy.blocks(name) for name in policy_names):
         desc = f"{tool}: BLOCKED"
         result = {
@@ -946,7 +994,7 @@ async def _execute_tool_block_impl(
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)
-    elif tool in ("grep", "glob", "ls", "get_workspace"):
+    elif tool in ("grep", "glob", "ls", "get_workspace", "sandbox_read", "system_observe"):
         # Code-navigation tools — no MCP server; run the direct implementation.
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
