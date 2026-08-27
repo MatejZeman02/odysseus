@@ -3342,8 +3342,8 @@ export function addMessage(role, content, modelName, metadata) {
 
     // Qwen progress is transcript data, not a live-only UI decoration.  Put
     // its compact process block directly before the corresponding reply.
-    if (role === 'assistant' && metadata?.qwen_process) {
-      const processCard = buildQwenProcessCard(metadata.qwen_process);
+    if (role === 'assistant' && (metadata?.qwen_process || metadata?.computer_process)) {
+      const processCard = buildQwenProcessCard(metadata.qwen_process || metadata.computer_process);
       if (processCard) box.appendChild(processCard);
     }
     box.appendChild(wrap);
@@ -3355,8 +3355,8 @@ export function addMessage(role, content, modelName, metadata) {
       const patchCard = buildProjectPatchCard(metadata.project_patch);
       if (patchCard) box.appendChild(patchCard);
     }
-    if (role === 'user' && metadata?.qwen_process) {
-      const processCard = buildQwenProcessCard(metadata.qwen_process);
+    if (role === 'user' && (metadata?.qwen_process || metadata?.computer_process)) {
+      const processCard = buildQwenProcessCard(metadata.qwen_process || metadata.computer_process);
       if (processCard) box.appendChild(processCard);
     }
 

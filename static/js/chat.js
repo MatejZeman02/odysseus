@@ -8,8 +8,8 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import chatRenderer from './chatRenderer.js';
-import chatStream from './chatStream.js?v=20260815approvalsave1';
+import chatRenderer from './chatRenderer.js?v=20260819approvalcontrol1';
+import chatStream from './chatStream.js?v=20260819approvalcontrol1';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';
@@ -68,6 +68,17 @@ import { loadPanel } from './panels.js';
   let _contextHeaderData = null;
   let _contextHeaderBound = false;
   let _pendingToolApproval = null;
+
+  function _requestLikelyNeedsProjectPatch(message) {
+    // “Automatic project changes” means automatically apply a proposal for a
+    // change the owner asked for.  It must not turn every later follow-up
+    // (“read this”, “what does this mean?”) into a patch-proposal turn.
+    const text = String(message || '').replace(/\s+/g, ' ').trim();
+    if (!text) return false;
+    const head = text.slice(0, 900).toLowerCase();
+    if (/\b(?:do not|don't|without)\s+(?:change|edit|modify|write|patch|apply)\b/.test(head)) return false;
+    return /(?:^|[.!?]\s+|\b(?:please|can you|could you|would you|help me)\s+)(?:create|write|edit|update|change|modify|add|remove|rename|refactor|implement|fix|rewrite|replace|delete)\b/.test(head);
+  }
 
   function _submitToolApprovalWhenIdle(approvalId) {
     if (
@@ -1455,7 +1466,10 @@ import { loadPanel } from './panels.js';
     // chat history. Store the exact text first, then send and display a short
     // scoped artifact reference. If storage refuses the paste (including the
     // credential scanner), leave the original text in the composer.
-    const LONG_PASTE_ARTIFACT_THRESHOLD = 6000;
+    // A 4–5K character paste is already large enough to drown the actual
+    // instruction and make the transcript unpleasant to revisit. Keep this
+    // in sync with companion_memory.py and the request schema.
+    const LONG_PASTE_ARTIFACT_THRESHOLD = 3000;
     let effectiveMsg = msg;
     let longPasteDisplay = '';
     if (!approvalForSend && !isIncognitoForSend && msg.length >= LONG_PASTE_ARTIFACT_THRESHOLD) {
@@ -1478,11 +1492,17 @@ import { loadPanel } from './panels.js';
           try { captured = captureBody ? JSON.parse(captureBody) : {}; }
           catch (_) { throw new Error(`Could not save pasted text (server error ${captureResponse.status})`); }
           if (!captureResponse.ok) throw new Error(captured.detail || 'Could not save pasted text');
+          const compactPaste = msg.replace(/\s+/g, ' ').trim();
+          const intentHead = compactPaste.slice(0, 800);
+          const intentTail = compactPaste.length > 1200
+            ? compactPaste.slice(-400)
+            : '';
           effectiveMsg = [
+            `Task excerpt: ${intentHead}${intentTail ? ` … ${intentTail}` : ''}`,
             `My complete pasted message is stored in the scoped artifact \`${captured.path}\`.`,
             'Read its supplied content as the exact current request and source material, then respond to it.',
-          ].join(' ');
-          const preview = msg.replace(/\s+/g, ' ').trim().slice(0, 280);
+          ].join('\n\n');
+          const preview = compactPaste.slice(0, 280);
           longPasteDisplay = [
             `Long paste saved as artifact \`${captured.path}\` (${captured.character_count.toLocaleString()} characters).`,
             preview + (msg.length > 280 ? '…' : ''),
@@ -1905,7 +1925,12 @@ import { loadPanel } from './panels.js';
       const _g15AgentMode = document.getElementById('mode-agent-btn')?.classList.contains('active') ||
         (Storage.loadToggleState().mode || 'chat') === 'agent';
       if (_g15AgentMode && _g15Session?.scope_kind === 'project' && _g15Session?.harness_kind === 'qwen') {
-        const _patchProposalRequested = window.__odysseusPatchProposalSessionId === streamSessionId;
+        const _automaticProjectChanges = window.__odysseusPatchProposalSessionId === streamSessionId;
+        const _patchProposalRequested = _automaticProjectChanges
+          && _requestLikelyNeedsProjectPatch(_finalMsgWithInject);
+        if (_automaticProjectChanges && !_patchProposalRequested) {
+          uiModule.showToast?.('Automatic project changes is on; this question will stay read-only', 2200);
+        }
         const _qwenProcessStarted = Date.now();
         const _qwenProcess = (() => {
           const card = document.createElement('details');

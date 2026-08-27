@@ -10,11 +10,11 @@ import modelsModule from './js/models.js?v=20260715startupcalm2';
 import ragModule from './js/rag.js';
 import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
-// Keep stateful modules on one exact URL throughout the import graph. Query
-// variants are distinct ES modules, so mixing `sessions.js?v=...` here with
-// `sessions.js` inside chat.js creates two currentSessionId singletons.
-import chatModule from './js/chat.js';
-import compareModule from './js/compare/index.js?v=20260723compareicon2';
+// Keep the approval-critical module graph on one shared versioned URL. Query
+// variants are distinct ES modules, so every importer below must use the same
+// version and sessions.js itself stays unversioned everywhere.
+import chatModule from './js/chat.js?v=20260819approvalcontrol1';
+import compareModule from './js/compare/index.js?v=20260819approvalcontrol1';
 import documentModule from './js/document.js?v=20260818artifactedit2';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
@@ -25,7 +25,7 @@ import {
   settleSessionHydration
 } from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js';
+import chatRenderer from './js/chatRenderer.js?v=20260819approvalcontrol1';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -2022,6 +2022,35 @@ function initializeEventListeners() {
       : 'Enable automatic reviewed project changes';
     window.__odysseusPatchProposalSessionId = active ? sid : null;
     uiModule.showToast?.(active ? 'Automatic project changes enabled · diffs and Undo remain available' : 'Returned to read-only project mode', 2400);
+  });
+  const computerObserveBtn = el('computer-observe-btn');
+  if (computerObserveBtn) computerObserveBtn.addEventListener('click', async () => {
+    if (computerObserveBtn.disabled || computerObserveBtn.hidden) return;
+    const sid = window.sessionModule?.getCurrentSessionId?.();
+    const current = window.sessionModule?.getSessions?.().find(session => session.id === sid);
+    if (!sid || current?.scope_kind !== 'computer') {
+      uiModule.showToast?.('Open Computer Help first', 1800); return;
+    }
+    computerObserveBtn.disabled = true;
+    computerObserveBtn.classList.add('active');
+    try {
+      const response = await fetch('/api/companion/computer/observe', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: sid}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Computer diagnostics could not run');
+      const message = result.message;
+      if (!message?.content) throw new Error('Computer diagnostics returned no safe summary');
+      chatModule.addMessage('assistant', message.content, 'Computer Help', message.metadata || {});
+      uiModule.scrollHistory?.();
+      uiModule.showToast?.('Read-only computer diagnostics completed', 1800);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Computer diagnostics could not run');
+    } finally {
+      computerObserveBtn.disabled = false;
+      computerObserveBtn.classList.remove('active');
+    }
   });
   const createCompanionProject = async () => {
     let current = window.sessionModule?.getSessions?.().find(s => s.id === window.sessionModule?.getCurrentSessionId?.());

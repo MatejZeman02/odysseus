@@ -246,9 +246,9 @@
        real request is discarded and the font fetched a second time. -->
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-Regular.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
-  <meta name="odysseus-build" content="20260818longpaste1">
-  <link rel="stylesheet" href="/static/style.css?v=20260818longpaste1">
-  <link rel="modulepreload" href="/static/app.js?v=20260818longpaste1">
+  <meta name="odysseus-build" content="20260827qwenfix1">
+  <link rel="stylesheet" href="/static/style.css?v=20260827qwenfix1">
+  <link rel="modulepreload" href="/static/app.js?v=20260827g2d2records1">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
@@ -1178,6 +1178,9 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/><path d="m15 5 3 3"/>
             </svg><span>Patch</span>
+          </button>
+          <button type="button" class="input-icon-btn project-patch-toggle" title="Run safe, read-only computer diagnostics" id="computer-observe-btn" data-mode-tool="true" aria-label="Inspect computer" hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 18v3"/><path d="M7 9h3"/><path d="M7 13h6"/></svg><span>Inspect</span>
           </button>
           <!-- Workspace indicator (hidden until a folder is set) -->
           <button type="button" class="input-icon-btn tool-indicator" title="Workspace - click to clear" id="workspace-indicator-btn" aria-label="Clear workspace" style="display:none;">
@@ -2593,9 +2596,12 @@
 <script type="module" src="/static/js/tts-ai.js"></script>
 <script type="module" src="/static/js/document.js?v=20260818artifactedit2"></script>
 <script type="module" src="/static/js/gallery.js?v=20260708match1"></script>
+<script type="module" src="/static/js/chatRenderer.js?v=20260819approvalcontrol1"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
-<script type="module" src="/static/js/chatStream.js?v=20260815approvalsave1"></script>
-  <!-- chat.js is imported once by app.js; a second module instance has its own send state. -->
+<script type="module" src="/static/js/chatStream.js?v=20260819approvalcontrol1"></script>
+  <!-- This direct import and app.js use the exact same URL, so ES modules
+       evaluate once while the approval handler has a cache-busted graph. -->
+<script type="module" src="/static/js/chat.js?v=20260819approvalcontrol1"></script>
 <script type="module" src="/static/js/cookbook.js"></script>
 <script src="/static/js/cookbookSchedule.js"></script>
 <script type="module" src="/static/js/search-chat.js"></script>
@@ -2603,11 +2609,11 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260815approvalsave1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260818artifactedit2"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260827g2d2records1"></script>  <!-- app.js must be LAST -->
   <script type="module" src="/static/js/init.js?v=20260715freshroot3"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">
-window.__ODYSSEUS_BUILD_ID='20260818longpaste1';
+window.__ODYSSEUS_BUILD_ID='20260827g2d2records1';
 document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
@@ -2625,7 +2631,7 @@ if('serviceWorker' in navigator){
     button.addEventListener('click',()=>location.reload());
     banner.append(text,button);document.body.appendChild(banner);
   });
-  navigator.serviceWorker.register('/static/sw.js?v=20260818longpaste1',{updateViaCache:'none'})
+  navigator.serviceWorker.register('/static/sw.js?v=20260827qwenfix1',{updateViaCache:'none'})
     .then(reg=>reg.update()).catch(()=>{});
 }
 </script>

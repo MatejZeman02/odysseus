@@ -66,10 +66,10 @@ function _syncCompanionScopeBanner(meta) {
     detail.textContent = 'Native · personal scope';
   } else {
     title.textContent = 'Computer Help';
-    detail.textContent = 'Native · Qwen coming next';
+    detail.textContent = 'Native · safe diagnostics';
   }
   banner.hidden = false;
-  const supportsMemory = scope !== 'computer';
+  const supportsMemory = ['project', 'personal', 'computer'].includes(scope);
   if (contextButton) {
     contextButton.hidden = !supportsMemory;
     contextButton.onclick = () => {
@@ -106,11 +106,20 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const brief = payload.personal_brief || payload.project_brief || {};
   const checkpoint = payload.thread_checkpoint || {};
   const artifacts = payload.artifacts || [];
+  const privateArtifacts = ['personal', 'computer'].includes(payload.scope_kind);
+  const artifactScope = payload.scope_kind === 'computer' ? 'computer' : 'personal';
+  const memoryTitle = payload.scope_kind === 'personal' ? 'Personal memory'
+    : (payload.scope_kind === 'computer' ? 'Computer Help records' : 'Project memory');
+  const artifactHelp = payload.scope_kind === 'personal'
+    ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat. Select one to edit it or use it in chat.'
+    : (payload.scope_kind === 'computer'
+      ? 'Verified device facts and incident plans live here. They are private Odysseus records, not project files.'
+      : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.');
   modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
-    <div class="modal-header"><h4 id="companion-memory-title">${esc(payload.scope_kind === 'personal' ? 'Personal memory' : 'Project memory')}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
+    <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button><button type="button" data-tab="artifacts">Artifacts</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
     <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
-    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${payload.scope_kind === 'personal' ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat. Select one to edit it or use it in chat.' : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.'}</p><div class="companion-artifact-workspace"><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div>${payload.scope_kind === 'personal' ? '<section class="companion-artifact-editor-pane"><p>Select an artifact to edit it.</p></section>' : ''}</div>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-new-artifact">New Markdown artifact</button>' : ''}</section>
+    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${artifactHelp}</p><div class="companion-artifact-workspace"><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div>${privateArtifacts ? '<section class="companion-artifact-editor-pane"><p>Select an artifact to edit it.</p></section>' : ''}</div>${privateArtifacts ? `<button type="button" class="companion-new-artifact">${payload.scope_kind === 'computer' ? 'New incident artifact' : 'New Markdown artifact'}</button>` : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
@@ -128,16 +137,16 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const useArtifactInChat = (item) => {
     const input = document.getElementById('message');
     if (!input) { uiModule.showToast?.('The message composer is unavailable'); return; }
-    input.value = `Work with my Personal artifact \`${item.path}\`. Read its supplied content first. `;
+    input.value = `Work with my ${payload.scope_kind === 'computer' ? 'Computer Help' : 'Personal'} artifact \`${item.path}\`. Read its supplied content first. `;
     input.dispatchEvent(new Event('input', {bubbles: true}));
     close(); input.focus();
-    uiModule.showToast?.('Artifact selected for the next Personal Advisor message.', 2400);
+    uiModule.showToast?.('Artifact selected for the next Companion message.', 2400);
   };
   const showArtifactEditor = async (artifactId) => {
     if (!artifactPane) return;
     artifactPane.textContent = 'Loading artifact…';
     try {
-      const response = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(artifactId)}`, {credentials: 'same-origin'});
+      const response = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(artifactId)}`, {credentials: 'same-origin'});
       const item = await readResponse(response, 'Could not open artifact');
       artifactPane.replaceChildren();
       const title = document.createElement('strong'); title.className = 'companion-artifact-editor-title'; title.textContent = item.path;
@@ -146,13 +155,13 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       const status = document.createElement('p'); status.className = 'companion-artifact-status'; status.setAttribute('role', 'status');
       const actions = document.createElement('div'); actions.className = 'companion-artifact-editor-actions';
       const save = document.createElement('button'); save.type = 'button'; save.className = 'companion-artifact-save'; save.textContent = 'Save revision';
-      const useInChat = document.createElement('button'); useInChat.type = 'button'; useInChat.className = 'companion-artifact-use-chat'; useInChat.textContent = 'Use in chat';
-      useInChat.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); useArtifactInChat(item); });
+      const useInChat = payload.scope_kind === 'personal' ? document.createElement('button') : null;
+      if (useInChat) { useInChat.type = 'button'; useInChat.className = 'companion-artifact-use-chat'; useInChat.textContent = 'Use in chat'; useInChat.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); useArtifactInChat(item); }); }
       save.addEventListener('click', async (event) => {
         event.preventDefault(); event.stopPropagation();
-        save.disabled = true; useInChat.disabled = true; save.textContent = 'Saving…'; status.textContent = '';
+        save.disabled = true; if (useInChat) useInChat.disabled = true; save.textContent = 'Saving…'; status.textContent = '';
         try {
-          const result = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: item.path, content: editor.value, expected_revision: item.revision})});
+          const result = await fetch(`/api/companion/artifacts/${artifactScope}`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: item.path, content: editor.value, expected_revision: item.revision})});
           await readResponse(result, 'Could not save artifact');
           status.textContent = 'Saved as a new revision.'; status.classList.remove('error');
           uiModule.showToast?.('Artifact revision saved', 1800);
@@ -160,22 +169,22 @@ async function openCompanionMemory(meta, initialTab = 'context') {
         } catch (error) {
           status.textContent = error.message || 'Could not save artifact'; status.classList.add('error');
           uiModule.showError?.(status.textContent);
-          save.disabled = false; useInChat.disabled = false; save.textContent = 'Save revision';
+          save.disabled = false; if (useInChat) useInChat.disabled = false; save.textContent = 'Save revision';
         }
       });
-      actions.append(save, useInChat); artifactPane.append(title, revision, editor, actions, status);
+      actions.append(save); if (useInChat) actions.append(useInChat); artifactPane.append(title, revision, editor, actions, status);
     } catch (error) {
       artifactPane.textContent = error.message || 'Could not open artifact';
     }
   };
   modal.querySelectorAll('.companion-artifact-row').forEach(button => button.addEventListener('click', async () => {
-    if (payload.scope_kind !== 'personal') {
+    if (!privateArtifacts) {
       uiModule.showToast?.('Project artifacts stay in the project workspace and are changed through Patch proposals.', 3200);
       return;
     }
     button.disabled = true;
     try {
-      const response = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(button.dataset.id)}/document`, {
+      const response = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(button.dataset.id)}/document`, {
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({session_id: meta.id}),
       });
@@ -199,16 +208,16 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   modal.querySelector('.companion-new-artifact')?.addEventListener('click', () => {
     if (!artifactPane) return;
     artifactPane.replaceChildren();
-    const path = document.createElement('input'); path.placeholder = 'drafts/love-letter.md'; path.setAttribute('aria-label', 'Artifact path');
-    const content = document.createElement('textarea'); content.className = 'companion-artifact-editor'; content.placeholder = 'Write the Markdown draft…'; content.setAttribute('aria-label', 'Artifact Markdown content');
+    const path = document.createElement('input'); path.placeholder = payload.scope_kind === 'computer' ? 'computer/incidents/nvidia-black-screen.md' : 'drafts/love-letter.md'; path.setAttribute('aria-label', 'Artifact path');
+    const content = document.createElement('textarea'); content.className = 'companion-artifact-editor'; content.placeholder = payload.scope_kind === 'computer' ? 'Describe the symptom, current status, and next steps…' : 'Write the Markdown draft…'; content.setAttribute('aria-label', 'Artifact Markdown content');
     const save = document.createElement('button'); save.type = 'button'; save.className = 'companion-artifact-save'; save.textContent = 'Create artifact';
     const status = document.createElement('p'); status.className = 'companion-artifact-status'; status.setAttribute('role', 'status');
     save.addEventListener('click', async (event) => {
       event.preventDefault(); save.disabled = true; save.textContent = 'Creating…'; status.textContent = '';
       try {
-        const response = await fetch('/api/companion/artifacts/personal', {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
+        const response = await fetch(`/api/companion/artifacts/${artifactScope}`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path: path.value, content: content.value})});
         const artifact = await readResponse(response, 'Could not create artifact');
-        const documentResponse = await fetch(`/api/companion/artifacts/personal/${encodeURIComponent(artifact.id)}/document`, {
+        const documentResponse = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(artifact.id)}/document`, {
           method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({session_id: meta.id}),
         });
@@ -1438,8 +1447,8 @@ function _renderSessionListImpl() {
     const computer = companion.find(s => s.scope_kind === 'computer' && s.is_scope_primary);
     if (personal) appendHome(personal, 'Personal Advisor');
     else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Personal Advisor'; button.onclick = () => openBuiltinHome('personal'); _frag.appendChild(button); }
-    if (computer) appendHome(computer, 'Computer Help', ' · Qwen coming next');
-    else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Computer Help · Qwen coming next'; button.onclick = () => openBuiltinHome('computer'); _frag.appendChild(button); }
+    if (computer) appendHome(computer, 'Computer Help', ' · diagnostics');
+    else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Computer Help · diagnostics'; button.onclick = () => openBuiltinHome('computer'); _frag.appendChild(button); }
     const projectsHeading = document.createElement('div');
     projectsHeading.className = 'date-section-header'; projectsHeading.textContent = 'Projects'; _frag.appendChild(projectsHeading);
     const readiness = document.createElement('div');
@@ -2305,6 +2314,13 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
         patchBtn.setAttribute('aria-pressed', 'false');
         if (window.__odysseusPatchProposalSessionId === id) window.__odysseusPatchProposalSessionId = null;
       }
+    }
+    const computerObserveBtn = document.getElementById('computer-observe-btn');
+    if (computerObserveBtn) {
+      const computerScope = !!meta && meta.scope_kind === 'computer';
+      computerObserveBtn.hidden = !computerScope;
+      computerObserveBtn.style.display = computerScope ? '' : 'none';
+      computerObserveBtn.disabled = !computerScope;
     }
     const setModeReliably = (mode) => {
       const toggleState = Storage.loadToggleState(); toggleState.mode = mode; Storage.saveToggleState(toggleState);
