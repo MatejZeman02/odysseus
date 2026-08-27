@@ -163,8 +163,8 @@ remain mandatory before attempting AgentMemory recall or writes.
 
 - retain page-bounded chat history with the explicit **Load older messages**
   action now implemented;
-- add project home/related-project editing, `@project` resolution, and explicit
-  related-context caps;
+- retain project home/related-project editing, explicit `@Project Name`
+  resolution, and a three-project related-context cap now implemented;
 - provide a concise context inspector for checkpoint, brief, mounted transfer,
   episodic hits, artifacts, and grants;
 - add native `> [!question]` rendering/export only if it proves useful in

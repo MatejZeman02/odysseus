@@ -429,9 +429,12 @@ raw transcript/auto-memory writes.
 History is already page-bounded (desktop/mobile limits) and now has an explicit
 **Load older messages** action in addition to the existing scroll trigger. It
 preserves the visible scroll anchor and never alters stored messages or the
-continuity compiler. Remaining C5 work is bounded `@project`/related-project
-selection, richer inspector coverage for eventual episodic hits, and native
-question-callout rendering/export only if ordinary projects use it.
+continuity compiler. Project Context now exposes an owner-selected direct
+relation allowlist (maximum three projects). A relation shares nothing on its
+own: the owner must explicitly mention `@Project Name` in that exact project
+turn, and only the related project's accepted brief may then be compiled.
+Remaining C5 work is richer inspector coverage for eventual episodic hits and
+native question-callout rendering/export only if ordinary projects use it.
 
 ## Acceptance tests
 
