@@ -36,7 +36,7 @@ function _buildArtifactRevisionCard(proposal) {
   const card = document.createElement('section');
   card.className = 'personal-artifact-proposal';
   const title = document.createElement('strong'); title.textContent = `Draft revision · ${proposal.path}`;
-  const detail = document.createElement('span'); detail.textContent = 'The Advisor prepared a complete replacement. It is not saved until you apply it.';
+  const detail = document.createElement('span'); detail.textContent = 'The Companion prepared a complete replacement. It is not saved until you apply it.';
   const disclosure = document.createElement('details');
   const summary = document.createElement('summary'); summary.textContent = 'Review proposed Markdown';
   const preview = document.createElement('pre'); preview.textContent = proposal.content;
@@ -47,23 +47,26 @@ function _buildArtifactRevisionCard(proposal) {
   apply.addEventListener('click', async (event) => {
     event.preventDefault(); event.stopPropagation();
     const sessionId = window.sessionModule?.getCurrentSessionId?.();
-    if (!sessionId) { status.textContent = 'Open the Personal Advisor chat again before applying.'; return; }
+    if (!sessionId) { status.textContent = 'Open the Companion chat again before applying.'; return; }
     apply.disabled = true; apply.textContent = 'Checking…'; status.textContent = '';
     try {
       const contextResponse = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(sessionId)}`, {credentials: 'same-origin', cache: 'no-store'});
       const context = await contextResponse.json().catch(() => ({}));
-      if (!contextResponse.ok || context.scope_kind !== 'personal') throw new Error(context.detail || 'This revision can be applied only from Personal Advisor.');
+      const scopeKind = context.scope_kind;
+      if (!contextResponse.ok || !['personal', 'computer'].includes(scopeKind)) {
+        throw new Error(context.detail || 'This revision can be applied only from Personal Advisor or Computer Help.');
+      }
       const artifact = (context.artifacts || []).find(item => item.path === proposal.path);
       if (!artifact) throw new Error('The target artifact no longer exists. Open Artifacts to create or select it.');
       apply.textContent = 'Saving…';
-      const saveResponse = await fetch('/api/companion/artifacts/personal', {
+      const saveResponse = await fetch(`/api/companion/artifacts/${encodeURIComponent(scopeKind)}`, {
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({session_id: sessionId, path: proposal.path, content: proposal.content, expected_revision: artifact.revision}),
       });
       const saved = await saveResponse.json().catch(() => ({}));
       if (!saveResponse.ok) throw new Error(saved.detail || 'Could not apply the artifact revision.');
       apply.textContent = 'Applied'; status.textContent = `Saved as revision ${saved.revision}.`;
-      uiModule.showToast?.('Artifact revision applied', 2200);
+      uiModule.showToast?.(`${scopeKind === 'computer' ? 'Computer Help' : 'Personal'} artifact revision applied`, 2200);
     } catch (error) {
       status.textContent = error.message || 'Could not apply the artifact revision.';
       apply.disabled = false; apply.textContent = 'Apply to artifact';

@@ -652,6 +652,9 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "Task excerpt:" in chat
     assert "Long paste saved as artifact" in chat
     assert "Create semantic proposal" in ui
+    renderer = open("static/js/chatRenderer.js", encoding="utf-8").read()
+    assert "['personal', 'computer'].includes(scopeKind)" in renderer
+    assert "/api/companion/artifacts/${encodeURIComponent(scopeKind)}" in renderer
     assert "selected model ${model}" in ui
     assert "no tools" in ui
     assert "Background proposal paused" in ui
