@@ -257,11 +257,16 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     : '';
   const checkpointMounts = Array.isArray(payload.checkpoint_mounts) ? payload.checkpoint_mounts : [];
   const mountedCheckpointIds = new Set(checkpointMounts.map(mount => mount.source_checkpoint_id));
+  const checkpointPromotionFields = [
+    ['objective', 'Objective'], ['accepted_decisions', 'Decisions'], ['proposals', 'Proposals'],
+    ['failures', 'Failed approaches'], ['open_questions', 'Open questions'],
+    ['next_actions', 'Next actions'], ['artifact_refs', 'Artifact references'],
+  ];
   const checkpointCandidates = (payload.checkpoint_catalog || []).filter(item => (
     item.session_id !== meta.id && !mountedCheckpointIds.has(item.id)
   ));
   const checkpointMountHtml = (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
-    ? `<section class="companion-checkpoint-mounts"><h5>Read-only checkpoint mounts</h5><p class="companion-memory-help">Attach a compact checkpoint from another one of your Companion chats. It is labeled context, never a transcript merge or shared memory write.</p>${checkpointMounts.length ? checkpointMounts.map(mount => `<div class="companion-checkpoint-mount"><strong>${esc(mount.objective || 'Untitled checkpoint')}</strong><span>${esc(mount.derivation_status || 'legacy_unclassified')} · ${esc(mount.source_message_count || 0)} source messages</span><button type="button" class="companion-detach-checkpoint" data-mount-id="${esc(mount.id)}" data-mount-revision="${esc(mount.revision)}">Detach</button></div>`).join('') : '<p class="companion-memory-help">No checkpoint is mounted.</p>'}${checkpointCandidates.length ? `<label>Checkpoint <select class="companion-checkpoint-source">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(item.session_name || item.session_id)} · ${esc(item.objective || 'Untitled checkpoint')}</option>`).join('')}</select></label><button type="button" class="companion-attach-checkpoint">Attach checkpoint</button>` : '<p class="companion-memory-help">No other active Companion checkpoint is available to attach.</p>'}</section>`
+    ? `<section class="companion-checkpoint-mounts"><h5>Read-only checkpoint mounts</h5><p class="companion-memory-help">Attach a compact checkpoint from another one of your Companion chats. It is labeled context, never a transcript merge or shared memory write.</p>${checkpointMounts.length ? checkpointMounts.map(mount => { const item = mount.checkpoint || {}; return `<details class="companion-checkpoint-mount" data-mount-id="${esc(mount.id)}" data-mount-revision="${esc(mount.revision)}"><summary><strong>${esc(mount.objective || 'Untitled checkpoint')}</strong> · ${esc(mount.derivation_status || 'legacy_unclassified')} · ${esc(mount.source_message_count || 0)} source messages</summary><p class="companion-memory-help">Select entries only if you want to promote them into this home’s accepted memory.</p>${checkpointPromotionFields.map(([field, label]) => { const values = field === 'objective' ? (item.objective ? [item.objective] : []) : (item[field] || []); return values.length ? `<fieldset><legend>${esc(label)}</legend>${values.map((value, index) => `<label><input type="checkbox" data-mount-field="${esc(field)}" data-mount-index="${index}"> ${esc(value)}</label>`).join('')}</fieldset>` : ''; }).join('')}<button type="button" class="companion-promote-checkpoint">Promote selected entries</button><button type="button" class="companion-detach-checkpoint">Detach</button></details>`; }).join('') : '<p class="companion-memory-help">No checkpoint is mounted.</p>'}${checkpointCandidates.length ? `<label>Checkpoint <select class="companion-checkpoint-source">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(item.session_name || item.session_id)} · ${esc(item.objective || 'Untitled checkpoint')}</option>`).join('')}</select></label><button type="button" class="companion-attach-checkpoint">Attach checkpoint</button>` : '<p class="companion-memory-help">No other active Companion checkpoint is available to attach.</p>'}</section>`
     : '';
   const proposalHistoryHtml = proposalHistory.length > 1 ? `<details class="companion-semantic-history"><summary>Proposal history (${proposalHistory.length})</summary>${proposalHistory.map((record) => {
     const item = record.proposal || {};
@@ -306,14 +311,38 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   });
   modal.querySelectorAll('.companion-detach-checkpoint').forEach(button => button.addEventListener('click', async (event) => {
     event.currentTarget.disabled = true;
+    const card = event.currentTarget.closest('[data-mount-id]');
     try {
-      const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/checkpoint-mounts/${encodeURIComponent(event.currentTarget.dataset.mountId)}`, {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected_revision: Number(event.currentTarget.dataset.mountRevision)})});
+      const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/checkpoint-mounts/${encodeURIComponent(card.dataset.mountId)}`, {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected_revision: Number(card.dataset.mountRevision)})});
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.detail || 'Could not detach checkpoint');
       uiModule.showToast?.('Checkpoint detached.', 2200);
       close(); openCompanionMemory(meta, 'context');
     } catch (error) {
       uiModule.showError?.(error.message || 'Could not detach checkpoint');
+      event.currentTarget.disabled = false;
+    }
+  }));
+  modal.querySelectorAll('.companion-promote-checkpoint').forEach(button => button.addEventListener('click', async (event) => {
+    const card = event.currentTarget.closest('[data-mount-id]');
+    const selections = {};
+    card.querySelectorAll('input[data-mount-field]:checked').forEach(input => {
+      const field = input.dataset.mountField;
+      (selections[field] ||= []).push(Number(input.dataset.mountIndex));
+    });
+    if (!Object.keys(selections).length) {
+      uiModule.showError?.('Select at least one checkpoint entry to promote.');
+      return;
+    }
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/checkpoint-mounts/${encodeURIComponent(card.dataset.mountId)}/promote`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected_revision: Number(card.dataset.mountRevision), selections})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not promote selected checkpoint entries');
+      uiModule.showToast?.('Selected checkpoint entries promoted into accepted home memory.', 3000);
+      close(); openCompanionMemory(meta, 'context');
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not promote selected checkpoint entries');
       event.currentTarget.disabled = false;
     }
   }));

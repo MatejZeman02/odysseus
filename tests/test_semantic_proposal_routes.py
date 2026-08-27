@@ -158,6 +158,15 @@ def test_checkpoint_mount_routes_attach_and_detach_owner_checkpoint(monkeypatch)
     assert payload["checkpoint_mounts"][0]["id"] == mounted["id"]
     assert all("content" not in item for item in payload["checkpoint_catalog"])
 
+    promote = _endpoint(router, "/api/companion/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}/promote")
+    assert promote(
+        "destination", mounted["id"],
+        route_module.CheckpointMountPromotion(
+            expected_revision=mounted["revision"], selections={"objective": [0]},
+        ), SimpleNamespace(),
+    )["promoted"] is True
+    assert context("destination", SimpleNamespace())["personal_brief"]["summary"] == "Compare the release candidates"
+
     detach = _endpoint(router, "/api/companion/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}", "DELETE")
     assert detach(
         "destination", mounted["id"],

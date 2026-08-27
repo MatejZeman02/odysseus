@@ -87,6 +87,12 @@ class CheckpointMountDetach(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class CheckpointMountPromotion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    selections: dict[str, list[int]] = Field(min_length=1, max_length=7)
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, ArtifactConflict):
         return HTTPException(409, str(exc))
@@ -157,6 +163,7 @@ def setup_companion_memory_routes() -> APIRouter:
                         "derivation_status": mount.checkpoint.derivation_status,
                         "source_through_message_id": mount.checkpoint.source_through_message_id,
                         "source_message_count": len(mount.checkpoint.source_message_ids),
+                        "checkpoint": mount.checkpoint.to_payload(),
                     }
                     for mount in mounts
                 ],
@@ -243,6 +250,21 @@ def setup_companion_memory_routes() -> APIRouter:
             return {"detached": True}
         except NotFoundError as exc:
             raise HTTPException(404, "Checkpoint mount was not found") from exc
+        except ScopeConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @router.post("/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}/promote")
+    def promote_checkpoint_mount(session_id: str, mount_id: str, payload: CheckpointMountPromotion, request: Request):
+        try:
+            write = ContinuityStore().promote_checkpoint_mount(
+                owner=_owner(request), destination_session_id=session_id, mount_id=mount_id,
+                expected_revision=payload.expected_revision, selections=payload.selections,
+            )
+            return {"brief_revision": write.revision, "promoted": True}
+        except NotFoundError as exc:
+            raise HTTPException(404, "Checkpoint mount was not found") from exc
+        except (ContractError, ValueError) as exc:
+            raise HTTPException(422, "The selected checkpoint entries are invalid") from exc
         except ScopeConflictError as exc:
             raise HTTPException(409, str(exc)) from exc
 

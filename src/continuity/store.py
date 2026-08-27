@@ -19,6 +19,7 @@ from .contracts import (
     SCOPES,
     SemanticCheckpointProposalV1,
     ThreadCheckpointV1,
+    selected_checkpoint_entries,
     selected_proposal_entries,
 )
 
@@ -676,6 +677,110 @@ class ContinuityStore:
                 raise ScopeConflictError("checkpoint mount revision is stale")
             mount.status = "detached"
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def promote_checkpoint_mount(
+        self,
+        *,
+        owner: str,
+        destination_session_id: str,
+        mount_id: str,
+        expected_revision: int,
+        selections: dict[str, list[int]],
+    ) -> ArtifactWrite:
+        """Promote owner-selected mounted checkpoint entries into home state."""
+        if expected_revision < 1:
+            raise ValueError("checkpoint mount revision must be positive")
+        db = SessionLocal()
+        try:
+            if db.get_bind().dialect.name == "sqlite":
+                db.execute(text("BEGIN IMMEDIATE"))
+            destination = self._session(db, owner, destination_session_id)
+            scope = self._resolved(db, destination, owner)
+            if scope.scope_kind not in {"personal", "project"}:
+                raise ScopeConflictError("checkpoint promotion requires a Personal or project destination")
+            mount = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.id == mount_id,
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == destination_session_id,
+                ContinuityArtifact.kind == "checkpoint_mount_v1",
+                ContinuityArtifact.status == "active",
+            ).first()
+            if mount is None:
+                raise NotFoundError("active checkpoint mount was not found")
+            if mount.revision != expected_revision:
+                raise ScopeConflictError("checkpoint mount revision is stale")
+            payload = json.loads(mount.payload_json)
+            source_id = str(payload["source_checkpoint_id"])
+            source = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.id == source_id,
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.kind == "thread_checkpoint_v1",
+            ).first()
+            if source is None:
+                raise NotFoundError("mounted source checkpoint was not found")
+            checkpoint = ThreadCheckpointV1.from_payload(json.loads(source.payload_json))
+            selected = selected_checkpoint_entries(checkpoint, selections)
+            source_hash = self._promotion_source_hash(mount_id, mount.revision, selected)
+            if scope.scope_kind == "project":
+                prior_row = self._active_brief(db, owner=owner, kind="project_brief_v1", project_id=scope.project_id)
+                prior = ProjectBriefV1.from_payload(json.loads(prior_row.payload_json)) if prior_row else None
+                preserved = prior if prior and prior.derivation_status == "accepted" else None
+                brief = ProjectBriefV1(
+                    project_id=scope.project_id or "",
+                    summary=(selected.get("objective") or [preserved.summary if preserved else ""])[0],
+                    confirmed_facts=list(preserved.confirmed_facts if preserved else []),
+                    accepted_decisions=self._merge(preserved.accepted_decisions if preserved else [], selected.get("accepted_decisions", [])),
+                    proposals=self._merge(preserved.proposals if preserved else [], selected.get("proposals", [])),
+                    failed_approaches=self._merge(preserved.failed_approaches if preserved else [], selected.get("failures", [])),
+                    open_questions=self._merge(preserved.open_questions if preserved else [], selected.get("open_questions", [])),
+                    current_plans=self._merge(preserved.current_plans if preserved else [], selected.get("next_actions", [])),
+                    source_refs=self._merge(preserved.source_refs if preserved else [], selected.get("artifact_refs", [])),
+                    source_session_ids=self._merge(preserved.source_session_ids if preserved else [], [checkpoint.session_id]),
+                    source_message_ids=self._merge(preserved.source_message_ids if preserved else [], checkpoint.source_message_ids),
+                    source_through_message_id=checkpoint.source_through_message_id,
+                    source_revision=source_hash,
+                    derivation_status="accepted", derivation_version=1,
+                    derivation_method="owner_checkpoint_mount_promotion_v1",
+                )
+                write = self._write(
+                    db, owner=owner, kind="project_brief_v1", session_id=None, project_id=scope.project_id,
+                    payload=brief.to_payload(), source_through_message_id=checkpoint.source_through_message_id,
+                    source_hash=source_hash, commit=False,
+                )
+            else:
+                prior_row = self._active_brief(db, owner=owner, kind="personal_brief_v1", session_id=destination_session_id)
+                prior = PersonalBriefV1.from_payload(json.loads(prior_row.payload_json)) if prior_row else None
+                preserved = prior if prior and prior.derivation_status == "accepted" else None
+                brief = PersonalBriefV1(
+                    owner_id=owner,
+                    summary=(selected.get("objective") or [preserved.summary if preserved else ""])[0],
+                    confirmed_facts=list(preserved.confirmed_facts if preserved else []),
+                    preferences=list(preserved.preferences if preserved else []),
+                    ongoing_goals=self._merge(preserved.ongoing_goals if preserved else [], selected.get("next_actions", [])),
+                    commitments=self._merge(preserved.commitments if preserved else [], selected.get("accepted_decisions", [])),
+                    proposals=self._merge(preserved.proposals if preserved else [], selected.get("proposals", [])),
+                    recurring_themes=list(preserved.recurring_themes if preserved else []),
+                    failed_approaches=self._merge(preserved.failed_approaches if preserved else [], selected.get("failures", [])),
+                    open_questions=self._merge(preserved.open_questions if preserved else [], selected.get("open_questions", [])),
+                    artifact_refs=self._merge(preserved.artifact_refs if preserved else [], selected.get("artifact_refs", [])),
+                    source_refs=self._merge(preserved.source_refs if preserved else [], checkpoint.source_message_ids),
+                    source_message_ids=self._merge(preserved.source_message_ids if preserved else [], checkpoint.source_message_ids),
+                    source_through_message_id=checkpoint.source_through_message_id,
+                    derivation_status="accepted", derivation_version=1,
+                    derivation_method="owner_checkpoint_mount_promotion_v1",
+                )
+                write = self._write(
+                    db, owner=owner, kind="personal_brief_v1", session_id=destination_session_id, project_id=None,
+                    payload=brief.to_payload(), source_through_message_id=checkpoint.source_through_message_id,
+                    source_hash=source_hash, commit=False,
+                )
+            db.commit()
+            return write
         except Exception:
             db.rollback()
             raise

@@ -182,6 +182,7 @@ def test_checkpoint_mount_is_owner_scoped_read_only_and_detachable(store):
     )
     source = ThreadCheckpointV1(
         session_id="alice-session", objective="Compare release approaches",
+        accepted_decisions=["Ship the small fix first"],
         source_message_ids=["m1"], source_through_message_id="m1", source_hash="source-hash",
         derivation_status="heuristic", derivation_version=1, derivation_method="local_heuristic_v1",
     )
@@ -199,6 +200,17 @@ def test_checkpoint_mount_is_owner_scoped_read_only_and_detachable(store):
     assert [item.source_checkpoint_id for item in continuity.checkpoint_mounts(
         owner="alice", destination_session_id="alice-destination",
     )] == [source_write.id]
+
+    promoted = continuity.promote_checkpoint_mount(
+        owner="alice", destination_session_id="alice-destination", mount_id=mount.id,
+        expected_revision=mount.revision, selections={"objective": [0], "accepted_decisions": [0]},
+    )
+    brief = continuity.latest_project_brief(owner="alice", project_id=project_id)
+    assert promoted.created is True
+    assert brief.derivation_status == "accepted"
+    assert brief.derivation_method == "owner_checkpoint_mount_promotion_v1"
+    assert brief.summary == "Compare release approaches"
+    assert brief.accepted_decisions == ["Ship the small fix first"]
 
     continuity.detach_checkpoint_mount(
         owner="alice", destination_session_id="alice-destination", mount_id=mount.id,

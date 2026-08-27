@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 
 SCOPES = frozenset({"project", "personal", "computer", "general"})
@@ -357,6 +357,10 @@ SEMANTIC_PROPOSAL_ENTRY_FIELDS = frozenset({
     "next_actions",
     "artifact_refs",
 })
+CHECKPOINT_PROMOTION_FIELDS = frozenset({
+    "objective", "accepted_decisions", "proposals", "failures",
+    "open_questions", "next_actions", "artifact_refs",
+})
 
 
 def selected_proposal_entries(
@@ -386,6 +390,43 @@ def selected_proposal_entries(
             total += 1
             if total > _MAX_PROPOSAL_ITEMS:
                 raise ContractError(f"semantic proposal selection exceeds {_MAX_PROPOSAL_ITEMS} entries")
+    return selected
+
+
+def selected_checkpoint_entries(
+    checkpoint: ThreadCheckpointV1, selections: Mapping[str, Any],
+) -> dict[str, list[str]]:
+    """Resolve owner-selected source-checkpoint entries; never accept text."""
+    if not isinstance(selections, Mapping) or not selections:
+        raise ContractError("checkpoint promotion requires selected entries")
+    if set(selections) - CHECKPOINT_PROMOTION_FIELDS:
+        raise ContractError("checkpoint promotion contains unsupported fields")
+    values_by_field: dict[str, list[str]] = {
+        "objective": [checkpoint.objective] if checkpoint.objective else [],
+        "accepted_decisions": list(checkpoint.accepted_decisions),
+        "proposals": list(checkpoint.proposals),
+        "failures": list(checkpoint.failures),
+        "open_questions": list(checkpoint.open_questions),
+        "next_actions": list(checkpoint.next_actions),
+        "artifact_refs": list(checkpoint.artifact_refs),
+    }
+    selected: dict[str, list[str]] = {}
+    total = 0
+    for field_name, indexes in selections.items():
+        if not isinstance(indexes, list) or not indexes:
+            raise ContractError("checkpoint promotion selections must be non-empty index lists")
+        values = values_by_field[field_name]
+        seen: set[int] = set()
+        for index in indexes:
+            if not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= len(values):
+                raise ContractError("checkpoint promotion selection index is out of range")
+            if index in seen:
+                raise ContractError("checkpoint promotion selection contains a duplicate entry")
+            seen.add(index)
+            selected.setdefault(field_name, []).append(values[index])
+            total += 1
+            if total > _MAX_PROPOSAL_ITEMS:
+                raise ContractError(f"checkpoint promotion selection exceeds {_MAX_PROPOSAL_ITEMS} entries")
     return selected
 
 

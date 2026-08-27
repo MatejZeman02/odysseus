@@ -368,8 +368,10 @@ artifact ID. Mounts are owner-scoped, limited to two, visible in Context, and
 revision-checked on detach. The compiler labels them as read-only mounted
 context and never reads their raw transcript. Checkpoint selection and mount
 metadata are server-resolved; the browser cannot submit replacement content.
-Synthesis, selected transfer promotion, expiry, and sensitivity classes remain
-next C3 work.
+The owner can now select individual mounted checkpoint entries for an atomic
+accepted Personal/project brief promotion; the browser still supplies only
+field/index pairs. Synthesis, expiry, and sensitivity classes remain next C3
+work.
 
 Implement the user-facing alternative to transcript merging:
 
