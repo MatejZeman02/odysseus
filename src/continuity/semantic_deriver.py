@@ -211,6 +211,28 @@ async def derive_semantic_proposal(
             "provider_failed", "The selected model could not create a semantic proposal. No memory was changed.",
         ) from exc
 
+    # Do the freshness check at the live provider boundary.  The generic store
+    # also supports imported/fixture artifacts with an external provenance,
+    # whereas a provider-derived proposal must never be shown if its cited
+    # conversation changed while the provider was working. Promotion retains
+    # the final transactional recheck for any later edits.
+    db = SessionLocal()
+    try:
+        if ContinuityStore._source_message_hash(
+            db, session_id=session_id, source_ids=source_ids,
+        ) != source_hash:
+            raise SemanticDerivationError(
+                "source_stale", "The conversation changed while the proposal was being prepared. No memory was changed.",
+            )
+    except SemanticDerivationError:
+        raise
+    except Exception as exc:
+        raise SemanticDerivationError(
+            "storage_failed", "The semantic proposal could not be stored. No memory was changed.",
+        ) from exc
+    finally:
+        db.close()
+
     try:
         if only_if_absent:
             record, created = ContinuityStore().write_semantic_proposal_if_absent(owner=owner, proposal=proposal)
