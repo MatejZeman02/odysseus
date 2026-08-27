@@ -228,6 +228,19 @@ class ContextCompiler:
         checkpoint = self.store.latest_thread_checkpoint(owner=owner, session_id=session_id)
         primary = self.store.latest_project_brief(owner=owner, project_id=scope.project_id) if scope.project_id else None
         personal = self.store.latest_personal_brief(owner=owner, session_id=session_id) if scope.scope_kind == "personal" else None
+        mount_loader = getattr(self.store, "checkpoint_mounts", None)
+        mounts = (
+            mount_loader(owner=owner, destination_session_id=session_id)
+            if scope.scope_kind in {"personal", "project"} and callable(mount_loader)
+            else []
+        )
+        mounted_checkpoints = tuple({
+            "mount_id": mount.id,
+            "mount_revision": mount.revision,
+            "source_checkpoint_id": mount.source_checkpoint_id,
+            "source_session_id": mount.source_session_id,
+            "checkpoint": mount.checkpoint.to_payload(),
+        } for mount in mounts)
         related: list[ProjectBriefV1] = []
         if scope.project_id:
             for project_id in dict.fromkeys(related_project_ids):
@@ -350,11 +363,21 @@ class ContextCompiler:
                     for brief in related
                 ],
             },
+            "checkpoint_mounts": [{
+                "mount_id": mount["mount_id"],
+                "mount_revision": mount["mount_revision"],
+                "source_checkpoint_id": mount["source_checkpoint_id"],
+                "source_session_id": mount["source_session_id"],
+                "derivation_status": mount["checkpoint"]["derivation_status"],
+                "source_through_message_id": mount["checkpoint"]["source_through_message_id"],
+                "source_message_count": len(mount["checkpoint"]["source_message_ids"]),
+            } for mount in mounted_checkpoints],
         }
         return ContextBundle(
             companion_profile=companion_profile, scope=scope, request=request,
             thread_checkpoint=checkpoint, primary_project_brief=primary,
             related_project_briefs=tuple(related), personal_brief=personal,
+            mounted_checkpoints=mounted_checkpoints,
             working_artifacts=working_artifacts, context_grants=context_grants,
             episodic_hits=hits, transcript_tail=tail, manifest=manifest,
         )

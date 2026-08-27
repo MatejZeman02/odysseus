@@ -122,6 +122,12 @@ automatic artifacts, not a different chat's raw transcript tail.
 
 **Outcome:** a finished chat can transfer selected context safely.
 
+The initial read-only attachment primitive is implemented: a compact active
+checkpoint may be mounted into another owner-owned Personal/project home with
+an explicit detach action. It is bounded, attributed, and compiled separately
+from the destination transcript. The remaining work is selected-entry transfer,
+two-checkpoint synthesis, expiry/sensitivity policy, and the richer UI.
+
 - attach an immutable checkpoint to another chat as a labeled read-only mount;
 - selectively promote owner-chosen items to Personal or project home state;
 - create a new synthesis chat from two attributed checkpoints;

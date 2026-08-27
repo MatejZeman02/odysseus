@@ -58,6 +58,15 @@ class SemanticProposalAttemptRecord:
     code: str
 
 
+@dataclass(frozen=True)
+class CheckpointMountRecord:
+    id: str
+    revision: int
+    source_checkpoint_id: str
+    source_session_id: str
+    checkpoint: ThreadCheckpointV1
+
+
 def _settings(project: Project) -> dict:
     try:
         value = json.loads(project.settings_json or "{}")
@@ -495,6 +504,181 @@ class ContinuityStore:
                 )
                 for row in rows
             ]
+        finally:
+            db.close()
+
+    def checkpoint_catalog(self, *, owner: str, limit: int = 50) -> list[dict[str, object]]:
+        """List owner-owned active checkpoints without exposing transcripts."""
+        if not 1 <= limit <= 100:
+            raise ValueError("checkpoint catalog limit must be between 1 and 100")
+        db = SessionLocal()
+        try:
+            rows = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.kind == "thread_checkpoint_v1",
+                ContinuityArtifact.status == "active",
+            ).order_by(ContinuityArtifact.updated_at.desc()).limit(limit).all()
+            sessions = {
+                row.id: row for row in db.query(DbSession).filter(
+                    DbSession.owner == owner,
+                    DbSession.id.in_([row.session_id for row in rows if row.session_id]),
+                ).all()
+            }
+            catalog: list[dict[str, object]] = []
+            for row in rows:
+                session = sessions.get(row.session_id)
+                if session is None or (session.scope_kind or "general") not in {"personal", "project"}:
+                    continue
+                checkpoint = ThreadCheckpointV1.from_payload(json.loads(row.payload_json))
+                catalog.append({
+                    "id": row.id,
+                    "revision": row.revision,
+                    "session_id": checkpoint.session_id,
+                    "session_name": session.name,
+                    "scope_kind": session.scope_kind or "general",
+                    "project_id": session.project_id,
+                    "objective": checkpoint.objective,
+                    "derivation_status": checkpoint.derivation_status,
+                    "source_through_message_id": checkpoint.source_through_message_id,
+                    "source_message_count": len(checkpoint.source_message_ids),
+                })
+            return catalog
+        finally:
+            db.close()
+
+    def attach_checkpoint(
+        self, *, owner: str, destination_session_id: str, source_checkpoint_id: str,
+    ) -> CheckpointMountRecord:
+        """Attach one immutable owner checkpoint as read-only destination context."""
+        db = SessionLocal()
+        try:
+            if db.get_bind().dialect.name == "sqlite":
+                db.execute(text("BEGIN IMMEDIATE"))
+            destination = self._session(db, owner, destination_session_id)
+            destination_scope = self._resolved(db, destination, owner)
+            if destination_scope.scope_kind not in {"personal", "project"}:
+                raise ScopeConflictError("checkpoint mounts require a Personal or project destination")
+            source = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.id == source_checkpoint_id,
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.kind == "thread_checkpoint_v1",
+                ContinuityArtifact.status == "active",
+            ).first()
+            if source is None:
+                raise NotFoundError("owner-scoped active checkpoint was not found")
+            checkpoint = ThreadCheckpointV1.from_payload(json.loads(source.payload_json))
+            source_session = self._session(db, owner, checkpoint.session_id)
+            if (source_session.scope_kind or "general") not in {"personal", "project"}:
+                raise ScopeConflictError("checkpoint source is not a Companion home")
+            existing_rows = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == destination_session_id,
+                ContinuityArtifact.kind == "checkpoint_mount_v1",
+                ContinuityArtifact.status == "active",
+            ).order_by(ContinuityArtifact.revision.desc()).all()
+            for row in existing_rows:
+                try:
+                    if json.loads(row.payload_json).get("source_checkpoint_id") == source_checkpoint_id:
+                        db.commit()
+                        return CheckpointMountRecord(
+                            row.id, row.revision, source_checkpoint_id, checkpoint.session_id, checkpoint,
+                        )
+                except (TypeError, json.JSONDecodeError):
+                    continue
+            if len(existing_rows) >= 2:
+                raise ScopeConflictError("a Companion home may mount at most two checkpoints")
+            revision = max((row.revision for row in db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == destination_session_id,
+                ContinuityArtifact.kind == "checkpoint_mount_v1",
+            ).all()), default=0) + 1
+            mount = ContinuityArtifact(
+                id=uuid.uuid4().hex,
+                owner=owner,
+                project_id=destination_scope.project_id,
+                session_id=destination_session_id,
+                kind="checkpoint_mount_v1",
+                status="active",
+                revision=revision,
+                payload_json=json.dumps({
+                    "schema_version": 1,
+                    "source_checkpoint_id": source_checkpoint_id,
+                    "source_session_id": checkpoint.session_id,
+                }, sort_keys=True, separators=(",", ":")),
+                source_through_message_id=checkpoint.source_through_message_id,
+                source_hash=hashlib.sha256(
+                    f"checkpoint-mount:{destination_session_id}:{source_checkpoint_id}".encode("utf-8")
+                ).hexdigest(),
+            )
+            db.add(mount)
+            db.commit()
+            return CheckpointMountRecord(
+                mount.id, mount.revision, source_checkpoint_id, checkpoint.session_id, checkpoint,
+            )
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def checkpoint_mounts(self, *, owner: str, destination_session_id: str) -> list[CheckpointMountRecord]:
+        db = SessionLocal()
+        try:
+            self._session(db, owner, destination_session_id)
+            rows = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == destination_session_id,
+                ContinuityArtifact.kind == "checkpoint_mount_v1",
+                ContinuityArtifact.status == "active",
+            ).order_by(ContinuityArtifact.revision.asc()).all()
+            mounts: list[CheckpointMountRecord] = []
+            for row in rows:
+                try:
+                    payload = json.loads(row.payload_json)
+                    source_id = str(payload["source_checkpoint_id"])
+                    source = db.query(ContinuityArtifact).filter(
+                        ContinuityArtifact.id == source_id,
+                        ContinuityArtifact.owner == owner,
+                        ContinuityArtifact.kind == "thread_checkpoint_v1",
+                    ).first()
+                    if source is None:
+                        continue
+                    checkpoint = ThreadCheckpointV1.from_payload(json.loads(source.payload_json))
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                mounts.append(CheckpointMountRecord(
+                    row.id, row.revision, source_id, checkpoint.session_id, checkpoint,
+                ))
+            return mounts
+        finally:
+            db.close()
+
+    def detach_checkpoint_mount(
+        self, *, owner: str, destination_session_id: str, mount_id: str, expected_revision: int,
+    ) -> None:
+        if expected_revision < 1:
+            raise ValueError("checkpoint mount revision must be positive")
+        db = SessionLocal()
+        try:
+            if db.get_bind().dialect.name == "sqlite":
+                db.execute(text("BEGIN IMMEDIATE"))
+            self._session(db, owner, destination_session_id)
+            mount = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.id == mount_id,
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == destination_session_id,
+                ContinuityArtifact.kind == "checkpoint_mount_v1",
+                ContinuityArtifact.status == "active",
+            ).first()
+            if mount is None:
+                raise NotFoundError("active checkpoint mount was not found")
+            if mount.revision != expected_revision:
+                raise ScopeConflictError("checkpoint mount revision is stale")
+            mount.status = "detached"
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

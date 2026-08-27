@@ -298,3 +298,34 @@ def test_cold_project_fork_reconstructs_promoted_brief_after_file_database_resta
     assert record["source_hash"]
     assert "Decide the crystal history" not in str(cold_fork.transcript_tail)
     restarted_engine.dispose()
+
+
+def test_checkpoint_mount_is_labeled_context_not_destination_transcript(monkeypatch):
+    store = _store(monkeypatch)
+    _add_session(continuity_store_module.SessionLocal, "destination")
+    store.bind_session(owner="alice", session_id="session", scope_kind="personal")
+    store.bind_session(owner="alice", session_id="destination", scope_kind="personal")
+    source = ThreadCheckpointV1(
+        session_id="session", objective="Release options need comparison",
+        source_message_ids=["source-1"], source_through_message_id="source-1", source_hash="source-hash",
+        derivation_status="heuristic", derivation_version=1, derivation_method="local_heuristic_v1",
+    )
+    source_write = store.write_thread_checkpoint(owner="alice", checkpoint=source)
+    store.attach_checkpoint(
+        owner="alice", destination_session_id="destination", source_checkpoint_id=source_write.id,
+    )
+
+    bundle = ContextCompiler(store, tail_count=1).compile(
+        owner="alice", session_id="destination", request="compare the options",
+        transcript=[_message("user", "new destination request", 42)],
+    )
+    assert bundle.thread_checkpoint is None
+    assert len(bundle.mounted_checkpoints) == 1
+    assert bundle.mounted_checkpoints[0]["source_checkpoint_id"] == source_write.id
+    assert bundle.mounted_checkpoints[0]["checkpoint"]["objective"] == "Release options need comparison"
+    assert "Release options" not in str(bundle.transcript_tail)
+    assert bundle.manifest["checkpoint_mounts"][0]["source_message_count"] == 1
+
+    from routes.chat_helpers import _continuity_prompt_message
+    prompt = _continuity_prompt_message(bundle)
+    assert "mounted_checkpoints_read_only" in prompt["content"]

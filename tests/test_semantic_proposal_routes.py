@@ -11,6 +11,7 @@ import routes.companion_memory_routes as route_module
 import src.continuity.semantic_deriver as deriver_module
 import src.continuity.store as store_module
 from src.continuity.semantic_proposals import derivation_messages, parse_semantic_proposal
+from src.continuity.contracts import ThreadCheckpointV1
 from src.continuity.store import ContinuityStore
 
 
@@ -129,3 +130,36 @@ def test_semantic_parser_rejects_extra_provider_keys_and_prompt_keeps_source_unt
             _json_payload(injected="bad"), session_id="s", scope_kind="personal", project_id=None,
             source_message_ids=["m1"], source_hash="h", derivation_model="model",
         )
+
+
+def test_checkpoint_mount_routes_attach_and_detach_owner_checkpoint(monkeypatch):
+    router = _setup(monkeypatch)
+    db = store_module.SessionLocal()
+    db.add(DbSession(
+        id="destination", owner="alice", name="Second Personal", endpoint_url="http://unused", model="model-a",
+        endpoint_id="endpoint-a", scope_kind="personal",
+    ))
+    db.commit(); db.close()
+    checkpoint = ThreadCheckpointV1(
+        session_id="session", objective="Compare the release candidates",
+        source_message_ids=["m1"], source_through_message_id="m1", source_hash="checkpoint-source",
+        derivation_status="heuristic", derivation_version=1, derivation_method="local_heuristic_v1",
+    )
+    source = ContinuityStore().write_thread_checkpoint(owner="alice", checkpoint=checkpoint)
+    attach = _endpoint(router, "/api/companion/memory/sessions/{session_id}/checkpoint-mounts")
+    mounted = attach(
+        "destination", route_module.CheckpointMountCreate(source_checkpoint_id=source.id), SimpleNamespace(),
+    )
+    assert mounted["source_checkpoint_id"] == source.id
+    assert mounted["objective"] == "Compare the release candidates"
+
+    context = _endpoint(router, "/api/companion/memory/sessions/{session_id}", "GET")
+    payload = context("destination", SimpleNamespace())
+    assert payload["checkpoint_mounts"][0]["id"] == mounted["id"]
+    assert all("content" not in item for item in payload["checkpoint_catalog"])
+
+    detach = _endpoint(router, "/api/companion/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}", "DELETE")
+    assert detach(
+        "destination", mounted["id"],
+        route_module.CheckpointMountDetach(expected_revision=mounted["revision"]), SimpleNamespace(),
+    ) == {"detached": True}

@@ -410,6 +410,9 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "Create semantic proposal" in ui
     assert "Promote selected entries" in ui
     assert "data-proposal-index" in ui
+    assert "checkpoint-mounts" in routes
+    assert "Read-only checkpoint mounts" in ui
+    assert "companion-attach-checkpoint" in ui
 
 
 def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store, monkeypatch):

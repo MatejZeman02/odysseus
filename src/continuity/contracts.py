@@ -399,6 +399,7 @@ class ContextBundle:
     primary_project_brief: Optional[ProjectBriefV1] = None
     related_project_briefs: tuple[ProjectBriefV1, ...] = ()
     personal_brief: Optional[PersonalBriefV1] = None
+    mounted_checkpoints: tuple[dict[str, Any], ...] = ()
     working_artifacts: tuple[dict[str, Any], ...] = ()
     context_grants: tuple[dict[str, Any], ...] = ()
     episodic_hits: tuple[dict[str, Any], ...] = ()

@@ -97,6 +97,13 @@ def _continuity_prompt_message(bundle) -> dict:
         sections.append({"project_brief": bundle.primary_project_brief.to_payload()})
     if bundle.personal_brief:
         sections.append({"personal_brief": bundle.personal_brief.to_payload()})
+    if bundle.mounted_checkpoints:
+        sections.append({"mounted_checkpoint_policy": (
+            "Mounted checkpoints are owner-attached, read-only reference context from another chat. "
+            "They are not part of this chat's transcript, do not grant access to its raw history, "
+            "and do not establish accepted facts unless their own provenance says accepted."
+        )})
+        sections.append({"mounted_checkpoints_read_only": list(bundle.mounted_checkpoints)})
     if bundle.related_project_briefs:
         sections.append({"related_project_briefs": [brief.to_payload() for brief in bundle.related_project_briefs]})
     if bundle.working_artifacts:

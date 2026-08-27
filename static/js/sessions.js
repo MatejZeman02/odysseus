@@ -255,6 +255,14 @@ async function openCompanionMemory(meta, initialTab = 'context') {
       failed: `Automatic proposal could not be created (${String(proposalAttempt.code || 'unknown').replaceAll('_', ' ')}). No memory was changed.`,
     }[proposalAttempt.outcome] || 'Automatic proposal did not complete. No memory was changed.')
     : '';
+  const checkpointMounts = Array.isArray(payload.checkpoint_mounts) ? payload.checkpoint_mounts : [];
+  const mountedCheckpointIds = new Set(checkpointMounts.map(mount => mount.source_checkpoint_id));
+  const checkpointCandidates = (payload.checkpoint_catalog || []).filter(item => (
+    item.session_id !== meta.id && !mountedCheckpointIds.has(item.id)
+  ));
+  const checkpointMountHtml = (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
+    ? `<section class="companion-checkpoint-mounts"><h5>Read-only checkpoint mounts</h5><p class="companion-memory-help">Attach a compact checkpoint from another one of your Companion chats. It is labeled context, never a transcript merge or shared memory write.</p>${checkpointMounts.length ? checkpointMounts.map(mount => `<div class="companion-checkpoint-mount"><strong>${esc(mount.objective || 'Untitled checkpoint')}</strong><span>${esc(mount.derivation_status || 'legacy_unclassified')} · ${esc(mount.source_message_count || 0)} source messages</span><button type="button" class="companion-detach-checkpoint" data-mount-id="${esc(mount.id)}" data-mount-revision="${esc(mount.revision)}">Detach</button></div>`).join('') : '<p class="companion-memory-help">No checkpoint is mounted.</p>'}${checkpointCandidates.length ? `<label>Checkpoint <select class="companion-checkpoint-source">${checkpointCandidates.map(item => `<option value="${esc(item.id)}">${esc(item.session_name || item.session_id)} · ${esc(item.objective || 'Untitled checkpoint')}</option>`).join('')}</select></label><button type="button" class="companion-attach-checkpoint">Attach checkpoint</button>` : '<p class="companion-memory-help">No other active Companion checkpoint is available to attach.</p>'}</section>`
+    : '';
   const proposalHistoryHtml = proposalHistory.length > 1 ? `<details class="companion-semantic-history"><summary>Proposal history (${proposalHistory.length})</summary>${proposalHistory.map((record) => {
     const item = record.proposal || {};
     const itemCount = semanticFields.reduce((count, [field]) => count + (field === 'objective' ? (item.objective ? 1 : 0) : (item[field] || []).length), 0);
@@ -266,7 +274,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
     <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
     <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
-    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${proposalHtml}${proposalAction}${proposalAttemptText ? `<p class="companion-memory-help">${esc(proposalAttemptText)}</p>` : ''}${proposalHistoryHtml}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
+    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><p class="companion-memory-help">${esc(continuityProvenance(checkpoint, 'Thread checkpoint'))}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">${esc(continuityProvenance(brief, 'Home brief'))}</p>${checkpointMountHtml}${proposalHtml}${proposalAction}${proposalAttemptText ? `<p class="companion-memory-help">${esc(proposalAttemptText)}</p>` : ''}${proposalHistoryHtml}<p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
@@ -281,6 +289,34 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     close();
     documentApi.openLibrary({tab: 'documents'});
   });
+  modal.querySelector('.companion-attach-checkpoint')?.addEventListener('click', async (event) => {
+    const sourceCheckpointId = modal.querySelector('.companion-checkpoint-source')?.value;
+    if (!sourceCheckpointId) return;
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/checkpoint-mounts`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({source_checkpoint_id: sourceCheckpointId})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not attach checkpoint');
+      uiModule.showToast?.('Checkpoint mounted as read-only context.', 2600);
+      close(); openCompanionMemory(meta, 'context');
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not attach checkpoint');
+      event.currentTarget.disabled = false;
+    }
+  });
+  modal.querySelectorAll('.companion-detach-checkpoint').forEach(button => button.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const response = await fetch(`/api/companion/memory/sessions/${encodeURIComponent(meta.id)}/checkpoint-mounts/${encodeURIComponent(event.currentTarget.dataset.mountId)}`, {method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected_revision: Number(event.currentTarget.dataset.mountRevision)})});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not detach checkpoint');
+      uiModule.showToast?.('Checkpoint detached.', 2200);
+      close(); openCompanionMemory(meta, 'context');
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not detach checkpoint');
+      event.currentTarget.disabled = false;
+    }
+  }));
   modal.querySelector('.companion-create-semantic-proposal')?.addEventListener('click', async (event) => {
     event.currentTarget.disabled = true;
     try {

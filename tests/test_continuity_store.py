@@ -170,6 +170,48 @@ def test_semantic_proposal_is_immutable_source_linked_and_not_a_home_brief(store
     assert admitted.id == written.id
 
 
+def test_checkpoint_mount_is_owner_scoped_read_only_and_detachable(store):
+    continuity, local_session = store
+    project_id = continuity.create_project(owner="alice", name="Dust", workspace_root="/work/dust")
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="personal")
+    db = local_session()
+    db.add(DbSession(id="alice-destination", owner="alice", name="Dust fork", endpoint_url="http://a", model="m"))
+    db.commit(); db.close()
+    continuity.bind_session(
+        owner="alice", session_id="alice-destination", scope_kind="project", project_id=project_id,
+    )
+    source = ThreadCheckpointV1(
+        session_id="alice-session", objective="Compare release approaches",
+        source_message_ids=["m1"], source_through_message_id="m1", source_hash="source-hash",
+        derivation_status="heuristic", derivation_version=1, derivation_method="local_heuristic_v1",
+    )
+    source_write = continuity.write_thread_checkpoint(owner="alice", checkpoint=source)
+
+    mount = continuity.attach_checkpoint(
+        owner="alice", destination_session_id="alice-destination", source_checkpoint_id=source_write.id,
+    )
+    duplicate = continuity.attach_checkpoint(
+        owner="alice", destination_session_id="alice-destination", source_checkpoint_id=source_write.id,
+    )
+    assert (mount.id, mount.revision, mount.checkpoint.objective) == (
+        duplicate.id, duplicate.revision, "Compare release approaches",
+    )
+    assert [item.source_checkpoint_id for item in continuity.checkpoint_mounts(
+        owner="alice", destination_session_id="alice-destination",
+    )] == [source_write.id]
+
+    continuity.detach_checkpoint_mount(
+        owner="alice", destination_session_id="alice-destination", mount_id=mount.id,
+        expected_revision=mount.revision,
+    )
+    assert continuity.checkpoint_mounts(owner="alice", destination_session_id="alice-destination") == []
+    continuity.bind_session(owner="bob", session_id="bob-session", scope_kind="personal")
+    with pytest.raises(NotFoundError):
+        continuity.attach_checkpoint(
+            owner="bob", destination_session_id="bob-session", source_checkpoint_id=source_write.id,
+        )
+
+
 def test_semantic_proposal_rejects_invalid_scope_or_promotion_status(store):
     continuity, _ = store
     project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")

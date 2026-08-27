@@ -77,6 +77,16 @@ class SemanticProposalPromotion(BaseModel):
     selections: dict[str, list[int]] = Field(min_length=1, max_length=8)
 
 
+class CheckpointMountCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_checkpoint_id: str = Field(min_length=1, max_length=128)
+
+
+class CheckpointMountDetach(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, ArtifactConflict):
         return HTTPException(409, str(exc))
@@ -111,6 +121,7 @@ def setup_companion_memory_routes() -> APIRouter:
             proposal = store.latest_semantic_proposal_record(owner=owner, session_id=session_id)
             proposal_history = store.semantic_proposal_history(owner=owner, session_id=session_id)
             proposal_attempt = store.latest_semantic_proposal_attempt(owner=owner, session_id=session_id)
+            mounts = store.checkpoint_mounts(owner=owner, destination_session_id=session_id) if scope_kind in {"personal", "project"} else []
             return {
                 "scope_kind": scope_kind, "project_id": project_id,
                 "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
@@ -136,6 +147,20 @@ def setup_companion_memory_routes() -> APIRouter:
                     "outcome": proposal_attempt.outcome,
                     "code": proposal_attempt.code,
                 } if proposal_attempt else None),
+                "checkpoint_mounts": [
+                    {
+                        "id": mount.id,
+                        "revision": mount.revision,
+                        "source_checkpoint_id": mount.source_checkpoint_id,
+                        "source_session_id": mount.source_session_id,
+                        "objective": mount.checkpoint.objective,
+                        "derivation_status": mount.checkpoint.derivation_status,
+                        "source_through_message_id": mount.checkpoint.source_through_message_id,
+                        "source_message_count": len(mount.checkpoint.source_message_ids),
+                    }
+                    for mount in mounts
+                ],
+                "checkpoint_catalog": store.checkpoint_catalog(owner=owner) if scope_kind in {"personal", "project"} else [],
                 "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
                 "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
                 "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
@@ -188,6 +213,38 @@ def setup_companion_memory_routes() -> APIRouter:
             return {"id": record.id, "revision": record.revision, "status": record.status, "proposal": record.proposal.to_payload()}
         except NotFoundError as exc:
             raise HTTPException(404, "Semantic proposal was not found") from exc
+
+    @router.post("/memory/sessions/{session_id}/checkpoint-mounts")
+    def attach_checkpoint_mount(session_id: str, payload: CheckpointMountCreate, request: Request):
+        try:
+            record = ContinuityStore().attach_checkpoint(
+                owner=_owner(request), destination_session_id=session_id,
+                source_checkpoint_id=payload.source_checkpoint_id,
+            )
+            return {
+                "id": record.id, "revision": record.revision,
+                "source_checkpoint_id": record.source_checkpoint_id,
+                "source_session_id": record.source_session_id,
+                "objective": record.checkpoint.objective,
+                "derivation_status": record.checkpoint.derivation_status,
+            }
+        except NotFoundError as exc:
+            raise HTTPException(404, "Checkpoint or Companion session was not found") from exc
+        except ScopeConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @router.delete("/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}")
+    def detach_checkpoint_mount(session_id: str, mount_id: str, payload: CheckpointMountDetach, request: Request):
+        try:
+            ContinuityStore().detach_checkpoint_mount(
+                owner=_owner(request), destination_session_id=session_id,
+                mount_id=mount_id, expected_revision=payload.expected_revision,
+            )
+            return {"detached": True}
+        except NotFoundError as exc:
+            raise HTTPException(404, "Checkpoint mount was not found") from exc
+        except ScopeConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @router.get("/memory/sessions/{session_id}/semantic-proposals")
     def list_semantic_proposals(session_id: str, request: Request):

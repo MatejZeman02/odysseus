@@ -362,6 +362,15 @@ conflicts.
 
 ### C3 — Transfer and synthesis
 
+**Implemented first primitive:** an owner can attach an active Personal or
+project `ThreadCheckpointV1` to another Personal/project home by immutable
+artifact ID. Mounts are owner-scoped, limited to two, visible in Context, and
+revision-checked on detach. The compiler labels them as read-only mounted
+context and never reads their raw transcript. Checkpoint selection and mount
+metadata are server-resolved; the browser cannot submit replacement content.
+Synthesis, selected transfer promotion, expiry, and sensitivity classes remain
+next C3 work.
+
 Implement the user-facing alternative to transcript merging:
 
 - attach an immutable source checkpoint to a destination chat as visible,
