@@ -445,8 +445,9 @@ must remain explicit rather than being combined into an unverified fact. The
 review UI labels each selectable source with its home, derivation status, and
 source-message count before synthesis. The owner may preview the two selected
 compact checkpoints through the same server-side validation used for creation;
-the preview exposes no source IDs, hashes, or transcript text. Richer
-source-diff/reconciliation review remains deferred.
+the preview exposes no source IDs, hashes, or transcript text. It separates
+exact overlaps from source-attributed differences without reconciling either
+source into a fact.
 
 Implement the user-facing alternative to transcript merging:
 
