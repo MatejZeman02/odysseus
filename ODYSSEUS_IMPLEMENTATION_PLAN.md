@@ -60,6 +60,28 @@ Progress labels are deliberately non-temporal:
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
 | Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
 
+## Immediate validation queue
+
+The remaining work is deliberately an ordered validation queue rather than a
+new feature grab-bag.  Each gate below has a clear pass/fail outcome and must
+not be bypassed by a less-contained fallback.
+
+| Order | Gate | What must be demonstrated | Current boundary if it fails |
+|---|---|---|---|
+| 1 | Configured-model continuity canary | In a real owner-scoped Personal or project home, derive a semantic proposal from bounded source messages, inspect its attribution, promote selected entries, reload, and confirm a fresh fork uses the accepted brief rather than another chat's tail. Cancelled or provider-failed derivations must leave home state unchanged. | Keep semantic proposals and the local exact-scope recall adapter available, but do not call provider-backed derivation operationally proven. |
+| 2 | G2B browser canary | In a harmless project documentation file, enable Patch, inspect the exact diff, apply it, reload, run an independent read-only review, then roll it back. | Retain the reviewed-patch transaction code; do not broaden patch scope or enable automatic project mutation for new sessions. |
+| 3 | Computer containment qualification | Configure one reviewed, locally present image pinned by immutable digest and pass the hostile-fixture report: rootless execution, declared command inventory, no host/home/socket/bridge access, no network, limits, cancellation, and descendant teardown. | `computer_assist` stays unavailable. Safe snapshots and task-root registration remain non-executing helpers. |
+| 4 | Full regression execution | Run the complete test suite in a development environment with enough wall-clock budget, following the focused suites below. A short runner timeout is not evidence of a product failure or success. | Treat focused suites as regression evidence only; do not label the aggregate suite green. |
+
+Focused automated evidence currently includes:
+
+```bash
+pytest -q tests/test_g2c_memory.py tests/test_computer_sandbox.py
+pytest -q tests/test_foreground_model_routing.py tests/test_tool_policy.py \
+  tests/test_external_context_tool_gate.py tests/test_g2c_memory.py
+pytest -q tests/test_add_directory_event_loop.py tests/test_agent_rounds_exhausted.py
+```
+
 ## Ordered delivery roadmap
 
 The work must now proceed in this order. Earlier stages repair the durable
