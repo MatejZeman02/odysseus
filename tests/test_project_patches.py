@@ -225,6 +225,24 @@ def test_symlink_parent_for_new_file_is_rejected(workspace, tmp_path):
     assert not (outside / "g2b-test.md").exists()
 
 
+def test_project_root_symlink_is_rejected_without_touching_its_target(workspace, database, tmp_path):
+    outside = tmp_path / "outside-project"
+    outside.mkdir()
+    (outside / "README.md").write_text("outside before\n", encoding="utf-8")
+    root_link = tmp_path / "project-link"
+    root_link.symlink_to(outside, target_is_directory=True)
+    database.query(Project).filter(Project.id == "project").one().workspace_root = str(root_link)
+    database.commit()
+
+    with pytest.raises(PatchError) as raised:
+        prepare_proposal(root_link, _answer([
+            {"operation": "update", "path": "README.md", "content": "outside after\n"},
+        ]))
+
+    assert raised.value.code == "path_denied"
+    assert (outside / "README.md").read_text() == "outside before\n"
+
+
 def test_reject_is_revision_guarded(workspace, database):
     row = _persist(database, prepare_proposal(workspace, _answer([
         {"operation": "update", "path": "README.md", "content": "# Proposed\n"},

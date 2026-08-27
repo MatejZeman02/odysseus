@@ -89,6 +89,26 @@ def _project_lock(project_id: str) -> threading.Lock:
         return _project_locks.setdefault(project_id, threading.Lock())
 
 
+def _project_root(workspace: Path) -> Path:
+    """Return a current regular project directory without following its leaf.
+
+    Project registration names an owner-selected checkout.  A later replacement
+    of that path with a symlink must not silently turn an approved patch into a
+    write somewhere else.  Individual target components are checked by
+    ``_safe_target``; this completes the same rule for the root itself.
+    """
+    try:
+        info = workspace.lstat()
+    except FileNotFoundError as exc:
+        raise PatchError("path_denied", "Project workspace is no longer available", 409) from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise PatchError("path_denied", "Project workspace is no longer a regular directory", 409)
+    try:
+        return workspace.resolve(strict=True)
+    except OSError as exc:
+        raise PatchError("path_denied", "Project workspace could not be resolved safely", 409) from exc
+
+
 def _dirty_tracked_targets(root: Path, changes: list[dict[str, Any]]) -> bool:
     tracked = [change["path"] for change in changes if change["operation"] == "update"]
     if not tracked:
@@ -221,7 +241,7 @@ def prepare_proposal(workspace: Path, raw_answer: str) -> PreparedProposal:
         code = "proposal_too_large" if isinstance(changes, list) and len(changes) > MAX_PATCH_FILES else "proposal_invalid"
         raise PatchError(code, "Patch must contain between 1 and 20 files", 413 if code == "proposal_too_large" else 400)
 
-    root = workspace.resolve(strict=True)
+    root = _project_root(workspace)
     if not (root / ".git").exists():
         raise PatchError("proposal_invalid", "Project is not a Git checkout", 409)
     normalized: list[dict[str, Any]] = []
@@ -421,7 +441,7 @@ def _verify_only_targets_changed(before: WorkspaceSnapshot, after: WorkspaceSnap
 def apply_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_revision: int) -> dict[str, Any]:
     if row.revision != expected_revision or row.status != "proposed":
         raise PatchError("apply_conflict", "Patch is no longer awaiting this approval", 409)
-    root = workspace.resolve(strict=True)
+    root = _project_root(workspace)
     proposal = json.loads(row.proposal_json)
     changes = proposal["changes"]
     with _project_lock(row.project_id):
@@ -545,7 +565,7 @@ def reject_change_set(db, row: ProjectChangeSet, *, expected_revision: int) -> d
 def rollback_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_revision: int) -> dict[str, Any]:
     if row.revision != expected_revision or row.status != "applied" or not row.rollback_json:
         raise PatchError("rollback_conflict", "Patch is not eligible for rollback", 409)
-    root = workspace.resolve(strict=True)
+    root = _project_root(workspace)
     proposal = json.loads(row.proposal_json)
     changes = proposal["changes"]
     rollback = json.loads(row.rollback_json)
@@ -591,7 +611,7 @@ def recover_applying_change_sets(db) -> int:
             row.revision += 1
             continue
         try:
-            root = Path(project.workspace_root).resolve(strict=True)
+            root = _project_root(Path(project.workspace_root))
             proposal = json.loads(row.proposal_json)
             rollback = json.loads(row.rollback_json)
             for change in proposal["changes"]:
