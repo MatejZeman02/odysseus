@@ -24,6 +24,7 @@ def test_readiness_requires_matching_passing_report(monkeypatch, tmp_path):
     monkeypatch.setenv("ODYSSEUS_COMPUTER_SANDBOX_IMAGE", image)
     monkeypatch.setattr(computer_sandbox.shutil, "which", lambda name: "/usr/bin/podman")
     monkeypatch.setattr(computer_sandbox, "_is_local", lambda value: True)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: True)
     monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
     assert computer_sandbox.readiness().qualified is False
     report.write_text(json.dumps({
@@ -31,6 +32,25 @@ def test_readiness_requires_matching_passing_report(monkeypatch, tmp_path):
         "checks": ["rootless_podman", "read_only_input", "private_writable_task", "network_none", "socket_absence", "host_path_absence", "resource_limits", "descendant_cleanup"],
     }), encoding="utf-8")
     assert computer_sandbox.readiness().qualified is True
+
+
+def test_readiness_revokes_a_historic_report_when_podman_is_no_longer_rootless(monkeypatch, tmp_path):
+    image = "example.invalid/sandbox@sha256:" + "a" * 64
+    report = tmp_path / "qualification.json"
+    report.write_text(json.dumps({
+        "version": computer_sandbox._REPORT_VERSION, "image": image, "passed": True, "complete": True,
+        "checks": ["rootless_podman", "read_only_input", "private_writable_task", "network_none", "socket_absence", "host_path_absence", "resource_limits", "descendant_cleanup"],
+    }), encoding="utf-8")
+    monkeypatch.setenv("ODYSSEUS_COMPUTER_SANDBOX_IMAGE", image)
+    monkeypatch.setattr(computer_sandbox.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(computer_sandbox, "_is_local", lambda value: True)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: False)
+    monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
+
+    state = computer_sandbox.readiness()
+
+    assert state.qualified is False
+    assert state.reason == "podman_not_rootless"
 
 
 def test_server_owned_scratch_rejects_unqualified_or_symlink_input(monkeypatch, tmp_path):

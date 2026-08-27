@@ -96,7 +96,10 @@ probe must prove all of the following with the actual local Podman runtime:
   shell fallback and no less-contained “temporary” executor.
 
 The qualification report is persisted as evidence, not inferred from a CLI
-version string. Until it passes, G2D exposes `computer_observe` only.
+version string. Admission also rechecks that the currently active Podman
+runtime is still rootless; a historic passing report never authorizes a later
+rootful configuration. Until this gate passes, G2D exposes `computer_observe`
+only.
 
 ## Capability profiles
 

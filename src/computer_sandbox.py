@@ -213,6 +213,22 @@ def _is_local(image: str) -> bool:
         return False
 
 
+def _is_rootless_runtime() -> bool:
+    """Check the currently active Podman mode, not just a historic probe.
+
+    A qualification report is evidence for the pinned image/profile, but it
+    cannot authorize a later rootful Podman configuration. Every admission
+    therefore rechecks this property before a container is started.
+    """
+    if not shutil.which("podman"):
+        return False
+    try:
+        result = _run(["podman", "info", "--format", "{{.Host.Security.Rootless}}"], timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip().lower() == "true"
+
+
 def _load_report() -> dict | None:
     try:
         data = json.loads(_REPORT_PATH.read_text(encoding="utf-8"))
@@ -227,8 +243,9 @@ def readiness() -> ComputerSandboxReadiness:
     podman = bool(shutil.which("podman"))
     image_local = configured and _is_local(image)
     report = _load_report()
+    rootless = podman and _is_rootless_runtime()
     qualified = bool(
-        configured and image_local and report and report.get("image") == image
+        rootless and configured and image_local and report and report.get("image") == image
         and report.get("passed") is True and report.get("complete") is True
         and _REQUIRED_FINAL_CHECKS.issubset(set(report.get("checks", [])))
     )
@@ -236,6 +253,8 @@ def readiness() -> ComputerSandboxReadiness:
         reason = "qualified"
     elif not podman:
         reason = "podman_unavailable"
+    elif not rootless:
+        reason = "podman_not_rootless"
     elif not configured:
         reason = "pinned_sandbox_image_required"
     elif not image_local:
@@ -396,8 +415,7 @@ def qualify_containment() -> dict:
     checks: list[str] = []
     passed = False
     try:
-        rootless = _run(["podman", "info", "--format", "{{.Host.Security.Rootless}}"], timeout=8)
-        if rootless.returncode != 0 or rootless.stdout.strip().lower() != "true":
+        if not _is_rootless_runtime():
             raise SandboxQualificationError("Podman is not operating rootlessly.")
         checks.append("rootless_podman")
         with tempfile.TemporaryDirectory(prefix="odysseus-computer-probe-") as root:
