@@ -75,6 +75,13 @@ without storing provider output. These rows survive restart; a shutdown merely
 abandons an in-flight derivation before it can write. The only C1 qualification
 still outstanding is a manual canary against a real configured provider.
 
+**C2 correction:** the compiler's convenience checkpoint writer must never
+supersede an owner-promoted home brief. The store now rejects a heuristic write
+when accepted state exists and prefers the newest accepted revision when
+reading older data that was affected by the previous supersession bug. This
+preserves both the new checkpoint (as provisional thread context) and the
+owner-approved brief (as shared home state).
+
 ## Memory layers
 
 G2C treats “memory” as five different things with different owners and rules:

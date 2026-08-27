@@ -99,6 +99,41 @@ def test_cross_project_context_requires_explicit_direct_relationship(store):
     assert continuity.latest_project_brief(owner="bob", project_id=related) is None
 
 
+def test_heuristic_brief_cannot_replace_owner_accepted_project_home_state(store):
+    continuity, local_session = store
+    project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")
+    accepted = ProjectBriefV1(
+        project_id=project_id, summary="Owner-approved release plan",
+        derivation_status="accepted", derivation_version=1, derivation_method="owner_promotion_v1",
+    )
+    accepted_write = continuity.write_project_brief(owner="alice", brief=accepted, source_hash="accepted-source")
+    heuristic = ProjectBriefV1(
+        project_id=project_id, summary="Unreviewed latest chat claim",
+        derivation_status="heuristic", derivation_version=1, derivation_method="local_heuristic_v1",
+    )
+    blocked = continuity.write_project_brief(owner="alice", brief=heuristic, source_hash="heuristic-source")
+
+    assert (blocked.id, blocked.revision, blocked.created) == (
+        accepted_write.id, accepted_write.revision, False,
+    )
+    assert continuity.latest_project_brief(owner="alice", project_id=project_id) == accepted
+
+    # Simulate a historical row from the old bug, where a heuristic was
+    # allowed to supersede an accepted brief. The reader recovers the latest
+    # accepted state without rewriting source history.
+    db = local_session()
+    continuity._write(
+        db, owner="alice", kind="project_brief_v1", session_id=None, project_id=project_id,
+        payload=heuristic.to_payload(), source_through_message_id=None, source_hash="legacy-heuristic",
+    )
+    db.close()
+    assert continuity.latest_project_brief(owner="alice", project_id=project_id) == accepted
+    manifest = continuity.latest_artifact_manifest(
+        owner="alice", kind="project_brief_v1", project_id=project_id,
+    )
+    assert manifest["artifact_revision"] == accepted_write.revision
+
+
 def test_semantic_proposal_is_immutable_source_linked_and_not_a_home_brief(store):
     continuity, local_session = store
     project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")

@@ -221,6 +221,16 @@ def test_project_fork_receives_owner_promoted_semantic_brief_not_primary_transcr
         owner="alice", proposal_id=written.id, expected_revision=written.revision,
         selections={"objective": [0], "facts": [0]},
     )
+    # This is the normal foreground path after the next turn. It may still
+    # emit a heuristic checkpoint, but must not replace accepted home state.
+    CheckpointCompactor(store, tail_count=1).checkpoint(
+        owner="alice", session_id="session",
+        messages=[
+            _message("user", "new primary request", 10),
+            _message("assistant", "unreviewed reply", 11),
+            _message("user", "continue", 12),
+        ],
+    )
 
     fork = ContextCompiler(store, tail_count=1).compile(
         owner="alice", session_id="fork", request="what remains?", transcript=[_message("user", "fork question", 9)],

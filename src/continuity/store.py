@@ -195,6 +195,13 @@ class ContinuityStore:
         db = SessionLocal()
         try:
             self._project(db, owner, brief.project_id)
+            accepted = self._preferred_brief_artifact(
+                db, owner=owner, kind="project_brief_v1", project_id=brief.project_id,
+            )
+            if accepted and self._artifact_derivation_status(accepted) == "accepted" and brief.derivation_status != "accepted":
+                # A local heuristic is an availability aid, never authority to
+                # replace an owner-approved project home brief.
+                return ArtifactWrite(accepted.id, accepted.revision, False)
             return self._write(
                 db,
                 owner=owner,
@@ -222,6 +229,11 @@ class ContinuityStore:
             session = self._session(db, owner, session_id)
             if (session.scope_kind or "general") != "personal":
                 raise ScopeConflictError("personal brief requires a Personal Advisor session")
+            accepted = self._preferred_brief_artifact(
+                db, owner=owner, kind="personal_brief_v1", session_id=session_id,
+            )
+            if accepted and self._artifact_derivation_status(accepted) == "accepted" and brief.derivation_status != "accepted":
+                return ArtifactWrite(accepted.id, accepted.revision, False)
             return self._write(db, owner=owner, kind="personal_brief_v1", session_id=session_id,
                                project_id=None, payload=brief.to_payload(),
                                source_through_message_id=source_through_message_id, source_hash=source_hash)
@@ -357,11 +369,23 @@ class ContinuityStore:
         return ThreadCheckpointV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
     def latest_project_brief(self, *, owner: str, project_id: str) -> Optional[ProjectBriefV1]:
-        artifact = self._latest(owner=owner, kind="project_brief_v1", project_id=project_id)
+        db = SessionLocal()
+        try:
+            artifact = self._preferred_brief_artifact(
+                db, owner=owner, kind="project_brief_v1", project_id=project_id,
+            )
+        finally:
+            db.close()
         return ProjectBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
     def latest_personal_brief(self, *, owner: str, session_id: str) -> Optional[PersonalBriefV1]:
-        artifact = self._latest(owner=owner, kind="personal_brief_v1", session_id=session_id)
+        db = SessionLocal()
+        try:
+            artifact = self._preferred_brief_artifact(
+                db, owner=owner, kind="personal_brief_v1", session_id=session_id,
+            )
+        finally:
+            db.close()
         return PersonalBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
     def latest_artifact_manifest(
@@ -373,9 +397,18 @@ class ContinuityStore:
         project_id: Optional[str] = None,
     ) -> Optional[dict[str, object]]:
         """Return safe provenance for one active artifact, never its content."""
-        artifact = self._latest(
-            owner=owner, kind=kind, session_id=session_id, project_id=project_id,
-        )
+        if kind in {"project_brief_v1", "personal_brief_v1"}:
+            db = SessionLocal()
+            try:
+                artifact = self._preferred_brief_artifact(
+                    db, owner=owner, kind=kind, session_id=session_id, project_id=project_id,
+                )
+            finally:
+                db.close()
+        else:
+            artifact = self._latest(
+                owner=owner, kind=kind, session_id=session_id, project_id=project_id,
+            )
         if artifact is None:
             return None
         try:
@@ -571,13 +604,46 @@ class ContinuityStore:
         return list(dict.fromkeys([*existing, *incoming]))[:30]
 
     def _active_brief(self, db, *, owner: str, kind: str, session_id: Optional[str] = None, project_id: Optional[str] = None):
+        return self._preferred_brief_artifact(
+            db, owner=owner, kind=kind, session_id=session_id, project_id=project_id,
+        )
+
+    @staticmethod
+    def _artifact_derivation_status(artifact: ContinuityArtifact) -> str:
+        try:
+            payload = json.loads(artifact.payload_json)
+            return str(payload.get("derivation_status") or "legacy_unclassified")
+        except (TypeError, json.JSONDecodeError, AttributeError):
+            return "legacy_unclassified"
+
+    def _preferred_brief_artifact(
+        self,
+        db,
+        *,
+        owner: str,
+        kind: str,
+        session_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+    ) -> Optional[ContinuityArtifact]:
+        """Prefer accepted home state, including records superseded by C0 bugs.
+
+        A brief is special: an owner promotion establishes home state while a
+        heuristic checkpoint is only a convenience view. Older releases let
+        the latter supersede the former. Reading the newest accepted revision
+        repairs that presentation safely without rewriting raw history.
+        """
+        if bool(session_id) == bool(project_id):
+            raise ValueError("exactly one artifact scope is required")
         query = db.query(ContinuityArtifact).filter(
             ContinuityArtifact.owner == owner,
             ContinuityArtifact.kind == kind,
-            ContinuityArtifact.status == "active",
         )
         query = query.filter(ContinuityArtifact.session_id == session_id) if session_id else query.filter(ContinuityArtifact.project_id == project_id)
-        return query.order_by(ContinuityArtifact.revision.desc()).first()
+        rows = query.order_by(ContinuityArtifact.revision.desc()).all()
+        active = next((row for row in rows if row.status == "active"), None)
+        if active and self._artifact_derivation_status(active) == "accepted":
+            return active
+        return next((row for row in rows if self._artifact_derivation_status(row) == "accepted"), active)
 
     def _promote_project_brief(self, db, *, owner: str, proposal: SemanticCheckpointProposalV1, selected: dict[str, list[str]]) -> ProjectBriefV1:
         prior_row = self._active_brief(db, owner=owner, kind="project_brief_v1", project_id=proposal.project_id)

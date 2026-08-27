@@ -103,6 +103,11 @@ or a stable failure code without storing provider output. The remaining C1
 operational gate is a configured-provider canary. Continuation proof is Stage
 C2.
 
+C2 additionally enforces the non-negotiable authority boundary: a newly
+derived heuristic checkpoint cannot replace an owner-promoted project or
+Personal brief. The reader prefers the latest accepted brief if historical
+heuristic rows already superseded it.
+
 ### Stage C2 — Prove durable continuation
 
 **Outcome:** a fresh worker and a project fork continue from source-linked
