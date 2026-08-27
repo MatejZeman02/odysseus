@@ -95,6 +95,11 @@ def legacy_tool_denied_for_scope(tool_name: str, scope_kind: str) -> bool:
     normalized = str(tool_name or "").strip().casefold()
     if normalized in _COMPANION_LEGACY_DENIED_TOOLS:
         return True
+    # Do not rely on MCP namespacing. A future integration may register one
+    # of the same global-memory actions directly; it has no Companion scope
+    # contract until a purpose-built adapter exists.
+    if normalized in _COMPANION_LEGACY_MEMORY_MCP_ACTIONS or normalized in _COMPANION_LEGACY_MEMORY_MCP_VERBS:
+        return True
     if not normalized.startswith("mcp__"):
         return False
     # ``split`` rather than a positional server-id assumption: installed MCP

@@ -544,12 +544,15 @@ async def test_executor_backstop_denies_dynamic_legacy_memory_mcp_tool(monkeypat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", [
+    "memory_save",
+    "memory_search",
+    "remember",
     "mcp__new_agentmemory_server__memory_archive",
     "mcp__new_agentmemory_server__remember",
     "mcp__new_agentmemory_server__recall",
 ])
-async def test_executor_backstop_fails_closed_for_unlisted_legacy_memory_mcp_tools(monkeypatch, tool_name):
-    """A new AgentMemory action must not bypass Companion scope by its name."""
+async def test_executor_backstop_fails_closed_for_unscoped_legacy_memory_tools(monkeypatch, tool_name):
+    """Neither direct nor dynamically-namespaced memory can bypass scope."""
     from collections import namedtuple
     import src.tool_execution as tool_execution
 
@@ -636,6 +639,30 @@ def test_companion_prompt_filters_unlisted_legacy_memory_mcp_schemas():
 
     assert "mcp__agentmemory__memory_archive" not in names
     assert "mcp__agentmemory__remember" not in names
+    assert "mcp__calendar__list_events" in names
+
+
+def test_companion_prompt_filters_direct_legacy_memory_schemas():
+    """A future direct AgentMemory registration is no safer than an MCP one."""
+    from src.agent_loop import _build_system_prompt
+
+    class FakeMcp:
+        def get_all_openai_schemas(self, _disabled):
+            return [
+                {"type": "function", "function": {"name": "memory_save"}},
+                {"type": "function", "function": {"name": "remember"}},
+                {"type": "function", "function": {"name": "mcp__calendar__list_events"}},
+            ]
+
+    _messages, schemas = _build_system_prompt(
+        [{"role": "user", "content": "help me"}],
+        model="test-model", active_document=None, mcp_mgr=FakeMcp(),
+        suppress_skills=True, companion_scope=True,
+    )
+    names = {schema["function"]["name"] for schema in schemas}
+
+    assert "memory_save" not in names
+    assert "remember" not in names
     assert "mcp__calendar__list_events" in names
 
 
