@@ -27,11 +27,12 @@ from core.constants import DATA_DIR
 _DIGEST_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 # Bump whenever the qualification contract gets a materially stronger gate so
 # an old report can never authorize a newer execution profile.
-_REPORT_VERSION = 3
+_REPORT_VERSION = 4
 _REPORT_PATH = Path(DATA_DIR) / "computer_sandbox_qualification.json"
 _REQUIRED_FINAL_CHECKS = frozenset({
     "rootless_podman", "read_only_input", "private_writable_task", "network_none",
-    "socket_absence", "host_path_absence", "resource_limits", "descendant_cleanup",
+    "socket_absence", "host_path_absence", "resource_limits", "command_inventory",
+    "descendant_cleanup",
 })
 _MAX_PROBE_OUTPUT = 16 * 1024
 
@@ -431,6 +432,7 @@ def qualify_containment() -> dict:
             script = f"""
               test -r /inputs/sentinel.txt; test ! -w /inputs/sentinel.txt
               find /inputs -maxdepth 1 -name sentinel.txt -print | grep -qx /inputs/sentinel.txt
+              for tool in {' '.join(sorted(_READ_ONLY_COMMANDS))}; do command -v "$tool" >/dev/null; done
               test -w /task; test -w /tmp
               test ! -e /run/user/$(id -u)/podman/podman.sock
               test ! -e /var/run/docker.sock; test ! -e /host-home
@@ -448,7 +450,7 @@ def qualify_containment() -> dict:
                 raise SandboxQualificationError("The command container did not satisfy the containment fixture.")
             checks.extend([
                 "read_only_input", "private_writable_task", "network_none", "socket_absence",
-                "host_path_absence", "resource_limits",
+                "host_path_absence", "resource_limits", "command_inventory",
             ])
             # `--rm` must also remove a background descendant container. The
             # shell exits while a child is sleeping; after the client returns
