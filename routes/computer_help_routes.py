@@ -320,9 +320,24 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
                 raise HTTPException(409, "Task root changed; reload before removing it")
             if row.status != "active":
                 raise HTTPException(409, "Task root is no longer active")
-            row.status, row.revision, row.updated_at = "retired", row.revision + 1, utcnow_naive()
+            # Recheck the revision in the update itself.  Two stale browser
+            # actions can otherwise both read ``active`` and incorrectly
+            # report that they retired the same root.
+            updated = db.query(ComputerTaskRoot).filter(
+                ComputerTaskRoot.id == task_root_id,
+                ComputerTaskRoot.owner == owner,
+                ComputerTaskRoot.status == "active",
+                ComputerTaskRoot.revision == payload.expected_revision,
+            ).update({
+                ComputerTaskRoot.status: "retired",
+                ComputerTaskRoot.revision: ComputerTaskRoot.revision + 1,
+                ComputerTaskRoot.updated_at: utcnow_naive(),
+            }, synchronize_session=False)
+            if updated != 1:
+                db.rollback()
+                raise HTTPException(409, "Task root changed; reload before removing it")
             db.commit()
-            return {"retired": True, "id": task_root_id, "revision": row.revision}
+            return {"retired": True, "id": task_root_id, "revision": payload.expected_revision + 1}
         except HTTPException:
             db.rollback(); raise
         except Exception as exc:

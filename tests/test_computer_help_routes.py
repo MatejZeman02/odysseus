@@ -153,3 +153,44 @@ def test_task_root_duplicate_insert_race_returns_a_conflict(monkeypatch, tmp_pat
         ), SimpleNamespace())
     assert conflict.value.status_code == 409
     assert "already exists" in str(conflict.value.detail)
+
+
+def test_task_root_retire_uses_an_atomic_expected_revision_check(monkeypatch, tmp_path):
+    router, task_dir, _local = _task_root_router(monkeypatch, tmp_path)
+    retire = _endpoint(router, "/api/companion/computer/task-roots/{task_root_id}", "DELETE")
+
+    class _SessionQuery:
+        def __init__(self, row):
+            self._row = row
+        def filter(self, *_args):
+            return self
+        def first(self):
+            return self._row
+
+    class _RootQuery(_SessionQuery):
+        def __init__(self):
+            super().__init__(SimpleNamespace(id="root", owner="alice", status="active", revision=1))
+        def update(self, *_args, **_kwargs):
+            return 0
+
+    class _RacingSession:
+        def __init__(self):
+            self.rolled_back = False
+        def query(self, model):
+            if model is DbSession:
+                return _SessionQuery(SimpleNamespace(scope_kind="computer"))
+            return _RootQuery()
+        def rollback(self):
+            self.rolled_back = True
+        def close(self):
+            pass
+
+    session = _RacingSession()
+    monkeypatch.setattr(route_module, "SessionLocal", lambda: session)
+    with pytest.raises(HTTPException) as conflict:
+        retire("root", route_module.TaskRootRetire(
+            session_id="computer", expected_revision=1,
+        ), SimpleNamespace())
+    assert conflict.value.status_code == 409
+    assert session.rolled_back is True
+    assert task_dir.is_dir()
