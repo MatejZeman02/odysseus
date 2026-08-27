@@ -33,15 +33,21 @@ The intended experience is closer to Codex than a command-confirmation loop:
 
 G2D-0/1 are complete: Odysseus has a server-owned safe diagnostic snapshot and
 a qualified rootless-Podman, command-only read broker. G2D-2 private incident
-records and its basic UI are also present. These capabilities remain
-read-only/contained and do not grant native host shell access.
+records and its basic UI are also present. The first D3 configuration primitive
+is now present: Computer Help can register owner-selected, dedicated directories
+as encrypted task-root records. Registration validates an existing current-user
+folder under the home directory, rejects broad/protected credential locations,
+returns no absolute path to the browser, and neither creates files nor enables
+execution. These capabilities remain read-only/contained and do not grant
+native host shell access.
 
 The next Computer Help stage is intentionally **after G2C C1/C2**. A task plan,
 incident summary, completed-step record, and escalation TODO must be backed by
 validated, attributed semantic state—not the current heuristic checkpoint.
 After that dependency passes, implement in order:
 
-1. server-owned task roots and bounded task artifacts;
+1. server-owned task roots and bounded task artifacts; **the non-executable
+   task-root registry is implemented; task admission must revalidate it**;
 2. scratch-only command execution plus deterministic process/output limits;
 3. separately qualified filtered egress for public repositories, package
    indexes, and user-requested downloads;

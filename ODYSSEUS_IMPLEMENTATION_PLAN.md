@@ -922,6 +922,8 @@ memory stores, changing a writer, or migrating memory data.
 
 - [x] Add captured safe diagnostic snapshots/private incident records and a
   separately qualified command-only Podman read broker.
+- [x] Add private owner-selected task-root records that validate dedicated
+  home folders without creating files or enabling execution.
 - [x] Keep project and Personal context absent unless explicitly admitted.
 - [ ] After C1/C2, add owner-selected task roots, scratch execution, filtered
   egress, reversible transaction journals, and bounded Approve-for-me mode.

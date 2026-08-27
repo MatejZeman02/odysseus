@@ -189,7 +189,94 @@ async function openChatCapabilities(meta) {
     };
     row.append(label, detail, button); content.append(row);
   }
+  if (meta.scope_kind === 'computer') {
+    const taskRoots = document.createElement('button');
+    taskRoots.type = 'button'; taskRoots.className = 'companion-task-roots-button';
+    taskRoots.textContent = 'Manage task roots';
+    taskRoots.title = 'Prepare dedicated folders for a future contained Computer Help task';
+    taskRoots.onclick = () => { modal.remove(); openComputerTaskRoots(meta); };
+    content.append(taskRoots);
+  }
   modal.append(content); document.body.appendChild(modal);
+}
+
+async function openComputerTaskRoots(meta) {
+  if (!meta?.id || meta.scope_kind !== 'computer') return;
+  let payload;
+  try {
+    const response = await fetch(`/api/companion/computer/task-roots?session_id=${encodeURIComponent(meta.id)}`, {
+      credentials: 'same-origin', cache: 'no-store',
+    });
+    payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || 'Could not load task roots');
+  } catch (error) {
+    uiModule.showError?.(error.message || 'Could not load task roots'); return;
+  }
+  document.getElementById('computer-task-roots-modal')?.remove();
+  const modal = document.createElement('div'); modal.id = 'computer-task-roots-modal'; modal.className = 'modal';
+  const content = document.createElement('div'); content.className = 'modal-content companion-memory-modal';
+  content.setAttribute('role', 'dialog'); content.setAttribute('aria-modal', 'true');
+  const header = document.createElement('div'); header.className = 'modal-header';
+  const title = document.createElement('h4'); title.textContent = 'Computer Help task roots';
+  const close = document.createElement('button'); close.type = 'button'; close.className = 'close-btn'; close.setAttribute('aria-label', 'Close'); close.textContent = '✖';
+  close.onclick = () => modal.remove(); header.append(title, close); content.append(header);
+  const intro = document.createElement('p'); intro.className = 'companion-memory-help';
+  intro.textContent = payload.notice || 'Task roots are dedicated folders prepared for contained Computer Help work.';
+  content.append(intro);
+  if (!payload.execution_ready) {
+    const disabled = document.createElement('p'); disabled.className = 'companion-memory-help';
+    disabled.textContent = 'Contained execution is not ready yet. Saving a root will not create files, run commands, or grant filesystem access.';
+    content.append(disabled);
+  }
+  const roots = Array.isArray(payload.task_roots) ? payload.task_roots : [];
+  const list = document.createElement('div'); list.className = 'companion-task-root-list';
+  if (!roots.length) {
+    const empty = document.createElement('p'); empty.className = 'companion-memory-help'; empty.textContent = 'No dedicated task folder is registered.'; list.append(empty);
+  }
+  roots.forEach((root) => {
+    const row = document.createElement('div'); row.className = 'companion-grant-card';
+    const label = document.createElement('strong'); label.textContent = root.label || 'Task root';
+    const detail = document.createElement('span'); detail.textContent = `Folder: ${root.directory_name || 'selected folder'}`;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+    remove.onclick = async () => {
+      if (!window.confirm(`Remove the task-root record “${root.label || 'Task root'}”? The folder and its files will not be touched.`)) return;
+      remove.disabled = true;
+      try {
+        const response = await fetch(`/api/companion/computer/task-roots/${encodeURIComponent(root.id)}`, {
+          method: 'DELETE', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({session_id: meta.id, expected_revision: Number(root.revision)}),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.detail || 'Could not remove task root');
+        modal.remove(); openComputerTaskRoots(meta);
+      } catch (error) {
+        uiModule.showError?.(error.message || 'Could not remove task root'); remove.disabled = false;
+      }
+    };
+    row.append(label, detail, remove); list.append(row);
+  });
+  content.append(list);
+  const form = document.createElement('form'); form.className = 'companion-task-root-form';
+  const labelInput = document.createElement('input'); labelInput.required = true; labelInput.maxLength = 100; labelInput.placeholder = 'Label, for example Music downloads'; labelInput.setAttribute('aria-label', 'Task root label');
+  const pathInput = document.createElement('input'); pathInput.required = true; pathInput.maxLength = 4096; pathInput.placeholder = 'Existing dedicated folder inside your home'; pathInput.setAttribute('aria-label', 'Task root folder');
+  const save = document.createElement('button'); save.type = 'submit'; save.textContent = 'Save task root';
+  form.append(labelInput, pathInput, save);
+  form.onsubmit = async (event) => {
+    event.preventDefault(); save.disabled = true;
+    try {
+      const response = await fetch('/api/companion/computer/task-roots', {
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({session_id: meta.id, label: labelInput.value, path: pathInput.value}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || 'Could not save task root');
+      uiModule.showToast?.(result.notice || 'Task root saved.', 3000);
+      modal.remove(); openComputerTaskRoots(meta);
+    } catch (error) {
+      uiModule.showError?.(error.message || 'Could not save task root'); save.disabled = false;
+    }
+  };
+  content.append(form); modal.append(content); document.body.append(modal);
 }
 
 window.addEventListener('odysseus:tool-toggle', (event) => {

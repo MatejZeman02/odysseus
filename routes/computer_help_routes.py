@@ -1,12 +1,16 @@
 """G2D-1 Computer Help routes: safe host observations, not host execution."""
 from __future__ import annotations
 
+import os
+import stat
 import time
+import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.database import Session as DbSession, SessionLocal
+from core.database import ComputerTaskRoot, Session as DbSession, SessionLocal, utcnow_naive
 from core.models import ChatMessage
 from routes.g1_continuity_routes import _owner
 from src.companion_capabilities import SYSTEM_OBSERVE, normalize
@@ -19,6 +23,25 @@ class ObserveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str = Field(min_length=1, max_length=128)
     categories: list[str] = Field(default_factory=list, max_length=5)
+
+
+class TaskRootCreate(BaseModel):
+    """Browser requests a label/path; the server owns validation and storage."""
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1, max_length=100)
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class TaskRootRetire(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=128)
+    expected_revision: int = Field(ge=1)
+
+
+_TASK_ROOT_DENIED_NAMES = frozenset({
+    ".aws", ".config", ".docker", ".gnupg", ".kube", ".pki", ".ssh", ".password-store",
+})
 
 
 def _observation_session(owner: str, session_id: str) -> str:
@@ -41,6 +64,57 @@ def _observation_session(owner: str, session_id: str) -> str:
         return scope_kind
     finally:
         db.close()
+
+
+def _computer_session(owner: str, session_id: str) -> None:
+    """Keep root registration bound to the owner's Computer Help home."""
+    db = SessionLocal()
+    try:
+        row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
+        if not row:
+            raise HTTPException(404, "Computer Help session was not found")
+        if (row.scope_kind or "general") != "computer":
+            raise HTTPException(409, "Task roots can be managed only from Computer Help")
+    finally:
+        db.close()
+
+
+def _safe_task_root(path: str) -> Path:
+    """Resolve a user-owned, dedicated directory without creating it.
+
+    The task executor is intentionally not implemented here.  Its future use
+    must repeat this validation and reject symlink changes, so this registry
+    can never turn a stale path into a persistent authority grant.
+    """
+    raw = Path(str(path or "").strip()).expanduser()
+    if not raw.is_absolute() or raw.is_symlink():
+        raise ValueError("Choose an existing dedicated folder inside your home directory")
+    try:
+        resolved = raw.resolve(strict=True)
+        home = Path.home().resolve(strict=True)
+        relative = resolved.relative_to(home)
+        metadata = resolved.stat()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError("Choose an existing dedicated folder inside your home directory") from exc
+    if relative == Path(".") or not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("Choose an existing dedicated folder inside your home directory")
+    if any(part in _TASK_ROOT_DENIED_NAMES for part in relative.parts):
+        raise ValueError("Choose a task folder outside protected credential and configuration directories")
+    current_uid = getattr(os, "getuid", lambda: None)()
+    if current_uid is not None and metadata.st_uid != current_uid:
+        raise ValueError("Choose a folder owned by the current desktop user")
+    return resolved
+
+
+def _task_root_payload(row: ComputerTaskRoot) -> dict:
+    """Never return an absolute host path to the browser."""
+    return {
+        "id": row.id,
+        "label": row.label,
+        "directory_name": Path(str(row.root_path)).name,
+        "revision": row.revision,
+        "status": row.status,
+    }
 
 
 def _observation_message(observations: list[dict]) -> tuple[str, dict]:
@@ -132,5 +206,84 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
         except SandboxQualificationError as exc:
             raise HTTPException(409, str(exc)) from exc
         return result
+
+    @router.get("/task-roots")
+    def list_task_roots(session_id: str, request: Request):
+        owner = _owner(request)
+        _computer_session(owner, session_id)
+        db = SessionLocal()
+        try:
+            rows = db.query(ComputerTaskRoot).filter(
+                ComputerTaskRoot.owner == owner,
+                ComputerTaskRoot.status == "active",
+            ).order_by(ComputerTaskRoot.created_at.asc()).all()
+            return {
+                "task_roots": [_task_root_payload(row) for row in rows],
+                "execution_ready": readiness().qualified,
+                "notice": "Registering a task root does not create files or enable command execution.",
+            }
+        finally:
+            db.close()
+
+    @router.post("/task-roots")
+    def create_task_root(payload: TaskRootCreate, request: Request):
+        owner = _owner(request)
+        _computer_session(owner, payload.session_id)
+        try:
+            root = _safe_task_root(payload.path)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        label = " ".join(payload.label.split())
+        if not label:
+            raise HTTPException(422, "Give this task folder a label")
+        db = SessionLocal()
+        try:
+            existing = db.query(ComputerTaskRoot).filter(
+                ComputerTaskRoot.owner == owner, ComputerTaskRoot.label == label,
+            ).first()
+            if existing:
+                raise HTTPException(409, "A task root with that label already exists")
+            row = ComputerTaskRoot(
+                id=str(uuid.uuid4()), owner=owner, label=label, root_path=str(root),
+                status="active", revision=1,
+            )
+            db.add(row); db.commit(); db.refresh(row)
+            return {
+                "task_root": _task_root_payload(row),
+                "notice": "Task root saved. It is not yet an execution permission.",
+            }
+        except HTTPException:
+            db.rollback(); raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(503, "Task root could not be saved safely") from exc
+        finally:
+            db.close()
+
+    @router.delete("/task-roots/{task_root_id}")
+    def retire_task_root(task_root_id: str, payload: TaskRootRetire, request: Request):
+        owner = _owner(request)
+        _computer_session(owner, payload.session_id)
+        db = SessionLocal()
+        try:
+            row = db.query(ComputerTaskRoot).filter(
+                ComputerTaskRoot.id == task_root_id, ComputerTaskRoot.owner == owner,
+            ).first()
+            if not row:
+                raise HTTPException(404, "Task root was not found")
+            if row.revision != payload.expected_revision:
+                raise HTTPException(409, "Task root changed; reload before removing it")
+            if row.status != "active":
+                raise HTTPException(409, "Task root is no longer active")
+            row.status, row.revision, row.updated_at = "retired", row.revision + 1, utcnow_naive()
+            db.commit()
+            return {"retired": True, "id": task_root_id, "revision": row.revision}
+        except HTTPException:
+            db.rollback(); raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(503, "Task root could not be removed safely") from exc
+        finally:
+            db.close()
 
     return router

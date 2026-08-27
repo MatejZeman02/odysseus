@@ -429,6 +429,30 @@ class LegacyMemoryMigrationReview(TimestampMixin, Base):
         Index("ix_legacy_memory_migration_review_owner_status", "owner", "status"),
     )
 
+
+class ComputerTaskRoot(TimestampMixin, Base):
+    """One owner-selected future Computer Help write boundary.
+
+    Registering a root neither creates nor modifies a filesystem path.  The
+    encrypted resolved path is intentionally server-only: current UI/API
+    payloads expose just the owner label and final directory name.  A later
+    transaction broker must revalidate this record at use time; it is never a
+    blanket filesystem grant.
+    """
+    __tablename__ = "computer_task_roots"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=False, index=True)
+    label = Column(String, nullable=False)
+    root_path = Column(EncryptedText, nullable=False)
+    status = Column(String, nullable=False, default="active", index=True)
+    revision = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        Index("ix_computer_task_roots_owner_label", "owner", "label", unique=True),
+        Index("ix_computer_task_roots_owner_status", "owner", "status"),
+    )
+
 class ChatMessage(Base):
     """
     SQLAlchemy model for ChatMessage table.
