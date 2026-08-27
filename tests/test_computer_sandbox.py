@@ -56,6 +56,35 @@ def test_readiness_requires_a_qualified_command_inventory(monkeypatch, tmp_path)
     assert state.reason == "containment_probe_incomplete"
 
 
+def test_qualification_fixture_requires_every_advertised_command(monkeypatch, tmp_path):
+    image = "example.invalid/sandbox@sha256:" + "a" * 64
+    captured_scripts = []
+    reports = []
+    monkeypatch.setattr(
+        computer_sandbox, "readiness",
+        lambda: computer_sandbox.ComputerSandboxReadiness(True, True, True, False, "probe_required"),
+    )
+    monkeypatch.setattr(computer_sandbox, "_image", lambda: image)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: True)
+    monkeypatch.setattr(computer_sandbox, "_container_exists", lambda _name: False)
+    monkeypatch.setattr(computer_sandbox, "_store_report", reports.append)
+
+    def fake_run_bounded(command, **_kwargs):
+        captured_scripts.append(command[-1])
+        return computer_sandbox._BoundedRun(0, "qualified" if len(captured_scripts) == 1 else "cleanup", "")
+
+    monkeypatch.setattr(computer_sandbox, "_run_bounded", fake_run_bounded)
+
+    result = computer_sandbox.qualify_containment()
+
+    assert result["passed"] is True
+    assert "command_inventory" in result["checks"]
+    assert len(captured_scripts) == 2
+    for command in computer_sandbox._READ_ONLY_COMMANDS:
+        assert command in captured_scripts[0]
+    assert reports[-1]["complete"] is True
+
+
 def test_readiness_revokes_a_historic_report_when_podman_is_no_longer_rootless(monkeypatch, tmp_path):
     image = "example.invalid/sandbox@sha256:" + "a" * 64
     report = tmp_path / "qualification.json"
