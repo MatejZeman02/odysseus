@@ -9,11 +9,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import Project, Session as DbSession, SessionLocal
+from core.database import ChatMessage as DbMessage, Project, Session as DbSession, SessionLocal
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
-from src.continuity.contracts import PersonalBriefV1
-from src.continuity.store import ContinuityStore
+from src.continuity.contracts import ContractError, PersonalBriefV1
+from src.continuity.semantic_proposals import bounded_source, derivation_messages, parse_semantic_proposal
+from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictError
+from src.endpoint_resolver import resolve_endpoint_by_id
+from src.llm_core import llm_call_async
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,12 @@ class PersonalBriefWrite(BaseModel):
     artifact_refs: list[str] = Field(default_factory=list, max_length=30)
 
 
+class SemanticProposalPromotion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    selections: dict[str, list[int]] = Field(min_length=1, max_length=8)
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, ArtifactConflict):
         return HTTPException(409, str(exc))
@@ -101,11 +110,13 @@ def setup_companion_memory_routes() -> APIRouter:
             checkpoint = store.latest_thread_checkpoint(owner=owner, session_id=session_id)
             project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
             personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
+            proposal = store.latest_semantic_proposal(owner=owner, session_id=session_id)
             return {
                 "scope_kind": scope_kind, "project_id": project_id,
                 "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
                 "project_brief": project_brief.to_payload() if project_brief else None,
                 "personal_brief": personal_brief.to_payload() if personal_brief else None,
+                "semantic_proposal": proposal.to_payload() if proposal else None,
                 "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
                 "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
                 "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
@@ -125,6 +136,94 @@ def setup_companion_memory_routes() -> APIRouter:
                 500,
                 "Companion memory could not be loaded. Check the server log for details.",
             ) from exc
+
+    @router.post("/memory/sessions/{session_id}/semantic-proposals")
+    async def create_semantic_proposal(session_id: str, request: Request):
+        """Derive one bounded, tool-free proposal from an owner session."""
+        owner = _owner(request)
+        db = SessionLocal()
+        try:
+            session = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
+            if not session:
+                raise HTTPException(404, "Companion session was not found")
+            scope_kind = session.scope_kind or "general"
+            if scope_kind not in {"personal", "project"}:
+                raise HTTPException(409, "Semantic proposals are available only for Personal and project homes")
+            endpoint_id = str(session.endpoint_id or "")
+            model = str(session.model or "")
+            if not endpoint_id or not model:
+                raise HTTPException(409, "Select a registered model before creating a semantic proposal")
+            rows = db.query(DbMessage).filter(DbMessage.session_id == session_id).order_by(
+                DbMessage.timestamp.asc(), DbMessage.id.asc()
+            ).all()
+            source = bounded_source([
+                {"id": row.id, "role": row.role, "content": row.content}
+                for row in rows
+            ])
+            source_ids = [item["id"] for item in source]
+            source_hash = ContinuityStore._source_message_hash(db, session_id=session_id, source_ids=source_ids)
+            if not source_hash:
+                raise HTTPException(409, "The selected source messages are no longer available")
+            project_id = session.project_id
+        except ContractError as exc:
+            raise HTTPException(422, "This conversation does not contain a bounded source span for a semantic proposal") from exc
+        finally:
+            db.close()
+
+        route = resolve_endpoint_by_id(endpoint_id, model=model, owner=owner, require_exact_model=True)
+        if not route:
+            raise HTTPException(409, "The selected model route is unavailable; choose a registered model and try again")
+        url, resolved_model, headers = route
+        try:
+            response = await llm_call_async(
+                url, resolved_model, derivation_messages(source), temperature=0, max_tokens=3_000,
+                headers=headers, timeout=90, max_retries=0, session_id=session_id,
+                workload="foreground",
+            )
+            proposal = parse_semantic_proposal(
+                response, session_id=session_id, scope_kind=scope_kind, project_id=project_id,
+                source_message_ids=source_ids, source_hash=source_hash, derivation_model=resolved_model,
+            )
+            result = ContinuityStore().write_semantic_proposal(owner=owner, proposal=proposal)
+        except ContractError as exc:
+            logger.info("Semantic proposal validation failed for session %s: %s", session_id, exc)
+            raise HTTPException(422, "The selected model did not return a valid semantic proposal. No memory was changed.") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Semantic proposal derivation failed for session %s", session_id)
+            raise HTTPException(502, "The selected model could not create a semantic proposal. No memory was changed.") from exc
+        return {"id": result.id, "revision": result.revision, "status": "proposed", "proposal": proposal.to_payload()}
+
+    @router.get("/memory/semantic-proposals/{proposal_id}")
+    def read_semantic_proposal(proposal_id: str, request: Request):
+        try:
+            record = ContinuityStore().semantic_proposal(owner=_owner(request), proposal_id=proposal_id)
+            return {"id": record.id, "revision": record.revision, "status": record.status, "proposal": record.proposal.to_payload()}
+        except NotFoundError as exc:
+            raise HTTPException(404, "Semantic proposal was not found") from exc
+
+    @router.post("/memory/semantic-proposals/{proposal_id}/promote")
+    def promote_semantic_proposal(proposal_id: str, payload: SemanticProposalPromotion, request: Request):
+        try:
+            record, write, brief = ContinuityStore().promote_semantic_proposal(
+                owner=_owner(request), proposal_id=proposal_id,
+                expected_revision=payload.expected_revision, selections=payload.selections,
+            )
+            return {
+                "proposal": {"id": record.id, "revision": record.revision, "status": record.status},
+                "brief": brief.to_payload(),
+                "brief_revision": write.revision,
+            }
+        except NotFoundError as exc:
+            raise HTTPException(404, "Semantic proposal was not found") from exc
+        except (ContractError, ValueError) as exc:
+            raise HTTPException(422, "The selected proposal entries are invalid") from exc
+        except ScopeConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Semantic proposal promotion failed for %s", proposal_id)
+            raise HTTPException(500, "The semantic proposal could not be promoted. No memory was changed.") from exc
 
     @router.post("/artefacts/personal", include_in_schema=False)
     @router.post("/artifacts/personal")
