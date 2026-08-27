@@ -4652,7 +4652,11 @@ async def stream_agent_loop(
         if _force_answer:
             return []
         if route_state["is_api_model"]:
-            if route_relevant_tools:
+            # ``None`` means no caller-selected policy: retain the legacy
+            # full-tool fallback. An explicit empty set is a deliberate
+            # tool-less policy and must yield no ordinary schemas, not the
+            # full tool catalog.
+            if route_relevant_tools is not None:
                 schema_names = set(route_relevant_tools)
                 if _needs_admin:
                     schema_names |= _ADMIN_TOOLS

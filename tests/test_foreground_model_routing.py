@@ -2826,6 +2826,7 @@ def test_reasoning_only_agent_error_emits_terminal_history(monkeypatch):
 
 def test_toolless_multi_round_agent_persists_round_route_provenance(monkeypatch):
     calls = 0
+    tool_batch_sizes = []
     primary = ("https://selected.example/v1", "selected-model", {})
     backup = ("https://backup.example/v1", "backup-model", {})
     monkeypatch.setattr(agent_loop, "get_setting", lambda key, default=None: default)
@@ -2835,6 +2836,7 @@ def test_toolless_multi_round_agent_persists_round_route_provenance(monkeypatch)
     async def fake_stream(candidates, messages, **kwargs):
         nonlocal calls
         calls += 1
+        tool_batch_sizes.append(len(kwargs.get("tools") or []))
         if calls == 1:
             yield 'data: {"delta": "Let me check that now"}\n\n'
         else:
@@ -2871,6 +2873,7 @@ def test_toolless_multi_round_agent_persists_round_route_provenance(monkeypatch)
     assert metrics["requested_endpoint_id"] == "selected-ep"
     assert metrics["endpoint_cost_tracked"] is True
     assert "tool_events" not in metrics
+    assert tool_batch_sizes == [0, 0]
 
 
 def test_agent_metrics_attribute_usage_to_each_answering_route(monkeypatch):
