@@ -977,7 +977,7 @@ whether those experiments require a snapshot-capable Fedora VM.
 | Milestone | State | Outcome |
 |---|---|---|
 | Continuity storage/compiler | **Complete** | Stable bindings, retained raw history, artifact contracts/store, deterministic context |
-| Semantic continuity derivation | **Partial** | Heuristic checkpoints/briefs are source-linked but not accepted/proposed-state truth; C0/C1 replace them |
+| Semantic continuity derivation | **Implemented; provider canary pending** | Source-linked, schema-validated proposals and owner-selected promotions establish accepted home briefs; the remaining gate is a configured-provider operational canary |
 | Qwen + ModelBridge | **Complete** | Provider-neutral credential boundary, disposable Serve lifecycle, read-only Bubblewrap containment |
 | Protected Dust runtime proof | **Complete** | Cited conflict-aware answers, read-only integrity, fresh-worker raw-tail continuation, and scope isolation |
 | Companion UI trial | **Complete** | Testable homes/projects, Qwen/native comparison, Process visibility, feedback and lifecycle controls |
@@ -1148,5 +1148,5 @@ when a measured MVP failure or accepted next milestone requires them.
   configuration was exposed or changed. No local AgentMemory configuration was
   discovered. Dynamic aggregate counts deliberately remain in the owner-only
   runtime inventory rather than this tracked plan.
-- [ ] Answer the four `[!QUESTION]` callouts above before selecting the next
+- [ ] Answer the three `[!QUESTION]` callouts above before selecting the next
   capability milestone. They do not block ordinary G1.5 stabilization.
