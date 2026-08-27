@@ -229,7 +229,12 @@ def _legacy_background_extraction_allowed(sess, allow_background_extraction: boo
     source-linked semantic *proposal*, but must never feed the legacy global
     extractor merely because an owner enabled auto-memory for ordinary chats.
     """
-    return bool(allow_background_extraction) and getattr(sess, "scope_kind", "general") not in {
+    return bool(allow_background_extraction) and not _is_companion_home(sess)
+
+
+def _is_companion_home(sess) -> bool:
+    """Whether a session has Odysseus-owned scoped continuity authority."""
+    return getattr(sess, "scope_kind", "general") in {
         "personal", "project", "computer",
     }
 
@@ -904,12 +909,19 @@ async def build_chat_context(
     )
     casual_low_signal = _is_casual_low_signal(context_message)
 
-    # Memory enabled?
+    # Memory enabled? Companion homes intentionally assemble context from the
+    # scoped continuity compiler only.  The older native memory/RAG/skills
+    # plumbing has no home/project/grant boundary, so a broad user preference
+    # must never cause it to inject cross-scope material into a Companion turn.
+    companion_home = _is_companion_home(sess)
     mem_enabled = not incognito and not no_memory and uprefs.get("memory_enabled", True)
     # Skills injection respects its own enable toggle (mirrors memory_enabled).
     # When off, the "Available skills" index is not added to the prompt.
     skills_enabled = not incognito and uprefs.get("skills_enabled", True)
     if not allow_tool_preprocessing:
+        mem_enabled = False
+        skills_enabled = False
+    if companion_home:
         mem_enabled = False
         skills_enabled = False
     if casual_low_signal:
@@ -930,7 +942,7 @@ async def build_chat_context(
 
     # Use RAG?
     use_rag_val = (str(use_rag).lower() != "false") if use_rag is not None else True
-    if incognito or not allow_tool_preprocessing or is_research_spinoff or casual_low_signal:
+    if incognito or not allow_tool_preprocessing or is_research_spinoff or casual_low_signal or companion_home:
         use_rag_val = False
 
     # If pre-fetched search context was provided (compare mode), skip live web search
@@ -961,7 +973,7 @@ async def build_chat_context(
         incognito=incognito,
         use_skills=skills_enabled,
     )
-    if use_rag is not None or is_research_spinoff or casual_low_signal:
+    if use_rag is not None or is_research_spinoff or casual_low_signal or companion_home:
         _preface_kwargs["use_rag"] = use_rag_val
     preface, rag_sources, web_sources = chat_processor.build_context_preface(**_preface_kwargs)
 

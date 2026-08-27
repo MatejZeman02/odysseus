@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from routes.chat_helpers import (
     _continuity_context_enabled,
     _continuity_prompt_message,
@@ -53,6 +55,55 @@ def test_personal_turn_does_not_schedule_global_auto_memory(monkeypatch):
     )
 
     assert scheduled == []
+
+
+@pytest.mark.asyncio
+async def test_companion_context_does_not_inject_legacy_memory_rag_or_skills(monkeypatch):
+    """A global preference cannot bypass the Personal/project scope boundary."""
+    import routes.chat_helpers as helpers
+
+    captured = {}
+
+    async def fake_preprocess(_handler, message, _attachments, _session, **_kwargs):
+        return helpers.PreprocessedMessage(
+            enhanced_message=message, user_content=message, text_for_context=message,
+            youtube_transcripts=[], attachment_meta=[],
+        )
+
+    def fake_add_user_message(session, _handler, preprocessed, **_kwargs):
+        session.messages.append({"role": "user", "content": preprocessed.user_content})
+
+    async def fake_maybe_compact(_session, _url, _model, messages, _headers, **_kwargs):
+        return messages, 8192, False
+
+    def fake_preface(**kwargs):
+        captured.update(kwargs)
+        return [], [], []
+
+    monkeypatch.setattr(helpers, "preprocess", fake_preprocess)
+    monkeypatch.setattr(helpers, "extract_preset", lambda *_args, **_kwargs: helpers.PresetInfo(0.7, 1024, None, None))
+    monkeypatch.setattr(helpers, "add_user_message", fake_add_user_message)
+    monkeypatch.setattr(helpers, "effective_user", lambda _request: "alice")
+    monkeypatch.setattr(helpers, "load_prefs_for_user", lambda _owner: {"memory_enabled": True, "skills_enabled": True})
+    monkeypatch.setattr(helpers, "_normalize_model_id_from_cache", lambda _session: None)
+    monkeypatch.setattr(helpers, "normalize_model_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(helpers, "maybe_compact", fake_maybe_compact)
+    monkeypatch.setattr(helpers, "trim_for_context", lambda messages, _limit: messages)
+    monkeypatch.setattr(helpers, "_continuity_enabled_for_session", lambda _session: False)
+
+    session = SimpleNamespace(
+        scope_kind="personal", endpoint_url="http://unused", model="unused", headers={},
+        owner="alice", history=[], messages=[],
+    )
+    session.get_context_messages = lambda: list(session.messages)
+    await helpers.build_chat_context(
+        session, SimpleNamespace(), SimpleNamespace(),
+        SimpleNamespace(build_context_preface=fake_preface), "keep this private", "personal",
+    )
+
+    assert captured["use_memory"] is False
+    assert captured["use_skills"] is False
+    assert captured["use_rag"] is False
 
 
 def test_continuity_prompt_marks_derived_context_without_raw_transcript():
