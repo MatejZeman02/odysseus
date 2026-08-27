@@ -54,6 +54,14 @@ def test_snapshot_includes_nonignored_untracked_files(workspace):
     assert "draft.md" in after.files
 
 
+def test_snapshot_rejects_a_symlinked_workspace_root(workspace, tmp_path):
+    swapped_root = tmp_path / "swapped-workspace"
+    swapped_root.symlink_to(workspace, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="regular directory"):
+        snapshot_workspace(swapped_root)
+
+
 def test_read_only_runner_detects_a_file_mutation(workspace):
     with pytest.raises(WorkspaceMutationError):
         run_read_only(workspace, lambda: (workspace / "note.md").write_text("changed\n"))
