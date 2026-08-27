@@ -368,6 +368,16 @@ fails closed instead of being overwritten. Stage, apply, and rollback advance
 the review through an atomic expected-revision update, so concurrent stale
 requests cannot both change its state.
 
+For entries without trustworthy home provenance, the owner can explicitly
+reveal **one** unresolved, non-duplicate entry in Context and choose the
+Personal Advisor or a deterministic project primary as its destination. The
+reveal is a confirmed action, returns a bounded text preview only for that
+owner, and does not change the review. The assignment sends back only the
+opaque candidate token plus a scope/project choice; the server resolves the
+destination home itself, persists the encrypted mapping with a new revision,
+and revalidates it again at apply time. No bulk default or automatic
+Personal-home fallback exists for unscoped legacy entries.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to

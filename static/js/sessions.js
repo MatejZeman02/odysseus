@@ -437,6 +437,69 @@ async function openCompanionMemory(meta, initialTab = 'context') {
           });
           reviewHistory.append(button);
         }
+        if (
+          Number(review.owner_reviewable_unresolved_count || 0) > 0
+          && ['review_ready', 'assignments_staged'].includes(review.status)
+        ) {
+          const reviewButton = document.createElement('button'); reviewButton.type = 'button';
+          reviewButton.textContent = `Review unresolved entry (${review.owner_reviewable_unresolved_count})`;
+          reviewButton.addEventListener('click', async () => {
+            if (!window.confirm('Reveal one of your unresolved legacy memory entries so you can choose its home?')) return;
+            reviewButton.disabled = true;
+            try {
+              const response = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/reveal-next-unresolved`, {
+                method: 'POST', credentials: 'same-origin', cache: 'no-store',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({expected_revision: Number(review.revision), confirm_reveal_legacy_text: true}),
+              });
+              const revealed = await response.json().catch(() => ({}));
+              if (!response.ok) throw new Error(revealed.detail || 'Could not reveal an unresolved legacy entry');
+              const card = document.createElement('section'); card.className = 'companion-legacy-entry-review';
+              const title = document.createElement('p');
+              title.textContent = `Unresolved legacy entry · ${revealed.category || 'fact'}${revealed.text_truncated ? ' · preview truncated' : ''}`;
+              const text = document.createElement('pre'); text.textContent = String(revealed.text || '');
+              const select = document.createElement('select');
+              const personal = document.createElement('option'); personal.value = 'personal'; personal.textContent = 'Personal Advisor';
+              select.append(personal);
+              (Array.isArray(payload.project_catalog) ? payload.project_catalog : []).forEach(project => {
+                if (!project?.id || !project?.name) return;
+                const option = document.createElement('option'); option.value = `project:${project.id}`; option.textContent = `Project · ${project.name}`;
+                select.append(option);
+              });
+              const assign = document.createElement('button'); assign.type = 'button'; assign.textContent = 'Stage selected home';
+              assign.addEventListener('click', async () => {
+                const selected = String(select.value || '');
+                const [scopeKind, projectId] = selected.split(':', 2);
+                assign.disabled = true;
+                try {
+                  const assignmentResponse = await fetch(`/api/companion/memory/legacy-migration-reviews/${encodeURIComponent(review.review_id)}/stage-owner-assignment`, {
+                    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                      expected_revision: Number(revealed.revision), candidate_token: revealed.candidate_token,
+                      destination_scope_kind: scopeKind,
+                      destination_project_id: scopeKind === 'project' ? projectId : null,
+                    }),
+                  });
+                  const updated = await assignmentResponse.json().catch(() => ({}));
+                  if (!assignmentResponse.ok) throw new Error(updated.detail || 'Could not stage this legacy assignment');
+                  card.remove(); reviewButton.remove();
+                  summary.textContent = `Saved review: ${updated.assignment_staged_count || 0} assignments staged · ${updated.owner_reviewable_unresolved_count || 0} entries still need a chosen home. No migration started.`;
+                  uiModule.showToast?.('Owner-selected home staged. Reopen Context to continue the review or apply migration.', 4800);
+                } catch (error) {
+                  uiModule.showError?.(error.message || 'Could not stage this legacy assignment');
+                  assign.disabled = false;
+                }
+              });
+              card.append(title, text, select, assign);
+              reviewHistory.append(card);
+            } catch (error) {
+              uiModule.showError?.(error.message || 'Could not reveal an unresolved legacy entry');
+              reviewButton.disabled = false;
+            }
+          });
+          reviewHistory.append(reviewButton);
+        }
       })
       .catch(() => {});
   }

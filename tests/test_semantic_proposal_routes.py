@@ -53,7 +53,7 @@ def _setup(monkeypatch):
     db = local_session()
     db.add(DbSession(
         id="session", owner="alice", name="Personal", endpoint_url="http://unused", model="model-a",
-        endpoint_id="endpoint-a", scope_kind="personal",
+        endpoint_id="endpoint-a", scope_kind="personal", is_scope_primary=True,
     ))
     db.add_all([
         DbMessage(id="m1", session_id="session", role="user", content="Please plan the release", meta_data="{}"),
@@ -506,6 +506,7 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
         "assignment_staged_count": 0,
         "assignment_unavailable_count": 0,
         "assignment_unresolved_count": 0,
+        "owner_reviewable_unresolved_count": 1,
         "migration_applied_count": 0,
         "migration_started": False,
     }
@@ -545,12 +546,50 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
         )
     assert stale.value.status_code == 409
 
+    reveal = _endpoint(router, "/api/companion/memory/legacy-migration-reviews/{review_id}/reveal-next-unresolved", "POST")
+    with pytest.raises(HTTPException) as missing_reveal_confirmation:
+        reveal(
+            review_id,
+            route_module.LegacyMigrationRevealNext(
+                expected_revision=2, confirm_reveal_legacy_text=False,
+            ),
+            SimpleNamespace(),
+        )
+    assert missing_reveal_confirmation.value.status_code == 422
+    revealed = reveal(
+        review_id,
+        route_module.LegacyMigrationRevealNext(
+            expected_revision=2, confirm_reveal_legacy_text=True,
+        ),
+        SimpleNamespace(),
+    )
+    assert revealed["text"] == "old note"
+    assert revealed["text_truncated"] is False
+    owner_assignment = _endpoint(
+        router,
+        "/api/companion/memory/legacy-migration-reviews/{review_id}/stage-owner-assignment",
+        "POST",
+    )
+    manual_staged = owner_assignment(
+        review_id,
+        route_module.LegacyMigrationOwnerAssignment(
+            expected_revision=2, candidate_token=revealed["candidate_token"],
+            destination_scope_kind="personal", destination_project_id=None,
+        ),
+        SimpleNamespace(),
+    )
+    assert manual_staged["revision"] == 3
+    assert manual_staged["assignment_staged_count"] == 3
+    assert manual_staged["assignment_unresolved_count"] == 1
+    assert manual_staged["owner_reviewable_unresolved_count"] == 0
+    assert "old note" not in str(manual_staged)
+
     apply = _endpoint(router, "/api/companion/memory/legacy-migration-reviews/{review_id}/apply", "POST")
     with pytest.raises(HTTPException) as missing_confirmation:
         apply(
             review_id,
             route_module.LegacyMigrationApply(
-                expected_revision=2, confirm_additive_local_migration=False,
+                expected_revision=3, confirm_additive_local_migration=False,
             ),
             SimpleNamespace(),
         )
@@ -563,7 +602,7 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
         apply(
             review_id,
             route_module.LegacyMigrationApply(
-                expected_revision=2, confirm_additive_local_migration=True,
+                expected_revision=3, confirm_additive_local_migration=True,
             ),
             SimpleNamespace(),
         )
@@ -578,22 +617,22 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     applied = apply(
         review_id,
         route_module.LegacyMigrationApply(
-            expected_revision=2, confirm_additive_local_migration=True,
+            expected_revision=3, confirm_additive_local_migration=True,
         ),
         SimpleNamespace(),
     )
     assert applied["status"] == "migration_applied"
-    assert applied["revision"] == 3
+    assert applied["revision"] == 4
     assert applied["migration_started"] is True
-    assert applied["migration_applied_count"] == 2
-    assert applied["journal_entry_count"] == 2
+    assert applied["migration_applied_count"] == 3
+    assert applied["journal_entry_count"] == 3
     assert "prefers concise" not in str(applied)
     db = route_module.SessionLocal()
     migrated = db.query(ScopedMemoryRecord).filter(
         ScopedMemoryRecord.owner == "alice",
         ScopedMemoryRecord.source_kind == "legacy_native_migration",
     ).all()
-    assert len(migrated) == 2
+    assert len(migrated) == 3
     assert {record.scope_kind for record in migrated} == {"personal", "project"}
     assert {record.project_id for record in migrated} == {None, "dust"}
     db.close()
@@ -610,14 +649,14 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     with pytest.raises(HTTPException) as rollback_conflict:
         rollback(
             review_id,
-            route_module.LegacyMigrationRollback(expected_revision=3),
+            route_module.LegacyMigrationRollback(expected_revision=4),
             SimpleNamespace(),
         )
     assert rollback_conflict.value.status_code == 409
     db = route_module.SessionLocal()
     assert db.query(ScopedMemoryRecord).filter(
         ScopedMemoryRecord.source_kind == "legacy_native_migration",
-    ).count() == 2
+    ).count() == 3
     personal_record = db.query(ScopedMemoryRecord).filter(
         ScopedMemoryRecord.id == personal_record_id,
     ).one()
@@ -625,13 +664,13 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     db.commit(); db.close()
     rolled_back = rollback(
         review_id,
-        route_module.LegacyMigrationRollback(expected_revision=3),
+        route_module.LegacyMigrationRollback(expected_revision=4),
         SimpleNamespace(),
     )
     assert rolled_back["status"] == "migration_rolled_back"
-    assert rolled_back["revision"] == 4
+    assert rolled_back["revision"] == 5
     assert rolled_back["migration_started"] is False
-    assert rolled_back["journal_entry_count"] == 3
+    assert rolled_back["journal_entry_count"] == 4
     db = route_module.SessionLocal()
     assert db.query(ScopedMemoryRecord).filter(
         ScopedMemoryRecord.source_kind == "legacy_native_migration",

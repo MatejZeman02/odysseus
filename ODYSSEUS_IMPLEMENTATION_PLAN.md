@@ -878,8 +878,9 @@ not exercised by this slice and is deliberately tracked next.
   no legacy entry is read or migrated. A separate explicit action may
   additively copy those exact-home entries into encrypted local scoped recall,
   retaining native memory unchanged and allowing conditional rollback.
-- [ ] After the owner reviews unresolved entries, add any remaining explicit
-  scope choices and only then consider an AgentMemory provider switch.
+- [ ] Decide whether duplicate legacy entries should remain excluded or gain a
+  separately reviewed merge/deduplication flow; only then consider an
+  AgentMemory provider switch.
 
 **Checkpoint G2:** obtain explicit approval before reading the owner's real
 memory stores, changing a writer, or migrating memory data.

@@ -145,6 +145,22 @@ class LegacyMigrationRollback(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class LegacyMigrationRevealNext(BaseModel):
+    """Owner acknowledgement before legacy text is returned to the browser."""
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    confirm_reveal_legacy_text: bool
+
+
+class LegacyMigrationOwnerAssignment(BaseModel):
+    """Assign one explicitly revealed unscoped candidate to a Companion home."""
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+    candidate_token: str = Field(pattern=r"^[a-f0-9]{32}$")
+    destination_scope_kind: str = Field(pattern=r"^(personal|project)$")
+    destination_project_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class ArtifactUndo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=1)
@@ -665,6 +681,161 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             raise ArtifactConflict("This migration review changed; reload it before continuing")
         return refreshed
 
+    def _legacy_review_plan(review: LegacyMemoryMigrationReview) -> dict:
+        try:
+            plan = json.loads(review.plan_json)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("migration review could not be read safely") from exc
+        if not isinstance(plan, dict) or plan.get("schema_version") != 1:
+            raise ValueError("migration review could not be read safely")
+        if not isinstance(plan.get("backup_id"), str) or plan["backup_id"] != review.backup_id:
+            raise ValueError("migration review could not be read safely")
+        if not isinstance(plan.get("candidates"), list):
+            raise ValueError("migration review could not be read safely")
+        return plan
+
+    def _reveal_next_unresolved_legacy_candidate(
+        *, owner: str, review_id: str, expected_revision: int,
+    ) -> dict:
+        """Return one owner-confirmed unresolved entry without changing state."""
+        db = SessionLocal()
+        try:
+            review = _load_legacy_migration_review_for_update(
+                db=db, owner=owner, review_id=review_id,
+            )
+            if review.revision != expected_revision:
+                raise ArtifactConflict("This migration review changed; reload it before reviewing another entry")
+            if review.status not in {"review_ready", "assignments_staged"}:
+                raise MemoryScopeError("This migration review no longer accepts unresolved assignments")
+            plan = _legacy_review_plan(review)
+            candidate = next((item for item in plan["candidates"] if (
+                isinstance(item, dict)
+                and item.get("classification") == "needs_owner_assignment"
+                and item.get("duplicate") is not True
+                and not isinstance(item.get("assignment"), dict)
+            )), None)
+            if not candidate:
+                raise MemoryScopeError("No unresolved non-duplicate legacy entry is available for review")
+            ordinal = candidate.get("ordinal")
+            if not isinstance(ordinal, int) or ordinal < 0:
+                raise ValueError("migration review could not be read safely")
+            entries = _read_legacy_backup(owner=owner, backup_id=review.backup_id)
+            if ordinal >= len(entries):
+                raise ValueError("migration review no longer matches its backup")
+            token, _content = _legacy_candidate_material(
+                backup_id=review.backup_id, ordinal=ordinal, entry=entries[ordinal], owner=owner,
+            )
+            if token != candidate.get("candidate_token"):
+                raise ValueError("migration review no longer matches its backup")
+            raw_text = str(entries[ordinal].get("text") or "")
+            preview_limit = 64 * 1024
+            return {
+                "review_id": review.id,
+                "revision": review.revision,
+                "candidate_token": token,
+                "category": str(candidate.get("category") or "fact")[:64],
+                "text": raw_text[:preview_limit],
+                "text_truncated": len(raw_text) > preview_limit,
+            }
+        finally:
+            db.close()
+
+    def _resolve_owner_assignment_destination(
+        *, db, owner: str, scope_kind: str, project_id: str | None,
+    ) -> DbSession:
+        if scope_kind == "personal":
+            if project_id is not None:
+                raise MemoryScopeError("Personal migration assignments cannot select a project")
+            destination = db.query(DbSession).filter(
+                DbSession.owner == owner,
+                DbSession.scope_kind == "personal",
+                DbSession.is_scope_primary == True,
+            ).first()
+        elif scope_kind == "project" and project_id:
+            destination = db.query(DbSession).filter(
+                DbSession.owner == owner,
+                DbSession.scope_kind == "project",
+                DbSession.project_id == project_id,
+                DbSession.is_scope_primary == True,
+            ).first()
+        else:
+            raise MemoryScopeError("Choose a valid Personal or project destination")
+        if not destination:
+            raise MemoryScopeError("The selected destination home is not available")
+        return destination
+
+    def _stage_owner_selected_assignment(
+        *, owner: str, review_id: str, expected_revision: int,
+        candidate_token: str, destination_scope_kind: str, destination_project_id: str | None,
+    ) -> dict:
+        """Bind one explicitly reviewed unscoped entry to an owner-chosen home."""
+        db = SessionLocal()
+        try:
+            review = _load_legacy_migration_review_for_update(
+                db=db, owner=owner, review_id=review_id,
+            )
+            if review.revision != expected_revision:
+                raise ArtifactConflict("This migration review changed; reload it before assigning this entry")
+            if review.status not in {"review_ready", "assignments_staged"}:
+                raise MemoryScopeError("This migration review no longer accepts unresolved assignments")
+            plan = _legacy_review_plan(review)
+            candidate = next((item for item in plan["candidates"] if (
+                isinstance(item, dict) and item.get("candidate_token") == candidate_token
+            )), None)
+            if (
+                not candidate
+                or candidate.get("classification") != "needs_owner_assignment"
+                or candidate.get("duplicate") is True
+                or isinstance(candidate.get("assignment"), dict)
+            ):
+                raise MemoryScopeError("This legacy entry cannot be assigned")
+            destination = _resolve_owner_assignment_destination(
+                db=db, owner=owner, scope_kind=destination_scope_kind,
+                project_id=destination_project_id,
+            )
+            candidate["assignment"] = {
+                "kind": "owner_selected_home_v1",
+                "scope_kind": destination_scope_kind,
+                "project_id": destination.project_id if destination_scope_kind == "project" else None,
+                "destination_session_id": destination.id,
+            }
+            all_candidates = [item for item in plan["candidates"] if isinstance(item, dict)]
+            staged_count = sum(isinstance(item.get("assignment"), dict) for item in all_candidates)
+            unresolved_count = sum(not isinstance(item.get("assignment"), dict) for item in all_candidates)
+            unavailable_count = sum(
+                item.get("classification") == "eligible" and not isinstance(item.get("assignment"), dict)
+                for item in all_candidates
+            )
+            plan["assignment_summary"] = {
+                "schema_version": 1,
+                "staged_count": staged_count,
+                "unavailable_count": unavailable_count,
+                "unresolved_count": unresolved_count,
+            }
+            try:
+                journal = json.loads(review.journal_json or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ValueError("migration review could not be read safely") from exc
+            if not isinstance(journal, list):
+                raise ValueError("migration review could not be read safely")
+            next_revision = expected_revision + 1
+            journal.append({
+                "kind": "owner_selected_home_assignment_staged",
+                "revision": next_revision,
+                "recorded_at": utcnow_naive().isoformat(),
+            })
+            review = _commit_migration_review(
+                db=db, review=review, expected_revision=expected_revision,
+                status="assignments_staged", plan=plan, journal=journal,
+            )
+            db.commit()
+            return _legacy_migration_review_payload(review)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def _stage_exact_home_assignments(
         *, owner: str, review_id: str, expected_revision: int,
     ) -> dict:
@@ -808,21 +979,42 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 )
                 if token != candidate.get("candidate_token"):
                     raise ValueError("migration review no longer matches its backup")
-                source = sessions.get(assignment.get("source_session_id"))
                 scope_kind = assignment.get("scope_kind")
                 project_id = assignment.get("project_id")
-                valid = (
-                    assignment.get("kind") == "exact_source_home_v1"
-                    and source is not None
-                    and scope_kind in {"personal", "project"}
-                    and (source.scope_kind or "general") == scope_kind
-                    and source.id == candidate.get("source_session_id")
-                    and source.id == assignment.get("source_session_id")
-                    and (
-                        (scope_kind == "personal" and project_id is None)
-                        or (scope_kind == "project" and project_id and source.project_id == project_id)
-                    )
+                assignment_kind = assignment.get("kind")
+                session_key = (
+                    assignment.get("source_session_id")
+                    if assignment_kind == "exact_source_home_v1"
+                    else assignment.get("destination_session_id")
                 )
+                source = sessions.get(session_key) if isinstance(session_key, str) else None
+                valid = False
+                if assignment_kind == "exact_source_home_v1":
+                    valid = (
+                        source is not None
+                        and scope_kind in {"personal", "project"}
+                        and (source.scope_kind or "general") == scope_kind
+                        and source.id == candidate.get("source_session_id")
+                        and source.id == assignment.get("source_session_id")
+                        and (
+                            (scope_kind == "personal" and project_id is None)
+                            or (scope_kind == "project" and project_id and source.project_id == project_id)
+                        )
+                    )
+                elif assignment_kind == "owner_selected_home_v1":
+                    valid = (
+                        candidate.get("classification") == "needs_owner_assignment"
+                        and candidate.get("duplicate") is not True
+                        and source is not None
+                        and scope_kind in {"personal", "project"}
+                        and source.id == assignment.get("destination_session_id")
+                        and source.is_scope_primary is True
+                        and (source.scope_kind or "general") == scope_kind
+                        and (
+                            (scope_kind == "personal" and project_id is None)
+                            or (scope_kind == "project" and project_id and source.project_id == project_id)
+                        )
+                    )
                 if not valid:
                     raise MemoryScopeError("A staged source home changed; review assignments again before applying")
                 existing = db.query(ScopedMemoryRecord).filter(
@@ -997,6 +1189,12 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             "assignment_staged_count": bounded_count(assignment.get("staged_count")),
             "assignment_unavailable_count": bounded_count(assignment.get("unavailable_count")),
             "assignment_unresolved_count": bounded_count(assignment.get("unresolved_count")),
+            "owner_reviewable_unresolved_count": min(sum(
+                item.get("classification") == "needs_owner_assignment"
+                and item.get("duplicate") is not True
+                and not isinstance(item.get("assignment"), dict)
+                for item in candidates if isinstance(item, dict)
+            ), 1_000_000),
             "migration_applied_count": bounded_count(migration.get("applied_count")),
             "migration_started": review.status == "migration_applied",
         }
@@ -1351,6 +1549,55 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory assignment staging failed")
             raise HTTPException(503, "Migration assignments could not be staged safely. No data was changed.") from exc
+
+    @router.post("/memory/legacy-migration-reviews/{review_id}/reveal-next-unresolved")
+    def legacy_memory_reveal_next_unresolved(
+        review_id: str, payload: LegacyMigrationRevealNext, request: Request,
+    ):
+        """Explicitly reveal one owner legacy entry for a scope decision."""
+        if not payload.confirm_reveal_legacy_text:
+            raise HTTPException(422, "Confirm before revealing legacy memory text")
+        try:
+            return _reveal_next_unresolved_legacy_candidate(
+                owner=_owner(request), review_id=review_id,
+                expected_revision=payload.expected_revision,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Migration review was not found.") from exc
+        except ArtifactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except MemoryScopeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory candidate reveal failed")
+            raise HTTPException(503, "Legacy entry could not be revealed safely. No data was changed.") from exc
+
+    @router.post("/memory/legacy-migration-reviews/{review_id}/stage-owner-assignment")
+    def legacy_memory_stage_owner_assignment(
+        review_id: str, payload: LegacyMigrationOwnerAssignment, request: Request,
+    ):
+        """Stage one owner-reviewed unscoped entry without migrating it."""
+        try:
+            return _stage_owner_selected_assignment(
+                owner=_owner(request), review_id=review_id,
+                expected_revision=payload.expected_revision,
+                candidate_token=payload.candidate_token,
+                destination_scope_kind=payload.destination_scope_kind,
+                destination_project_id=payload.destination_project_id,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Migration review was not found.") from exc
+        except ArtifactConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except MemoryScopeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory owner assignment failed")
+            raise HTTPException(503, "Legacy entry could not be assigned safely. No data was changed.") from exc
 
     @router.post("/memory/legacy-migration-reviews/{review_id}/apply")
     def legacy_memory_apply(
