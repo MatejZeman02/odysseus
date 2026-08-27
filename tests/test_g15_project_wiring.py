@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -451,9 +452,11 @@ def test_stateful_chat_and_session_modules_have_one_browser_identity():
     app = open("static/app.js", encoding="utf-8").read()
     index = open("static/index.html", encoding="utf-8").read()
 
-    assert "from './js/chat.js';" in app
+    chat_import = re.search(r"from './js/chat\.js(?P<query>\?v=[^']+)?';", app)
+    chat_preload = re.search(r'href="/static/js/chat\.js(?P<query>\?v=[^"]+)?"', index)
+    assert chat_import and chat_preload
+    assert chat_import.group("query") == chat_preload.group("query")
     assert "from './js/sessions.js';" in app
-    assert "chat.js?v=" not in index
     assert "sessions.js?v=" not in index
     assert 'type="module" src="/static/js/chat.js' not in index
     assert 'type="module" src="/static/js/sessions.js' not in index
