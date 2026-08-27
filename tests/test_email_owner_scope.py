@@ -1,9 +1,22 @@
+import asyncio
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+
+
+async def _run_inline(func, /, *args, **kwargs):
+    """Run fake synchronous I/O in the active test loop.
+
+    Owner-scope tests use in-memory fake IMAP objects.  Offloading those
+    fakes to a real executor adds no coverage and can leave a worker alive
+    across pytest-asyncio's per-test loops on Python 3.13.
+    """
+    result = func(*args, **kwargs)
+    await asyncio.sleep(0)
+    return result
 
 
 def _route_endpoint(router, path: str, method: str):
@@ -374,6 +387,7 @@ async def test_sender_signature_read_lookup_is_owner_scoped(tmp_path, monkeypatc
         yield FakeImap()
 
     monkeypatch.setattr(email_routes, "_imap", fake_imap)
+    monkeypatch.setattr(email_routes.asyncio, "to_thread", _run_inline)
     router = email_routes.setup_email_routes()
     read_email = _route_endpoint(router, "/api/email/read/{uid}", "GET")
 
