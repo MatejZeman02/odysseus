@@ -14,6 +14,7 @@ import secrets
 import shlex
 import signal
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -440,8 +441,17 @@ def _container_exists(name: str) -> bool:
 
 def _validate_input_directory(input_dir: Path) -> Path:
     """Allow only a server-created, ordinary input tree as a read-only mount."""
+    # ``resolve`` follows a leaf symlink before ``Path.is_symlink`` can see
+    # it.  Reject the registered/mounted leaf first so an approved input tree
+    # cannot be swapped for another directory just before the Podman bind.
+    try:
+        info = input_dir.lstat()
+    except OSError as exc:
+        raise SandboxRunError("input_denied") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise SandboxRunError("input_denied")
     resolved = input_dir.resolve(strict=True)
-    if not resolved.is_dir() or resolved.is_symlink():
+    if not resolved.is_dir():
         raise SandboxRunError("input_denied")
     for entry in resolved.rglob("*"):
         if entry.is_symlink() or entry.is_mount():

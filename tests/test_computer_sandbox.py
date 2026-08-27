@@ -164,6 +164,19 @@ def test_server_owned_scratch_rejects_unqualified_or_symlink_input(monkeypatch, 
         raise AssertionError("symlinked input must never be mounted")
 
 
+def test_input_directory_rejects_a_symlinked_root(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    linked_root = tmp_path / "linked-input"
+    linked_root.symlink_to(source, target_is_directory=True)
+    try:
+        computer_sandbox._validate_input_directory(linked_root)
+    except computer_sandbox.SandboxRunError as exc:
+        assert exc.code == "input_denied"
+    else:
+        raise AssertionError("a symlinked input root must never be mounted")
+
+
 def test_server_owned_scratch_never_converts_bounded_failures_to_success(monkeypatch, tmp_path):
     image = "example.invalid/sandbox@sha256:" + "a" * 64
     monkeypatch.setattr(
