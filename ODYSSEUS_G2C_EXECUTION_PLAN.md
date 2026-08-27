@@ -343,7 +343,8 @@ encrypted owner-private **migration review** record. It contains opaque
 candidate tokens, aggregate classifications, the backup digest, and an empty
 rollback journal; its read API exposes only aggregate counts/status. It cannot
 assign a target, read legacy text into the browser, index a record, or execute
-a migration.
+a migration. The Personal Context panel reloads only the latest aggregate
+review status so closing it cannot make the owner believe a preview was lost.
 
 ## Conversation attachment, not transcript merging
 

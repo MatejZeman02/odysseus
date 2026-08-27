@@ -507,6 +507,9 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     }
     assert "session" not in str(review_summary)
 
+    review_list = _endpoint(router, "/api/companion/memory/legacy-migration-reviews", "GET")(SimpleNamespace())
+    assert review_list == {"reviews": [review_summary]}
+
     repeated = _endpoint(router, "/api/companion/memory/legacy-dry-run", "POST")(
         route_module.LegacyMigrationDryRun(backup_id=backup["backup_id"]), SimpleNamespace(),
     )

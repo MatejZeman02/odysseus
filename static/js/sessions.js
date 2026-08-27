@@ -303,7 +303,7 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const proposalAction = !proposal && (payload.scope_kind === 'personal' || payload.scope_kind === 'project')
     ? '<button type="button" class="companion-create-semantic-proposal">Create semantic proposal</button>' : '';
   const legacyInventoryHtml = payload.scope_kind === 'personal'
-    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><button type="button" class="companion-create-legacy-backup" disabled>Create owner-private backup</button><button type="button" class="companion-run-legacy-dry-run" disabled>Preview scoped migration</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
+    ? '<details class="companion-legacy-memory-inventory"><summary>Legacy memory migration preflight</summary><p class="companion-memory-help">Run an aggregate-only inventory before any export, backup, or AgentMemory migration. It never displays memory text or changes records.</p><div class="companion-legacy-review-history" aria-live="polite"></div><button type="button" class="companion-run-legacy-inventory">Run read-only inventory</button><button type="button" class="companion-create-legacy-backup" disabled>Create owner-private backup</button><button type="button" class="companion-run-legacy-dry-run" disabled>Preview scoped migration</button><div class="companion-legacy-inventory-result" aria-live="polite"></div></details>'
     : '';
   const relatedProjectCatalog = Array.isArray(payload.related_project_catalog) ? payload.related_project_catalog : [];
   const relatedProjectChoices = relatedProjectCatalog.length
@@ -351,6 +351,19 @@ async function openCompanionMemory(meta, initialTab = 'context') {
     close();
     documentApi.openLibrary({tab: 'documents'});
   });
+  const reviewHistory = modal.querySelector('.companion-legacy-review-history');
+  if (reviewHistory) {
+    fetch('/api/companion/memory/legacy-migration-reviews', {credentials: 'same-origin', cache: 'no-store'})
+      .then(response => response.ok ? response.json() : null)
+      .then(result => {
+        const review = Array.isArray(result?.reviews) ? result.reviews[0] : null;
+        if (!review) return;
+        const summary = document.createElement('p'); summary.className = 'companion-memory-help';
+        summary.textContent = `Saved review: ${review.candidate_count || 0} candidates · ${review.status || 'review ready'} · no migration started.`;
+        reviewHistory.replaceChildren(summary);
+      })
+      .catch(() => {});
+  }
   modal.querySelector('.companion-run-legacy-inventory')?.addEventListener('click', async (event) => {
     const resultNode = modal.querySelector('.companion-legacy-inventory-result');
     event.currentTarget.disabled = true;

@@ -574,6 +574,53 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         finally:
             db.close()
 
+    def _legacy_migration_review_payload(review: LegacyMemoryMigrationReview) -> dict:
+        """Project a private review row to its aggregate browser-safe surface."""
+        try:
+            plan = json.loads(review.plan_json)
+            journal = json.loads(review.journal_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("migration review could not be read safely") from exc
+        if (
+            not isinstance(plan, dict)
+            or plan.get("schema_version") != 1
+            or not isinstance(journal, list)
+        ):
+            raise ValueError("migration review could not be read safely")
+        counts = plan.get("counts") if isinstance(plan.get("counts"), dict) else {}
+        scopes = plan.get("scope_candidates") if isinstance(plan.get("scope_candidates"), dict) else {}
+        rejected = plan.get("rejected") if isinstance(plan.get("rejected"), dict) else {}
+        candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
+
+        def bounded_count(value: object) -> int:
+            try:
+                return min(max(int(value or 0), 0), 1_000_000)
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "review_id": review.id,
+            "revision": review.revision,
+            "status": review.status,
+            "backup_sha256": review.backup_sha256,
+            "entries_considered": bounded_count(counts.get("entries_considered")),
+            "eligible_scope_candidates": bounded_count(counts.get("eligible_scope_candidates")),
+            "needs_owner_assignment": bounded_count(counts.get("needs_owner_assignment")),
+            "duplicate_candidates": bounded_count(counts.get("duplicate_candidates")),
+            "scope_candidates": {
+                "personal": bounded_count(scopes.get("personal")),
+                "project": bounded_count(scopes.get("project")),
+            },
+            "rejected": {
+                key: bounded_count(value)
+                for key, value in rejected.items()
+                if isinstance(key, str) and re.fullmatch(r"[a-z_]{1,64}", key)
+            },
+            "candidate_count": min(len(candidates), 1_000_000),
+            "journal_entry_count": min(len(journal), 1_000_000),
+            "migration_started": False,
+        }
+
     def _legacy_migration_review_summary(*, owner: str, review_id: str) -> dict:
         """Return a browser-safe summary of a persisted migration review.
 
@@ -592,45 +639,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             ).first()
             if not review:
                 raise FileNotFoundError("migration review was not found")
-            try:
-                plan = json.loads(review.plan_json)
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise ValueError("migration review could not be read safely") from exc
-            if not isinstance(plan, dict) or plan.get("schema_version") != 1:
-                raise ValueError("migration review could not be read safely")
-            counts = plan.get("counts") if isinstance(plan.get("counts"), dict) else {}
-            scopes = plan.get("scope_candidates") if isinstance(plan.get("scope_candidates"), dict) else {}
-            rejected = plan.get("rejected") if isinstance(plan.get("rejected"), dict) else {}
-            candidates = plan.get("candidates") if isinstance(plan.get("candidates"), list) else []
-
-            def bounded_count(value: object) -> int:
-                try:
-                    return min(max(int(value or 0), 0), 1_000_000)
-                except (TypeError, ValueError):
-                    return 0
-
-            return {
-                "review_id": review.id,
-                "revision": review.revision,
-                "status": review.status,
-                "backup_sha256": review.backup_sha256,
-                "entries_considered": bounded_count(counts.get("entries_considered")),
-                "eligible_scope_candidates": bounded_count(counts.get("eligible_scope_candidates")),
-                "needs_owner_assignment": bounded_count(counts.get("needs_owner_assignment")),
-                "duplicate_candidates": bounded_count(counts.get("duplicate_candidates")),
-                "scope_candidates": {
-                    "personal": bounded_count(scopes.get("personal")),
-                    "project": bounded_count(scopes.get("project")),
-                },
-                "rejected": {
-                    key: bounded_count(value)
-                    for key, value in rejected.items()
-                    if isinstance(key, str) and re.fullmatch(r"[a-z_]{1,64}", key)
-                },
-                "candidate_count": min(len(candidates), 1_000_000),
-                "journal_entry_count": len(json.loads(review.journal_json or "[]")),
-                "migration_started": False,
-            }
+            return _legacy_migration_review_payload(review)
         finally:
             db.close()
 
@@ -920,6 +929,24 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except Exception as exc:
             logger.exception("Legacy memory migration review lookup failed")
             raise HTTPException(503, "Migration review could not be read safely. No data was changed.") from exc
+
+    @router.get("/memory/legacy-migration-reviews")
+    def legacy_memory_migration_reviews(request: Request):
+        """List recent aggregate review states for the authenticated owner only."""
+        owner = _owner(request)
+        db = SessionLocal()
+        try:
+            rows = db.query(LegacyMemoryMigrationReview).filter(
+                LegacyMemoryMigrationReview.owner == owner,
+            ).order_by(LegacyMemoryMigrationReview.updated_at.desc()).limit(10).all()
+            return {"reviews": [_legacy_migration_review_payload(row) for row in rows]}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Legacy memory migration review list failed")
+            raise HTTPException(503, "Migration reviews could not be read safely. No data was changed.") from exc
+        finally:
+            db.close()
 
     @router.put("/memory/projects/{project_id}/relations")
     def update_project_relations(project_id: str, payload: ProjectRelationWrite, request: Request):
