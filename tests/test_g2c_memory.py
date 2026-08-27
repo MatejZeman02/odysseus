@@ -498,6 +498,7 @@ def test_companion_agent_prompt_explains_scoped_legacy_tool_boundary():
     assert "COMPANION SCOPE" in prompt
     assert "Global native memory" in prompt
     assert "working artifacts" in prompt
+    assert "scoped semantic proposal" in prompt
 
 
 @pytest.mark.asyncio

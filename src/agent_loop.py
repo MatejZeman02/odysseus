@@ -2364,7 +2364,9 @@ def _build_system_prompt(
             "\n\nCOMPANION SCOPE: this is a scoped Personal, project, or Computer Help home. "
             "Global native memory, globally learned skills, and raw cross-chat search are unavailable. "
             "Use the supplied continuity context, approved context grants, and working artifacts instead; "
-            "never claim that a global memory or another chat was read."
+            "never claim that a global memory or another chat was read. When the owner asks to "
+            "remember a lasting fact or decision, do not call a legacy memory tool: explain that "
+            "it can be reviewed as a scoped semantic proposal in Context before becoming home memory."
         )
 
     # Dynamic parts that change per request
