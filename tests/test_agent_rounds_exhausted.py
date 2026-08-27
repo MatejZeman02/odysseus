@@ -40,6 +40,15 @@ def _patch_common(monkeypatch):
         return (block.tool_type, {"output": "ok", "exit_code": 0})
     monkeypatch.setattr(al, "execute_tool_block", _fake_exec, raising=False)
 
+    # The loop-breaker deliberately makes one final no-tools synthesis call
+    # when a model ignores its force-answer instruction.  Keep this loop-control
+    # suite hermetic: it verifies the emitted guard event, not a live provider.
+    async def _fake_synthesis(*args, **kwargs):
+        return "Stopped after repeated calls."
+
+    import src.llm_core as llm_core
+    monkeypatch.setattr(llm_core, "llm_call_async", _fake_synthesis)
+
 
 def _run_loop(monkeypatch, round_text, max_rounds=2):
     async def _fake_stream(_candidates, messages, **kwargs):
