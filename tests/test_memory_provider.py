@@ -179,3 +179,36 @@ def test_memory_provider_registry_rejects_tool_name_conflicts():
         assert "memory_search" in str(exc)
     else:
         raise AssertionError("Expected duplicate memory tool names to be rejected")
+
+
+def test_scoped_registry_filters_wrong_scope_and_limits_one_provider():
+    from src.memory_provider import (
+        MemoryRecord, MemorySearchHit, ScopedMemoryProviderRegistry,
+        ScopedMemoryQuery, ScopedMemoryScope,
+    )
+
+    requested = ScopedMemoryScope(
+        owner_id="alice", home_kind="project", project_id="dust", session_id="chat",
+        provenance_kind="context_recall", provenance_id="chat",
+    )
+    foreign = ScopedMemoryScope(
+        owner_id="bob", home_kind="project", project_id="dust", session_id="chat",
+        provenance_kind="accepted_home_brief", provenance_id="brief-bob",
+    )
+
+    class Provider:
+        scoped_provider_id = "test-scoped"
+
+        def recall_scoped_sync(self, _query):
+            return [
+                MemorySearchHit(MemoryRecord(id="wrong", text="wrong owner", scope=foreign), "test-scoped"),
+                MemorySearchHit(MemoryRecord(id="right", text="right scope", scope=ScopedMemoryScope(
+                    owner_id="alice", home_kind="project", project_id="dust", session_id="source",
+                    provenance_kind="accepted_home_brief", provenance_id="brief-a",
+                )), "test-scoped"),
+            ]
+
+    hits = ScopedMemoryProviderRegistry([Provider()]).recall_scoped_sync(
+        ScopedMemoryQuery("release", requested, top_k=1),
+    )
+    assert [(hit.memory.id, hit.memory.text) for hit in hits] == [("right", "right scope")]

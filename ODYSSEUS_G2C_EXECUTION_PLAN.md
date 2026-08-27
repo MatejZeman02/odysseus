@@ -511,6 +511,13 @@ mount, episodic hit, artifact, one-request grant, and transcript-tail count).
 It intentionally excludes prompt text, recalled text, raw message IDs, grant
 IDs, provider routes, and any other session's transcript.
 
+Normal Companion episodic recall now reaches the local exact-scope adapter
+through `ScopedMemoryProviderRegistry`. It selects one synchronous,
+scope-validating provider, rejects any mismatched returned hit before prompt
+assembly, and fails non-fatally to checkpoint/raw-tail continuity. The initial
+registry contains only the rebuildable local index; adding AgentMemory or any
+async remote provider remains a separate, owner-reviewed milestone.
+
 ## Acceptance tests
 
 - Existing heuristic records are labelled and cannot be selected as accepted

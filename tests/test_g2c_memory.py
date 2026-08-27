@@ -391,6 +391,41 @@ def test_scoped_recall_outage_does_not_break_exact_artifact_or_checkpoint_contex
     assert [item["path"] for item in bundle.working_artifacts] == ["drafts/resilient.md"]
 
 
+def test_context_compiler_uses_scoped_provider_contract_for_normal_recall(store):
+    """Prompt assembly must not bypass the scoped provider with raw index I/O."""
+    from src.memory_provider import MemoryRecord, MemorySearchHit, ScopedMemoryScope
+
+    continuity, _memory = store
+    seen = {}
+
+    class Provider:
+        def recall_scoped_sync(self, query):
+            seen["query"] = query
+            record_scope = ScopedMemoryScope(
+                owner_id="alice", home_kind="project", project_id="dust", session_id="project",
+                provenance_kind="accepted_home_brief", provenance_id="brief-current",
+            )
+            return [MemorySearchHit(
+                MemoryRecord(
+                    id="episodic-1", text="Dust uses a fish motif", session_id="project", scope=record_scope,
+                ),
+                "fake-scoped",
+            )]
+
+    bundle = ContextCompiler(continuity, scoped_memory_provider=Provider()).compile(
+        owner="alice", session_id="project", request="Which motif is used?", transcript=[],
+    )
+
+    assert seen["query"].scope.owner_id == "alice"
+    assert seen["query"].scope.home_kind == "project"
+    assert seen["query"].scope.project_id == "dust"
+    assert bundle.episodic_hits == ({
+        "id": "episodic-1", "source_kind": "accepted_home_brief", "source_id": "brief-current",
+        "text": "Dust uses a fish motif", "session_id": "project", "expires_at": None,
+        "sensitivity": "normal", "scope": {"kind": "project", "project_id": "dust"},
+    },)
+
+
 def test_personal_brief_is_separate_from_project_and_checkpoint(store):
     continuity, _memory = store
     brief = PersonalBriefV1(owner_id="alice", summary="Prefers clear concise plans", preferences=["concise"])

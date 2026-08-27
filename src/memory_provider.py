@@ -182,6 +182,78 @@ class ScopedMemoryProvider(ABC):
         """Delete one record only when its complete stored scope matches."""
 
 
+class ScopedMemoryProviderRegistry:
+    """Select a continuity-safe provider for the synchronous prompt compiler.
+
+    ``ContextCompiler`` is intentionally synchronous because it is used by
+    both the native chat and Qwen paths, including while their async loops are
+    already active.  A scoped provider may opt into that bounded path by
+    exposing ``recall_scoped_sync``.  Providers that only expose asynchronous
+    I/O are never run with a nested event loop; they require a future async
+    compiler integration instead of becoming an accidental prompt authority.
+    """
+
+    def __init__(self, providers: Optional[Iterable[ScopedMemoryProvider]] = None):
+        self._providers: Dict[str, ScopedMemoryProvider] = {}
+        for provider in providers or []:
+            self.register(provider)
+
+    def register(self, provider: ScopedMemoryProvider) -> None:
+        provider_id = str(getattr(provider, "scoped_provider_id", "") or "")
+        if not provider_id or provider_id == "unknown-scoped":
+            raise ValueError("scoped memory provider requires a stable provider id")
+        if provider_id in self._providers:
+            raise ValueError(f"Scoped memory provider already registered: {provider_id}")
+        self._providers[provider_id] = provider
+
+    def active(self) -> List[ScopedMemoryProvider]:
+        return [provider for provider in self._providers.values() if getattr(provider, "enabled", True)]
+
+    def recall_scoped_sync(self, query: ScopedMemoryQuery) -> List[MemorySearchHit]:
+        """Return one exact-scope provider's bounded hits.
+
+        The first enabled synchronous provider is the explicit source of this
+        recall.  Combining rankings from multiple backends would quietly
+        change context authority and duplicate memories, so that is deferred
+        until a separately reviewed provider-selection design exists.
+        """
+        for provider in self.active():
+            recall = getattr(provider, "recall_scoped_sync", None)
+            if not callable(recall):
+                continue
+            raw_hits = recall(query)
+            accepted: List[MemorySearchHit] = []
+            seen: set[str] = set()
+            for hit in raw_hits or []:
+                if not isinstance(hit, MemorySearchHit):
+                    continue
+                memory = hit.memory
+                stored_scope = memory.scope
+                if not self._matches_query_scope(stored_scope, query.scope):
+                    continue
+                if not memory.id or memory.id in seen:
+                    continue
+                seen.add(memory.id)
+                accepted.append(hit)
+                if len(accepted) >= query.top_k:
+                    break
+            return accepted
+        raise RuntimeError("no synchronous scoped memory provider is available")
+
+    @staticmethod
+    def _matches_query_scope(stored: Optional[ScopedMemoryScope], requested: ScopedMemoryScope) -> bool:
+        if stored is None:
+            return False
+        return (
+            stored.owner_id == requested.owner_id
+            and stored.home_kind == requested.home_kind
+            and stored.project_id == requested.project_id
+            and stored.sensitivity == requested.sensitivity
+            and bool(stored.provenance_kind)
+            and bool(stored.provenance_id)
+        )
+
+
 class NativeMemoryProvider(MemoryProvider):
     """Provider adapter for Odysseus' built-in memory manager and vector store."""
 

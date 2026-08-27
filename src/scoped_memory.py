@@ -230,7 +230,8 @@ class LocalScopedMemoryProvider(ScopedMemoryProvider):
             raise RuntimeError("scoped memory write was not persisted")
         return self._to_record(record, scope=scope, category=category, metadata=metadata)
 
-    async def recall_scoped(self, query: ScopedMemoryQuery) -> list[MemorySearchHit]:
+    def recall_scoped_sync(self, query: ScopedMemoryQuery) -> list[MemorySearchHit]:
+        """Synchronous adapter used by the non-async context compiler."""
         scope = query.scope
         rows = self.index.recall(
             owner=scope.owner_id, scope_kind=scope.home_kind, project_id=scope.project_id,
@@ -240,6 +241,9 @@ class LocalScopedMemoryProvider(ScopedMemoryProvider):
             memory=self._to_record(row, scope=self._scope_for_row(scope, row)),
             provider_id=self.scoped_provider_id, score=None,
         ) for row in rows]
+
+    async def recall_scoped(self, query: ScopedMemoryQuery) -> list[MemorySearchHit]:
+        return self.recall_scoped_sync(query)
 
     async def list_scoped(self, *, scope: ScopedMemoryScope, limit: int = 100) -> list[MemoryRecord]:
         return [self._to_record(row, scope=self._scope_for_row(scope, row)) for row in self.index.list(

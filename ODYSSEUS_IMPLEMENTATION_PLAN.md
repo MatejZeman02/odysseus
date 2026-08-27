@@ -175,7 +175,8 @@ containment fix, not approval to migrate legacy records or enable AgentMemory.
 
 The provider-neutral scoped contract now fixes owner, home/project binding,
 session/source provenance, sensitivity, expiry, and opaque grant audit IDs
-before a provider operates. Its local adapter is conformance-only and is not
+before a provider operates. Normal Companion prompt recall now reaches the
+local adapter through the scoped-provider registry; it is read-only and is not
 registered as a replacement for the existing native-memory writer.
 
 After the owner reviews that aggregate inventory, Personal Advisor offers an
@@ -557,7 +558,7 @@ never part of the continuity contract.
 | One thread's working state | Odysseus `ThreadCheckpointV1` | Local, derived, and source-linked |
 | Shared cross-chat project notebook | Odysseus `ProjectBriefV1` | Compact derived artifact; not canon |
 | Companion identity and approved global profile | Existing personality/profile layer | Shared across chats; no project facts by default |
-| Personal/project episodic recall | Local `ScopedMemoryIndex`; AgentMemory later | Rebuildable, exact scope-filtered index; not project truth |
+| Personal/project episodic recall | Local `ScopedMemoryProviderRegistry`; AgentMemory later | Rebuildable, exact scope-filtered index; not project truth |
 | Legacy pinned/manual memories | Native `memory.json` during migration | Read/export/delete compatibility only after provider switch |
 | Active worker transcript and compaction | Qwen session/JSONL | Disposable execution state |
 
@@ -570,15 +571,18 @@ both auto-capture the same turn.
 inspect, migrate, or change the writer for the owner's real memory data. The
 rules below remain the acceptance contract for a future memory milestone.
 
-The existing `MemoryProviderRegistry` is initialized but normal prompt recall
-still reads `memory.json` directly. A future AgentMemory milestone must wire the
-provider abstraction into context assembly before calling it “integrated.”
+The legacy `MemoryProviderRegistry` remains initialized for native-memory
+compatibility. Normal Companion episodic recall now uses the separate
+`ScopedMemoryProviderRegistry`, whose only registered provider is the local
+exact-scope adapter. A future AgentMemory milestone must add an explicitly
+selected, conformance-tested scoped provider; it cannot piggyback on legacy
+`memory.json` recall or become a silent second writer.
 
 Safety rules for the existing AgentMemory installation:
 
-- [x] Define the provider-neutral scoped contract and a local conformance
-  adapter over structured Odysseus records; it is intentionally not registered
-  as a new writer or a replacement for native memory.
+- [x] Define the provider-neutral scoped contract and local conformance
+  adapter over structured Odysseus records; normal Companion prompt recall
+  uses it read-only, never as a new writer or a native-memory replacement.
 - [x] Validate owner, home/project binding, source provenance, sensitivity,
   expiry, and opaque grant provenance before a scoped provider operates.
 - [x] Use exact scope filtering and expiry exclusion in the local recall index;
@@ -857,7 +861,10 @@ not exercised by this slice and is deliberately tracked next.
 
 - [x] Implement the strictly scoped provider contract and local conformance
   adapter/tests. It is not wired as an automatic writer.
-- [ ] Wire normal context recall through `MemoryProviderRegistry`.
+- [x] Wire normal Companion context recall through the scoped-provider
+  registry, with a single local exact-scope adapter and a non-fatal failure
+  path. Future asynchronous/external providers require their own reviewed
+  compiler integration rather than a nested event loop.
 - [x] Index only owner-approved home briefs and explicit working artifacts in
   the local Personal/project namespaces. Heuristic checkpoints remain bounded
   thread context and never become episodic-retrieval records.

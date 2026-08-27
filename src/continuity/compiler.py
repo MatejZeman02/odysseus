@@ -204,9 +204,13 @@ class CheckpointCompactor:
 class ContextCompiler:
     """Builds a transparent bounded context without cross-scope transcript reads."""
 
-    def __init__(self, store: ContinuityStore, *, tail_count: int = 12):
+    def __init__(self, store: ContinuityStore, *, tail_count: int = 12, scoped_memory_provider: Any = None):
         self.store = store
         self.tail_count = tail_count
+        # Tests and future provider integration may inject a registry.  The
+        # product default is created lazily to avoid a module cycle with the
+        # local provider implementation.
+        self.scoped_memory_provider = scoped_memory_provider
 
     def compile(
         self,
@@ -262,9 +266,33 @@ class ContextCompiler:
         hits = tuple(dict(hit) for hit in episodic_hits)
         if not hits and scope.scope_kind in {"personal", "project"}:
             try:
-                from src.scoped_memory import ScopedMemoryIndex
-                hits = tuple(ScopedMemoryIndex().recall(owner=owner, scope_kind=scope.scope_kind,
-                                                        project_id=scope.project_id, query=request))
+                from src.memory_provider import (
+                    ScopedMemoryProviderRegistry, ScopedMemoryQuery, ScopedMemoryScope,
+                )
+                from src.scoped_memory import LocalScopedMemoryProvider
+                provider = self.scoped_memory_provider or ScopedMemoryProviderRegistry([
+                    LocalScopedMemoryProvider(),
+                ])
+                query_scope = ScopedMemoryScope(
+                    owner_id=owner, home_kind=scope.scope_kind, project_id=scope.project_id,
+                    session_id=session_id, provenance_kind="context_recall", provenance_id=session_id,
+                )
+                provider_hits = provider.recall_scoped_sync(ScopedMemoryQuery(
+                    request, query_scope, top_k=4,
+                ))
+                hits = tuple({
+                    "id": hit.memory.id,
+                    "source_kind": hit.memory.scope.provenance_kind,
+                    "source_id": hit.memory.scope.provenance_id,
+                    "text": hit.memory.text[:500],
+                    "session_id": hit.memory.session_id,
+                    "expires_at": hit.memory.scope.expires_at.isoformat() if hit.memory.scope.expires_at else None,
+                    "sensitivity": hit.memory.scope.sensitivity,
+                    "scope": {
+                        "kind": hit.memory.scope.home_kind,
+                        "project_id": hit.memory.scope.project_id,
+                    },
+                } for hit in provider_hits)
             except Exception:
                 hits = ()
         working_artifacts: tuple[dict[str, Any], ...] = ()
