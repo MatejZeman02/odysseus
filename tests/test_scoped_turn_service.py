@@ -50,6 +50,7 @@ def test_context_bundle_render_order_is_stable():
     rendered = render_context_bundle(bundle)
     headings = [
         "# Companion personality and policy", "# Conversation home",
+        "# Continuity provenance",
         "# This thread checkpoint", "# Home project shared brief",
         "# Recent raw transcript tail", "# Current request",
     ]
@@ -58,6 +59,8 @@ def test_context_bundle_render_order_is_stable():
     assert "do not invoke another tool after drafting the final answer" in rendered
     assert "one broad case-insensitive regex search" in rendered
     assert "do not retry a sequence of tiny spelling" in rendered
+    assert "legacy_unclassified" in rendered
+    assert "owner explicitly promoted" in rendered
 
 
 def test_selected_paste_is_context_source_not_a_workspace_file():
