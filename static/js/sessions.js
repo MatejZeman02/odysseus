@@ -41,7 +41,6 @@ function _syncCompanionScopeBanner(meta) {
   const title = document.getElementById('companion-scope-title');
   const detail = document.getElementById('companion-scope-detail');
   const contextButton = document.getElementById('overflow-companion-context-btn');
-  const artifactsButton = document.getElementById('overflow-companion-artifacts-btn');
   const capabilitiesButton = document.getElementById('overflow-chat-capabilities-btn');
   if (!banner || !title || !detail) return;
   const scope = meta?.scope_kind;
@@ -55,7 +54,6 @@ function _syncCompanionScopeBanner(meta) {
     title.textContent = '';
     detail.textContent = '';
     if (contextButton) contextButton.hidden = true;
-    if (artifactsButton) artifactsButton.hidden = true;
     return;
   }
   if (scope === 'project') {
@@ -80,13 +78,6 @@ function _syncCompanionScopeBanner(meta) {
     contextButton.onclick = () => {
       closeMoreTools();
       openCompanionMemory(meta, 'context');
-    };
-  }
-  if (artifactsButton) {
-    artifactsButton.hidden = !supportsMemory;
-    artifactsButton.onclick = () => {
-      closeMoreTools();
-      openCompanionMemory(meta, 'artifacts');
     };
   }
 }
@@ -239,91 +230,25 @@ async function openCompanionMemory(meta, initialTab = 'context') {
   const modal = document.createElement('div'); modal.id = 'companion-memory-modal'; modal.className = 'modal';
   const brief = payload.personal_brief || payload.project_brief || {};
   const checkpoint = payload.thread_checkpoint || {};
-  const artifacts = payload.artifacts || [];
-  const privateArtifacts = ['personal', 'computer'].includes(payload.scope_kind);
-  const artifactScope = payload.scope_kind === 'computer' ? 'computer' : 'personal';
   const memoryTitle = payload.scope_kind === 'personal' ? 'Personal memory'
     : (payload.scope_kind === 'computer' ? 'Computer Help records' : 'Project memory');
-  const artifactHelp = payload.scope_kind === 'personal'
-    ? 'Long-lived Markdown drafts live here by reference instead of being repeated in chat. Select one to open it in Documents.'
-    : (payload.scope_kind === 'computer'
-      ? 'Verified device facts and incident plans live here. They are private Odysseus records, not project files.'
-      : 'Project artifacts are changed through reviewed Patch proposals; this list contains indexed project artifacts.');
   modal.innerHTML = `<div class="modal-content companion-memory-modal" role="dialog" aria-modal="true" aria-labelledby="companion-memory-title">
     <div class="modal-header"><h4 id="companion-memory-title">${esc(memoryTitle)}</h4><button type="button" class="close-btn" aria-label="Close">✖</button></div>
-    <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button><button type="button" data-tab="artifacts">Artifacts</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
-    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
-    <section data-panel="artifacts" class="companion-memory-panel hidden"><p class="companion-memory-help">${artifactHelp}</p><div class="companion-artifact-workspace"><div class="companion-artifact-list">${artifacts.map(item => `<button type="button" class="companion-artifact-row" data-id="${esc(item.id)}"><strong>${esc(item.path)}</strong><span>r${item.revision} · ${esc(item.summary || 'Empty')}</span></button>`).join('') || '<p>No artifacts yet.</p>'}</div></div>${privateArtifacts ? `<button type="button" class="companion-new-artifact">${payload.scope_kind === 'computer' ? 'New incident document' : 'New Markdown document'}</button>` : ''}</section>
+    <div class="companion-memory-tabs"><button type="button" data-tab="context">Context</button>${payload.scope_kind === 'personal' ? '<button type="button" data-tab="projects">Project access</button>' : ''}</div>
+    <section data-panel="context" class="companion-memory-panel"><h5>Thread checkpoint</h5><p>${esc(checkpoint.objective || 'No compact checkpoint yet. It is derived as the conversation grows.')}</p><h5>Home brief</h5><p>${esc(brief.summary || 'No home brief saved yet.')}</p><p class="companion-memory-help">Working drafts and incident records are ordinary Documents. They are opened and edited in the shared Documents editor, not in a second artifact interface.</p><button type="button" class="companion-open-documents">Open Documents</button>${payload.scope_kind === 'personal' ? '<button type="button" class="companion-edit-brief">Edit Personal brief</button>' : ''}</section>
     ${payload.scope_kind === 'personal' ? `<section data-panel="projects" class="companion-memory-panel hidden"><p class="companion-memory-help">Project material is never searched automatically. Request only the brief or named artifacts you need.</p><div class="companion-grant-list">${(payload.pending_grants || []).map(grant => `<div class="companion-grant-card" data-grant="${esc(grant.id)}"><strong>Allow ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')} once?</strong><span>${esc(grant.purpose)}</span><button type="button" data-decision="allow">Allow once</button><button type="button" data-decision="deny">Deny</button></div>`).join('')}${(payload.grants || []).map(grant => `<p>Allowed once: ${esc((payload.project_catalog || []).find(p => p.id === grant.project_id)?.name || 'Project')}</p>`).join('') || '<p>No temporary project access is active.</p>'}</div><label>Project <select class="companion-grant-project">${(payload.project_catalog || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label><label>Why is it needed?<input class="companion-grant-purpose" maxlength="1000" placeholder="Consult the project brief for this answer"></label><button type="button" class="companion-request-grant">Request access</button></section>` : ''}
   </div>`;
   const close = () => modal.remove(); modal.querySelector('.close-btn').onclick = close;
   const show = (tab) => modal.querySelectorAll('[data-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.panel !== tab));
   modal.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => show(button.dataset.tab)); show(initialTab);
-  const readResponse = async (response, fallback) => {
-    const raw = await response.text(); let result = {};
-    try { result = raw ? JSON.parse(raw) : {}; } catch (_) {
-      throw new Error(response.ok ? fallback : `${fallback} (server error ${response.status})`);
-    }
-    if (!response.ok) throw new Error(result.detail || fallback);
-    return result;
-  };
-  modal.querySelectorAll('.companion-artifact-row').forEach(button => button.addEventListener('click', async () => {
-    if (!privateArtifacts) {
-      uiModule.showToast?.('Project artifacts stay in the project workspace and are changed through Patch proposals.', 3200);
+  modal.querySelector('.companion-open-documents')?.addEventListener('click', () => {
+    const documentApi = window.documentModule;
+    if (!documentApi?.openLibrary) {
+      uiModule.showError?.('The Documents editor is not ready yet. Try again in a moment.');
       return;
     }
-    button.disabled = true;
-    try {
-      const response = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(button.dataset.id)}/document`, {
-        method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({session_id: meta.id}),
-      });
-      const documentRecord = await readResponse(response, 'Could not open artifact in Documents');
-      const documentApi = window.documentModule;
-      if (!documentApi?.loadDocument) throw new Error('Document editor is not ready yet. Try again in a moment.');
-      close();
-      // The bridge already returns the authoritative document payload. Use it
-      // directly instead of racing a second GET against the session restore
-      // loader, which could replace an artifact with an empty Untitled tab.
-      if (typeof documentApi.injectFreshDoc === 'function') {
-        documentApi.injectFreshDoc(documentRecord);
-      } else {
-        await documentApi.loadDocument(documentRecord.id);
-      }
-    } catch (error) {
-      uiModule.showError?.(error.message || 'Could not open artifact in Documents');
-      button.disabled = false;
-    }
-  }));
-  modal.querySelector('.companion-new-artifact')?.addEventListener('click', () => {
-    (async () => {
-      const placeholder = payload.scope_kind === 'computer'
-        ? 'computer/incidents/nvidia-black-screen.md'
-        : 'drafts/love-letter.md';
-      const path = (await styledPrompt('Choose a Markdown path. You will write it in Documents.', {
-        title: 'New working document', placeholder, confirmText: 'Open document', maxLength: 500,
-      }) || '').trim();
-      if (!path) return;
-      try {
-        // The blank artifact is only a document binding. All authoring and
-        // revisions happen in the native Documents editor from this point on.
-        const response = await fetch(`/api/companion/artifacts/${artifactScope}`, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: meta.id, path, content: ''})});
-        const artifact = await readResponse(response, 'Could not create working document');
-        const documentResponse = await fetch(`/api/companion/artifacts/${artifactScope}/${encodeURIComponent(artifact.id)}/document`, {
-          method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({session_id: meta.id}),
-        });
-        const documentRecord = await readResponse(documentResponse, 'Working document was created but could not open it in Documents');
-        const documentApi = window.documentModule;
-        if (!documentApi?.loadDocument) throw new Error('The Document editor is not ready yet. Try again in a moment.');
-        close();
-        if (typeof documentApi.injectFreshDoc === 'function') documentApi.injectFreshDoc(documentRecord);
-        else await documentApi.loadDocument(documentRecord.id);
-        uiModule.showToast?.('Working document opened in Documents', 1800);
-      } catch (error) {
-        uiModule.showError?.(error.message || 'Could not create working document');
-      }
-    })();
+    close();
+    documentApi.openLibrary({tab: 'documents'});
   });
   modal.querySelector('.companion-request-grant')?.addEventListener('click', async () => {
     const project = modal.querySelector('.companion-grant-project')?.value; const purpose = modal.querySelector('.companion-grant-purpose')?.value;

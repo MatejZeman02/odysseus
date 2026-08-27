@@ -48,9 +48,10 @@ def test_companion_ui_uses_one_capability_drawer_and_native_documents_for_artifa
     app = open("static/app.js", encoding="utf-8").read()
     assert 'id="overflow-chat-capabilities-btn"' in index
     assert "Chat capabilities" in index
-    assert "Working documents" in index
+    assert "Companion memory" in index
     assert "/chat-capabilities" in sessions
     assert "odysseus:tool-toggle" in sessions
     assert "companion-artifact-editor" not in sessions
-    assert "/document`" in sessions
+    assert "companion-open-documents" in sessions
+    assert "documentApi.openLibrary({tab: 'documents'})" in sessions
     assert "odysseus:tool-toggle" in app

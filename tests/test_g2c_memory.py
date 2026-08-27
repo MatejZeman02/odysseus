@@ -395,7 +395,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "/artifacts/personal/{artifact_id}/document" in routes
     assert "/artifacts/capture-paste" in routes
     assert "overflow-companion-context-btn" in page
-    assert "overflow-companion-artifacts-btn" in page
+    assert "overflow-companion-artifacts-btn" not in page
+    assert "deprecated-companion-artifacts-btn" in page
     assert 'id="companion-context-btn"' not in page
     assert 'id="companion-artifacts-btn"' not in page
     assert "Allow once" in ui
@@ -435,10 +436,11 @@ def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store,
     assert captured["character_count"] == len("pasted line\n" * 600)
 
 
-def test_personal_artifact_ui_uses_bridge_payload_without_a_second_load_race():
+def test_personal_memory_ui_opens_the_shared_documents_library():
     sessions_js = open("static/js/sessions.js", encoding="utf-8").read()
-    assert "documentApi.injectFreshDoc(documentRecord)" in sessions_js
-    assert "racing a second GET" in sessions_js
+    assert "companion-open-documents" in sessions_js
+    assert "documentApi.openLibrary({tab: 'documents'})" in sessions_js
+    assert "companion-artifact-editor" not in sessions_js
 
 
 def test_personal_artifact_editor_has_a_document_only_agent_path():
