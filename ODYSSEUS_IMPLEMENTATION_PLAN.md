@@ -592,12 +592,15 @@ Safety rules for the existing AgentMemory installation:
   compiler failures leave checkpoint/raw-tail continuity available.
 - [x] Drop ambiguous/mismatched local scope requests before persistence or
   recall. AgentMemory remains deferred rather than being treated as equivalent.
-- [ ] Do not use `memory_smart_search` as a project security boundary; its
-  current hybrid result path does not reliably filter by project.
-- [ ] Do not call AgentMemory's free-form `remember` or enable Qwen auto-memory
-  initially.
-- [ ] Keep AgentMemory outage non-fatal: exact continuity checkpoints still
-  load without it.
+- [x] Do not use `memory_smart_search` as a project security boundary; its
+  current hybrid result path does not reliably filter by project. Companion
+  recall uses only the local scoped-provider registry.
+- [x] Do not call AgentMemory's free-form `remember` or enable Qwen auto-memory
+  initially. Qwen managed memory is disabled, and Companion homes do not queue
+  the native global auto-memory/skill extractors.
+- [x] Keep AgentMemory outage non-fatal: exact continuity checkpoints still
+  load without it. The default Companion provider is local and exact-scoped;
+  a regression test makes legacy native-provider construction fail.
 - [x] Provide an explicit aggregate-only inventory route and an explicit
   owner-private native-memory backup route. Neither is invoked automatically;
   a real owner action remains required before migration planning.

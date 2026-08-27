@@ -1,6 +1,12 @@
 import json
+from types import SimpleNamespace
 
-from routes.chat_helpers import _continuity_context_enabled, _continuity_prompt_message
+from routes.chat_helpers import (
+    _continuity_context_enabled,
+    _continuity_prompt_message,
+    _legacy_background_extraction_allowed,
+    run_post_response_tasks,
+)
 from src.continuity.contracts import ContextBundle, DeviceProfileV1, ResolvedScope, ThreadCheckpointV1
 
 
@@ -12,13 +18,41 @@ def test_continuity_gate_is_default_off_and_opt_in(monkeypatch):
 
 
 def test_companion_scopes_are_durably_enabled(monkeypatch):
-    from types import SimpleNamespace
     from routes.chat_helpers import _continuity_enabled_for_session
     monkeypatch.delenv("ODYSSEUS_CONTINUITY_CONTEXT", raising=False)
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="project")) is True
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="personal")) is True
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="computer")) is True
     assert _continuity_enabled_for_session(SimpleNamespace(scope_kind="general")) is False
+
+
+def test_companion_homes_never_queue_legacy_auto_memory_or_skill_extraction():
+    """The general-chat preference must not become a Companion memory writer."""
+    assert _legacy_background_extraction_allowed(SimpleNamespace(scope_kind="general"), True) is True
+    assert _legacy_background_extraction_allowed(SimpleNamespace(scope_kind="personal"), True) is False
+    assert _legacy_background_extraction_allowed(SimpleNamespace(scope_kind="project"), True) is False
+    assert _legacy_background_extraction_allowed(SimpleNamespace(scope_kind="computer"), True) is False
+    assert _legacy_background_extraction_allowed(SimpleNamespace(scope_kind="general"), False) is False
+
+
+def test_personal_turn_does_not_schedule_global_auto_memory(monkeypatch):
+    """The gate protects the actual post-response dispatch, not just a helper."""
+    import routes.chat_helpers as helpers
+
+    scheduled = []
+    monkeypatch.delenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", raising=False)
+    monkeypatch.setattr(helpers, "_spawn_bg", lambda task: scheduled.append(task))
+    session = SimpleNamespace(
+        scope_kind="personal", history=[{}, {}, {}, {}], endpoint_url="http://unused",
+        model="unused", headers={}, name="Personal Advisor",
+    )
+    run_post_response_tasks(
+        session, None, "personal", "hello", "reply", None,
+        {"auto_memory": True, "auto_skills": True}, None, None, None,
+        owner="alice", agent_rounds=3, agent_tool_calls=3,
+    )
+
+    assert scheduled == []
 
 
 def test_continuity_prompt_marks_derived_context_without_raw_transcript():

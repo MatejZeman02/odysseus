@@ -221,6 +221,19 @@ def _semantic_proposals_auto_enabled() -> bool:
     }
 
 
+def _legacy_background_extraction_allowed(sess, allow_background_extraction: bool) -> bool:
+    """Keep Companion homes out of native global auto-memory and skill writers.
+
+    Personal, project, and Computer Help state is owned by the scoped
+    continuity/artifact stores.  Their turns may create an explicitly enabled,
+    source-linked semantic *proposal*, but must never feed the legacy global
+    extractor merely because an owner enabled auto-memory for ordinary chats.
+    """
+    return bool(allow_background_extraction) and getattr(sess, "scope_kind", "general") not in {
+        "personal", "project", "computer",
+    }
+
+
 def cancel_scheduled_semantic_proposal(owner: str | None, session_id: str | None) -> None:
     """Cancel a queued derivation before a newer foreground turn begins."""
     key = (str(owner or ""), str(session_id or ""))
@@ -1440,11 +1453,14 @@ def run_post_response_tasks(
     turn's request too.
     """
     _extraction_jobs: list = []
+    legacy_background_extraction = _legacy_background_extraction_allowed(
+        sess, allow_background_extraction,
+    )
 
     # Memory extraction — only every 4th message pair to avoid excess LLM calls
     _msg_count = len(sess.history) if hasattr(sess, 'history') else 0
     _should_extract = (_msg_count >= 4) and (_msg_count % 4 == 0)
-    if allow_background_extraction and not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
+    if legacy_background_extraction and not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
         from services.memory.memory_extractor import extract_and_store
         from src.task_endpoint import resolve_task_endpoint
         t_url, t_model, t_headers = resolve_task_endpoint(
@@ -1471,7 +1487,7 @@ def run_post_response_tasks(
     )
     if (
         extract_skills
-        and allow_background_extraction
+        and legacy_background_extraction
         and auto_skills_enabled
         and not incognito
         and not compare_mode
