@@ -45,6 +45,28 @@ def test_bubblewrap_command_rejects_a_symlinked_workspace_root(tmp_path):
         )
 
 
+def test_qwen_workspace_rejects_a_symlink_swap_during_resolution(tmp_path, monkeypatch):
+    from src.qwen_supervisor import _regular_workspace_root
+
+    workspace = tmp_path / "workspace"; workspace.mkdir()
+    outside = tmp_path / "outside"; outside.mkdir()
+    original = tmp_path / "workspace-original"
+    real_resolve = Path.resolve
+    swapped = False
+
+    def swap_during_resolve(self, *args, **kwargs):
+        nonlocal swapped
+        if not swapped and self == workspace:
+            swapped = True
+            workspace.rename(original)
+            workspace.symlink_to(outside, target_is_directory=True)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", swap_during_resolve)
+    with pytest.raises(QwenHarnessError, match="changed while"):
+        _regular_workspace_root(workspace)
+
+
 def test_supervisor_keeps_npm_install_root_when_bin_is_symlink(tmp_path):
     root = tmp_path / "qwen-install"
     package = root / "node_modules" / "@qwen-code" / "qwen-code"

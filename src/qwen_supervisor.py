@@ -40,9 +40,22 @@ def _regular_workspace_root(workspace_root: Path) -> Path:
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise QwenHarnessError("Qwen workspace must be a regular directory")
     try:
-        return candidate.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+        # ``resolve`` follows the current pathname. Confirm its target still
+        # has the identity vetted above, so a concurrent symlink/directory
+        # swap cannot redirect the read-only Qwen bind.
+        current = candidate.lstat()
+        target = resolved.lstat()
     except OSError as exc:
         raise QwenHarnessError("Qwen workspace is unavailable") from exc
+    if (
+        stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(target.st_mode)
+        or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
+        or (target.st_dev, target.st_ino) != (info.st_dev, info.st_ino)
+    ):
+        raise QwenHarnessError("Qwen workspace changed while it was being prepared")
+    return resolved
 
 
 def verify_qwen_binary(binary: Path, *, expected_version: str = PINNED_QWEN_VERSION) -> None:

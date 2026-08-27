@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -60,6 +61,25 @@ def test_snapshot_rejects_a_symlinked_workspace_root(workspace, tmp_path):
 
     with pytest.raises(ValueError, match="regular directory"):
         snapshot_workspace(swapped_root)
+
+
+def test_snapshot_rejects_workspace_swapped_to_symlink_during_resolution(workspace, tmp_path, monkeypatch):
+    outside = tmp_path / "outside"; outside.mkdir()
+    original = tmp_path / "workspace-original"
+    real_resolve = Path.resolve
+    swapped = False
+
+    def swap_during_resolve(self, *args, **kwargs):
+        nonlocal swapped
+        if not swapped and self == workspace:
+            swapped = True
+            workspace.rename(original)
+            workspace.symlink_to(outside, target_is_directory=True)
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", swap_during_resolve)
+    with pytest.raises(ValueError, match="changed while"):
+        snapshot_workspace(workspace)
 
 
 def test_read_only_runner_detects_a_file_mutation(workspace):

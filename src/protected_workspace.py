@@ -73,7 +73,19 @@ def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
         raise ValueError("protected workspace is unavailable") from exc
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise ValueError("protected workspace must be a regular directory")
-    root = candidate.resolve(strict=True)
+    try:
+        root = candidate.resolve(strict=True)
+        current = candidate.lstat()
+        target = root.lstat()
+    except OSError as exc:
+        raise ValueError("protected workspace is unavailable") from exc
+    if (
+        stat.S_ISLNK(current.st_mode)
+        or not stat.S_ISDIR(target.st_mode)
+        or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)
+        or (target.st_dev, target.st_ino) != (info.st_dev, info.st_ino)
+    ):
+        raise ValueError("protected workspace changed while it was being prepared")
     if not (root / ".git").exists():
         raise ValueError("protected workspace must be a Git checkout")
     head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
