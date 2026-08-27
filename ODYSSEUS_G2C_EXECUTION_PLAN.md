@@ -453,10 +453,9 @@ continuity compiler. Project Context now exposes an owner-selected direct
 relation allowlist (maximum three projects). A relation shares nothing on its
 own: the owner must explicitly mention `@Project Name` in that exact project
 turn, and only the related project's accepted brief may then be compiled.
-Remaining C5 work is richer inspector coverage for eventual episodic hits.
-Native Obsidian-compatible callout rendering is now shared by chat and the
-Documents Markdown preview; export keeps the original Markdown source rather
-than serializing the presentation HTML.
+**C5 is implemented.** Native Obsidian-compatible callout rendering is shared
+by chat and the Documents Markdown preview; export keeps the original Markdown
+source rather than serializing the presentation HTML.
 
 The Context inspector now records the count and source *classes* of scoped
 episodic hits for the last completed turn (for example, `artifact: 1`,
