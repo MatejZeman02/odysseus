@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from core.database import Base, ContinuityArtifact, Session as DbSession
+from core.database import Base, ChatMessage as DbMessage, ContinuityArtifact, Session as DbSession
 from src.continuity import (
     ProjectBriefV1,
     ScopeConflictError,
@@ -150,3 +150,81 @@ def test_semantic_proposal_rejects_invalid_scope_or_promotion_status(store):
     )
     with pytest.raises(ScopeConflictError, match="stable session binding"):
         continuity.write_semantic_proposal(owner="alice", proposal=mismatch)
+
+
+def _source_hash(local_session, session_id, source):
+    db = local_session()
+    for message_id, role, content in source:
+        db.add(DbMessage(id=message_id, session_id=session_id, role=role, content=content, meta_data="{}"))
+    db.commit()
+    source_ids = [message_id for message_id, _role, _content in source]
+    result = ContinuityStore._source_message_hash(db, session_id=session_id, source_ids=source_ids)
+    db.close()
+    return source_ids, result
+
+
+def test_owner_selected_project_entries_promote_atomically_from_fresh_source(store):
+    continuity, local_session = store
+    project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="project", project_id=project_id)
+    source_ids, source_hash = _source_hash(local_session, "alice-session", [
+        ("m1", "user", "Prepare the release"),
+        ("m2", "assistant", "The release branch is frozen"),
+    ])
+    proposal = SemanticCheckpointProposalV1(
+        session_id="alice-session", scope_kind="project", project_id=project_id,
+        objective="Prepare the release", facts=["The branch is frozen"],
+        decision_candidates=["Ship the small fix first"], proposals=["Canary first"],
+        failed_approaches=["Previous rollout timed out"], open_questions=["Who reviews it?"],
+        next_actions=["Run the canary"], artifact_refs=["plans/release.md"],
+        source_message_ids=source_ids, source_through_message_id="m2", source_hash=source_hash,
+        derivation_model="selected-model",
+    )
+    proposal_write = continuity.write_semantic_proposal(owner="alice", proposal=proposal)
+
+    record, brief_write, brief = continuity.promote_semantic_proposal(
+        owner="alice", proposal_id=proposal_write.id, expected_revision=proposal_write.revision,
+        selections={"objective": [0], "facts": [0], "decision_candidates": [0], "next_actions": [0]},
+    )
+
+    assert record.status == "promoted"
+    assert brief_write.created is True
+    assert brief.derivation_status == "accepted"
+    assert brief.derivation_method == "owner_promotion_v1"
+    assert brief.summary == "Prepare the release"
+    assert brief.confirmed_facts == ["The branch is frozen"]
+    assert brief.accepted_decisions == ["Ship the small fix first"]
+    assert brief.current_plans == ["Run the canary"]
+    assert brief.proposals == []
+    assert continuity.latest_project_brief(owner="alice", project_id=project_id) == brief
+    with pytest.raises(ScopeConflictError, match="no longer available"):
+        continuity.promote_semantic_proposal(
+            owner="alice", proposal_id=proposal_write.id, expected_revision=proposal_write.revision,
+            selections={"facts": [0]},
+        )
+
+
+def test_promotion_rejects_stale_source_without_changing_home_state(store):
+    continuity, local_session = store
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="personal")
+    source_ids, source_hash = _source_hash(local_session, "alice-session", [
+        ("m1", "user", "Remember that I prefer short plans"),
+    ])
+    proposal = SemanticCheckpointProposalV1(
+        session_id="alice-session", scope_kind="personal", facts=["Prefers short plans"],
+        source_message_ids=source_ids, source_through_message_id="m1", source_hash=source_hash,
+        derivation_model="selected-model",
+    )
+    written = continuity.write_semantic_proposal(owner="alice", proposal=proposal)
+    db = local_session()
+    db.query(DbMessage).filter(DbMessage.id == "m1").update({"content": "Different current preference"})
+    db.commit()
+    db.close()
+
+    with pytest.raises(ScopeConflictError, match="source is stale"):
+        continuity.promote_semantic_proposal(
+            owner="alice", proposal_id=written.id, expected_revision=written.revision,
+            selections={"facts": [0]},
+        )
+    assert continuity.latest_personal_brief(owner="alice", session_id="alice-session") is None
+    assert continuity.semantic_proposal(owner="alice", proposal_id=written.id).status == "active"

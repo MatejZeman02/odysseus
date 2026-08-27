@@ -215,6 +215,7 @@ class PersonalBriefV1:
     preferences: list[str] = field(default_factory=list)
     ongoing_goals: list[str] = field(default_factory=list)
     commitments: list[str] = field(default_factory=list)
+    proposals: list[str] = field(default_factory=list)
     recurring_themes: list[str] = field(default_factory=list)
     failed_approaches: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
@@ -250,6 +251,7 @@ class PersonalBriefV1:
             preferences=_text_list(data.get("preferences"), "preferences"),
             ongoing_goals=_text_list(data.get("ongoing_goals"), "ongoing_goals"),
             commitments=_text_list(data.get("commitments"), "commitments"),
+            proposals=_text_list(data.get("proposals"), "proposals"),
             recurring_themes=_text_list(data.get("recurring_themes"), "recurring_themes"),
             failed_approaches=_text_list(data.get("failed_approaches"), "failed_approaches"),
             open_questions=_text_list(data.get("open_questions"), "open_questions"),
@@ -343,6 +345,48 @@ class SemanticCheckpointProposalV1:
             derivation_status=str(data.get("derivation_status") or "proposed"),
             schema_version=data.get("schema_version", 1),
         )
+
+
+SEMANTIC_PROPOSAL_ENTRY_FIELDS = frozenset({
+    "objective",
+    "facts",
+    "decision_candidates",
+    "proposals",
+    "failed_approaches",
+    "open_questions",
+    "next_actions",
+    "artifact_refs",
+})
+
+
+def selected_proposal_entries(
+    proposal: SemanticCheckpointProposalV1,
+    selections: dict[str, list[int]],
+) -> dict[str, list[str]]:
+    """Resolve an owner selection without accepting browser-provided text."""
+    if not isinstance(selections, dict) or not selections:
+        raise ContractError("semantic proposal promotion requires selected entries")
+    selected: dict[str, list[str]] = {}
+    seen: set[tuple[str, int]] = set()
+    total = 0
+    for field_name, indexes in selections.items():
+        if field_name not in SEMANTIC_PROPOSAL_ENTRY_FIELDS:
+            raise ContractError(f"unsupported semantic proposal field: {field_name}")
+        if not isinstance(indexes, list) or not indexes:
+            raise ContractError(f"selection for {field_name} must be a non-empty index list")
+        values = [proposal.objective] if field_name == "objective" else list(getattr(proposal, field_name))
+        for index in indexes:
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0 or index >= len(values):
+                raise ContractError(f"selection index for {field_name} is out of range")
+            key = (field_name, index)
+            if key in seen:
+                raise ContractError("semantic proposal selection contains a duplicate entry")
+            seen.add(key)
+            selected.setdefault(field_name, []).append(values[index])
+            total += 1
+            if total > _MAX_PROPOSAL_ITEMS:
+                raise ContractError(f"semantic proposal selection exceeds {_MAX_PROPOSAL_ITEMS} entries")
+    return selected
 
 
 @dataclass(frozen=True)

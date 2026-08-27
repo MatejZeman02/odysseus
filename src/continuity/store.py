@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import uuid
+import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-from core.database import ContinuityArtifact, Project, Session as DbSession, SessionLocal
+from sqlalchemy import text
+
+from core.database import ChatMessage as DbMessage, ContinuityArtifact, Project, Session as DbSession, SessionLocal
 
 from .contracts import (
     PersonalBriefV1,
@@ -16,6 +19,7 @@ from .contracts import (
     SCOPES,
     SemanticCheckpointProposalV1,
     ThreadCheckpointV1,
+    selected_proposal_entries,
 )
 
 
@@ -36,6 +40,14 @@ class ArtifactWrite:
     id: str
     revision: int
     created: bool
+
+
+@dataclass(frozen=True)
+class SemanticProposalRecord:
+    id: str
+    revision: int
+    status: str
+    proposal: SemanticCheckpointProposalV1
 
 
 def _settings(project: Project) -> dict:
@@ -252,6 +264,77 @@ class ContinuityStore:
         artifact = self._latest(owner=owner, kind="semantic_checkpoint_proposal_v1", session_id=session_id)
         return SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
+    def semantic_proposal(self, *, owner: str, proposal_id: str) -> SemanticProposalRecord:
+        db = SessionLocal()
+        try:
+            artifact = self._semantic_proposal_artifact(db, owner=owner, proposal_id=proposal_id)
+            return SemanticProposalRecord(
+                id=artifact.id,
+                revision=artifact.revision,
+                status=artifact.status,
+                proposal=SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json)),
+            )
+        finally:
+            db.close()
+
+    def promote_semantic_proposal(
+        self,
+        *,
+        owner: str,
+        proposal_id: str,
+        expected_revision: int,
+        selections: dict[str, list[int]],
+    ) -> tuple[SemanticProposalRecord, ArtifactWrite, ProjectBriefV1 | PersonalBriefV1]:
+        """Promote owner-selected proposal entries into one accepted home brief.
+
+        The proposal remains immutable and the browser supplies only indexes.
+        Rehashing the cited DB messages and updating the proposal/brief happen
+        in one transaction, so stale source material cannot become memory.
+        """
+        if expected_revision < 1:
+            raise ValueError("expected proposal revision must be positive")
+        db = SessionLocal()
+        try:
+            if db.get_bind().dialect.name == "sqlite":
+                db.execute(text("BEGIN IMMEDIATE"))
+            artifact = self._semantic_proposal_artifact(db, owner=owner, proposal_id=proposal_id, lock=True)
+            if artifact.revision != expected_revision:
+                raise ScopeConflictError("semantic proposal revision is stale")
+            if artifact.status != "active":
+                raise ScopeConflictError("semantic proposal is no longer available for promotion")
+            proposal = SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json))
+            session = self._session(db, owner, proposal.session_id)
+            scope = self._resolved(db, session, owner)
+            if scope.scope_kind != proposal.scope_kind or scope.project_id != proposal.project_id:
+                raise ScopeConflictError("semantic proposal no longer matches its session scope")
+            if self._source_message_hash(db, session_id=proposal.session_id, source_ids=proposal.source_message_ids) != proposal.source_hash:
+                raise ScopeConflictError("semantic proposal source is stale or no longer available")
+            selected = selected_proposal_entries(proposal, selections)
+            home_source_hash = self._promotion_source_hash(proposal_id, artifact.revision, selected)
+            if proposal.scope_kind == "project":
+                brief = self._promote_project_brief(db, owner=owner, proposal=proposal, selected=selected)
+                write = self._write(
+                    db, owner=owner, kind="project_brief_v1", session_id=None, project_id=proposal.project_id,
+                    payload=brief.to_payload(), source_through_message_id=proposal.source_through_message_id,
+                    source_hash=home_source_hash, commit=False,
+                )
+            else:
+                brief = self._promote_personal_brief(db, owner=owner, proposal=proposal, selected=selected)
+                write = self._write(
+                    db, owner=owner, kind="personal_brief_v1", session_id=proposal.session_id, project_id=None,
+                    payload=brief.to_payload(), source_through_message_id=proposal.source_through_message_id,
+                    source_hash=home_source_hash, commit=False,
+                )
+            artifact.status = "promoted"
+            db.commit()
+            record = SemanticProposalRecord(artifact.id, artifact.revision, artifact.status, proposal)
+            return record, write, brief
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def project_catalog(self, *, owner: str) -> list[dict[str, str]]:
         db = SessionLocal()
         try:
@@ -295,7 +378,103 @@ class ContinuityStore:
         project = self._project(db, owner, project_id or "")
         return ResolvedScope(owner, session.id, "project", project.id, project.workspace_root)
 
-    def _write(self, db, *, owner, kind, session_id, project_id, payload, source_through_message_id, source_hash) -> ArtifactWrite:
+    @staticmethod
+    def _merge(existing: list[str], incoming: list[str]) -> list[str]:
+        return list(dict.fromkeys([*existing, *incoming]))[:30]
+
+    def _active_brief(self, db, *, owner: str, kind: str, session_id: Optional[str] = None, project_id: Optional[str] = None):
+        query = db.query(ContinuityArtifact).filter(
+            ContinuityArtifact.owner == owner,
+            ContinuityArtifact.kind == kind,
+            ContinuityArtifact.status == "active",
+        )
+        query = query.filter(ContinuityArtifact.session_id == session_id) if session_id else query.filter(ContinuityArtifact.project_id == project_id)
+        return query.order_by(ContinuityArtifact.revision.desc()).first()
+
+    def _promote_project_brief(self, db, *, owner: str, proposal: SemanticCheckpointProposalV1, selected: dict[str, list[str]]) -> ProjectBriefV1:
+        prior_row = self._active_brief(db, owner=owner, kind="project_brief_v1", project_id=proposal.project_id)
+        prior = ProjectBriefV1.from_payload(json.loads(prior_row.payload_json)) if prior_row else None
+        preserved = prior if prior and prior.derivation_status == "accepted" else None
+        return ProjectBriefV1(
+            project_id=proposal.project_id or "",
+            summary=(selected.get("objective") or [preserved.summary if preserved else ""])[0],
+            confirmed_facts=self._merge(preserved.confirmed_facts if preserved else [], selected.get("facts", [])),
+            accepted_decisions=self._merge(preserved.accepted_decisions if preserved else [], selected.get("decision_candidates", [])),
+            proposals=self._merge(preserved.proposals if preserved else [], selected.get("proposals", [])),
+            failed_approaches=self._merge(preserved.failed_approaches if preserved else [], selected.get("failed_approaches", [])),
+            open_questions=self._merge(preserved.open_questions if preserved else [], selected.get("open_questions", [])),
+            current_plans=self._merge(preserved.current_plans if preserved else [], selected.get("next_actions", [])),
+            source_refs=self._merge(preserved.source_refs if preserved else [], selected.get("artifact_refs", [])),
+            source_session_ids=self._merge(preserved.source_session_ids if preserved else [], [proposal.session_id]),
+            source_message_ids=self._merge(preserved.source_message_ids if preserved else [], proposal.source_message_ids),
+            source_through_message_id=proposal.source_through_message_id,
+            source_revision=proposal.source_hash,
+            derivation_status="accepted", derivation_version=1, derivation_method="owner_promotion_v1",
+        )
+
+    def _promote_personal_brief(self, db, *, owner: str, proposal: SemanticCheckpointProposalV1, selected: dict[str, list[str]]) -> PersonalBriefV1:
+        prior_row = self._active_brief(db, owner=owner, kind="personal_brief_v1", session_id=proposal.session_id)
+        prior = PersonalBriefV1.from_payload(json.loads(prior_row.payload_json)) if prior_row else None
+        preserved = prior if prior and prior.derivation_status == "accepted" else None
+        return PersonalBriefV1(
+            owner_id=owner,
+            summary=(selected.get("objective") or [preserved.summary if preserved else ""])[0],
+            confirmed_facts=self._merge(preserved.confirmed_facts if preserved else [], selected.get("facts", [])),
+            commitments=self._merge(preserved.commitments if preserved else [], selected.get("decision_candidates", [])),
+            proposals=self._merge(preserved.proposals if preserved else [], selected.get("proposals", [])),
+            failed_approaches=self._merge(preserved.failed_approaches if preserved else [], selected.get("failed_approaches", [])),
+            open_questions=self._merge(preserved.open_questions if preserved else [], selected.get("open_questions", [])),
+            ongoing_goals=self._merge(preserved.ongoing_goals if preserved else [], selected.get("next_actions", [])),
+            artifact_refs=self._merge(preserved.artifact_refs if preserved else [], selected.get("artifact_refs", [])),
+            source_refs=self._merge(preserved.source_refs if preserved else [], proposal.source_message_ids),
+            source_message_ids=self._merge(preserved.source_message_ids if preserved else [], proposal.source_message_ids),
+            source_through_message_id=proposal.source_through_message_id,
+            derivation_status="accepted", derivation_version=1, derivation_method="owner_promotion_v1",
+        )
+
+    @staticmethod
+    def _promotion_source_hash(proposal_id: str, revision: int, selected: dict[str, list[str]]) -> str:
+        material = json.dumps({"proposal_id": proposal_id, "revision": revision, "selected": selected}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _source_message_hash(db, *, session_id: str, source_ids: list[str]) -> str:
+        rows = db.query(DbMessage).filter(
+            DbMessage.session_id == session_id,
+            DbMessage.id.in_(source_ids),
+        ).all()
+        by_id = {row.id: row for row in rows}
+        if len(by_id) != len(source_ids):
+            return ""
+        normalized = []
+        for source_id in source_ids:
+            row = by_id[source_id]
+            try:
+                metadata = json.loads(row.meta_data or "{}")
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["_db_id"] = row.id
+            normalized.append({"role": row.role or "", "content": row.content or "", "metadata": metadata})
+        encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _semantic_proposal_artifact(db, *, owner: str, proposal_id: str, lock: bool = False) -> ContinuityArtifact:
+        query = db.query(ContinuityArtifact).filter(
+            ContinuityArtifact.id == proposal_id,
+            ContinuityArtifact.owner == owner,
+            ContinuityArtifact.kind == "semantic_checkpoint_proposal_v1",
+        )
+        if lock and db.get_bind().dialect.name != "sqlite":
+            query = query.with_for_update()
+        artifact = query.first()
+        if artifact is None:
+            raise NotFoundError("owner-scoped semantic proposal was not found")
+        return artifact
+
+    def _write(self, db, *, owner, kind, session_id, project_id, payload, source_through_message_id, source_hash, commit: bool = True) -> ArtifactWrite:
         query = db.query(ContinuityArtifact).filter(
             ContinuityArtifact.owner == owner,
             ContinuityArtifact.kind == kind,
@@ -330,7 +509,8 @@ class ContinuityStore:
             source_hash=source_hash,
         )
         db.add(artifact)
-        db.commit()
+        if commit:
+            db.commit()
         return ArtifactWrite(artifact.id, artifact.revision, True)
 
     def _latest(self, *, owner: str, kind: str, session_id: Optional[str] = None, project_id: Optional[str] = None):
