@@ -155,7 +155,7 @@ def test_compiler_only_includes_explicit_related_project_briefs(monkeypatch):
     assert named.manifest["related_project_ids"] == [allowed]
 
     not_named = ContextCompiler(store).compile(
-        owner="alice", session_id="session", request="Compare Allowed with the current plan",
+        owner="alice", session_id="session", request="Compare @AllowedButNot with the current plan",
         transcript=[_message("user", "hello", 3)],
     )
     assert not_named.related_project_briefs == ()

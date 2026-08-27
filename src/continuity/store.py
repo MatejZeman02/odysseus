@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
@@ -215,7 +216,9 @@ class ContinuityStore:
         related = self.related_project_catalog(owner=owner, project_id=project_id)
         matches = [
             str(row["id"]) for row in related
-            if row["related"] and f"@{str(row['name']).casefold()}" in folded_request
+            if row["related"] and re.search(
+                rf"(?<![\w])@{re.escape(str(row['name']).casefold())}(?![\w])", folded_request,
+            )
         ]
         return matches[:limit]
 
