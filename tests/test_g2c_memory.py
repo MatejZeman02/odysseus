@@ -467,6 +467,30 @@ def test_local_scoped_provider_enforces_complete_scope_and_provenance(store):
         ))
 
 
+def test_local_scoped_provider_keeps_stored_expiry_and_rejects_expired_writes(store):
+    from src.memory_provider import ScopedMemoryQuery, ScopedMemoryScope
+    from src.scoped_memory import LocalScopedMemoryProvider
+
+    provider = LocalScopedMemoryProvider()
+    expires_at = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=1)
+    scope = ScopedMemoryScope(
+        owner_id="alice", home_kind="project", project_id="dust", session_id="project",
+        provenance_kind="approved_brief", provenance_id="brief-1", expires_at=expires_at,
+    )
+    asyncio.run(provider.remember_scoped("A fish enemy", scope=scope))
+    hit = asyncio.run(provider.recall_scoped(ScopedMemoryQuery("fish", scope)))[0]
+    assert hit.memory.scope is not None
+    assert hit.memory.scope.expires_at == expires_at.replace(tzinfo=None)
+
+    expired_scope = ScopedMemoryScope(
+        owner_id="alice", home_kind="project", project_id="dust", session_id="project",
+        provenance_kind="approved_brief", provenance_id="expired-brief",
+        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    with pytest.raises(ValueError, match="future"):
+        asyncio.run(provider.remember_scoped("Must not persist", scope=expired_scope))
+
+
 def test_g2c_routes_and_ui_keep_scopes_explicit():
     routes = open("routes/companion_memory_routes.py", encoding="utf-8").read()
     ui = open("static/js/sessions.js", encoding="utf-8").read()

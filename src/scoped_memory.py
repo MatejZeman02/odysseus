@@ -165,6 +165,12 @@ class LocalScopedMemoryProvider(ScopedMemoryProvider):
     ) -> MemoryRecord:
         if not scope.provenance_kind or not scope.provenance_id:
             raise ValueError("scoped memory writes require provenance")
+        if scope.expires_at is not None:
+            expiry = scope.expires_at
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry <= datetime.now(timezone.utc):
+                raise ValueError("scoped memory expiry must be in the future")
         self.index.index(
             owner=scope.owner_id, scope_kind=scope.home_kind, project_id=scope.project_id,
             session_id=scope.session_id, source_kind=scope.provenance_kind,
@@ -206,10 +212,15 @@ class LocalScopedMemoryProvider(ScopedMemoryProvider):
 
     @staticmethod
     def _scope_for_row(scope: ScopedMemoryScope, row: dict[str, Any]) -> ScopedMemoryScope:
+        raw_expiry = row.get("expires_at")
+        try:
+            stored_expiry = datetime.fromisoformat(raw_expiry) if isinstance(raw_expiry, str) and raw_expiry else None
+        except ValueError:
+            stored_expiry = None
         return ScopedMemoryScope(
             owner_id=scope.owner_id, home_kind=scope.home_kind, project_id=scope.project_id,
             session_id=row.get("session_id"), sensitivity=scope.sensitivity,
-            expires_at=scope.expires_at, provenance_kind=str(row.get("source_kind") or ""),
+            expires_at=stored_expiry, provenance_kind=str(row.get("source_kind") or ""),
             provenance_id=str(row.get("source_id") or ""), grant_ids=scope.grant_ids,
         )
 
