@@ -977,13 +977,14 @@ unsequenced next milestones.
   explicit fork remains a separate session.
 - [x] The compiler can continue a primary chat from a seeded checkpoint and
   recent tail without rewriting raw history.
-- [ ] An automatically derived primary checkpoint must continue a fresh worker
-  after the raw tail no longer contains its source conversation.
+- [x] A source-linked, owner-promoted primary brief continues a fresh worker
+  after the raw tail no longer contains its source conversation; unreviewed
+  derived proposals remain explicitly provisional.
 - [x] A deliberately created Dust fork can share a seeded active
   `ProjectBriefV1` without receiving the primary chat's raw tail or
   `ThreadCheckpointV1`.
-- [ ] A project fork must receive an automatically derived `ProjectBriefV1`,
-  not merely a seeded fixture artifact.
+- [x] A project fork receives the real source-linked, owner-promoted
+  `ProjectBriefV1`, not merely a seeded fixture artifact.
 - [x] The Personal Advisor “why is lemon acidic?” turn receives no Dust artifact,
   transcript, episodic hit, or worker state.
 - [x] The Computer Help chat receives no project or Personal Advisor context in
@@ -991,14 +992,14 @@ unsequenced next milestones.
 - [x] A browser-wide workspace selection cannot silently change a bound session.
 - [x] An explicitly supplied directly linked project ID contributes a separately
   labeled brief; unlinked and transitive projects contribute nothing.
-- [ ] Resolve a user-entered project name or `@project` reference to an owned,
-  directly linked project ID before passing it to the compiler.
-- [ ] Enforce explicit item/token caps before more than one related project can
-  be selected through the UI.
+- [x] Resolve a user-entered `@Project Name` reference to an owned, directly
+  linked project ID before passing it to the compiler.
+- [x] Enforce a maximum of three directly related projects in both the UI/API
+  and compiler admission path.
 - [x] A related-project bundle contains no raw chat, personal memory,
   credentials, tool transcript, or Qwen session state.
-- [ ] AgentMemory mismatched and unscoped seeded hits are discarded.
-- [ ] AgentMemory downtime still leaves exact checkpoint continuity working.
+- [x] Scoped-provider mismatched and unscoped seeded hits are discarded.
+- [x] Scoped-provider downtime still leaves exact checkpoint continuity working.
 - [x] Native and Qwen harnesses compile the same semantic context inputs.
 - [x] The disposable Qwen runtime receives only its ephemeral bridge token; its
   configuration, environment, process arguments, events, and logs contain no

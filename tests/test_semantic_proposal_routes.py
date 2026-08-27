@@ -15,6 +15,7 @@ import src.continuity.semantic_deriver as deriver_module
 import src.continuity.store as store_module
 import src.scoped_memory as scoped_memory_module
 from src.continuity.semantic_proposals import derivation_messages, parse_semantic_proposal
+from src.continuity.compiler import ContextCompiler
 from src.continuity.contracts import PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
 from src.continuity.store import ContinuityStore
 
@@ -160,6 +161,56 @@ def test_semantic_proposal_context_preflight_rejects_hidden_or_missing_model(mon
 
     assert payload["semantic_proposal_readiness"]["eligible"] is False
     assert payload["semantic_proposal_readiness"]["code"] == "model_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_owner_promoted_semantic_project_brief_continues_in_cold_project_fork(monkeypatch):
+    """C2 proof must use the real proposal/promotion path, not a seeded brief."""
+    router = _setup(monkeypatch)
+    db = route_module.SessionLocal()
+    primary = db.query(DbSession).filter(DbSession.id == "session").one()
+    primary.name, primary.scope_kind, primary.project_id = "Dust", "project", "dust"
+    db.add(Project(id="dust", owner="alice", name="Dust", workspace_root="/dust", settings_json="{}"))
+    db.add(DbSession(
+        id="fork", owner="alice", name="Dust fork", endpoint_url="http://unused", model="model-a",
+        endpoint_id="endpoint-a", scope_kind="project", project_id="dust",
+    ))
+    db.commit(); db.close()
+
+    monkeypatch.setattr(
+        deriver_module, "resolve_endpoint_by_id",
+        lambda endpoint_id, **kwargs: ("https://model.invalid/v1/chat/completions", kwargs["model"], {}),
+    )
+
+    async def fake_llm(*_args, **_kwargs):
+        return _json_payload(objective="Ship the Dust release", facts=["Dust is frozen"])
+
+    monkeypatch.setattr(deriver_module, "llm_call_async", fake_llm)
+    create = _endpoint(router, "/api/companion/memory/sessions/{session_id}/semantic-proposals")
+    proposal = await create("session", SimpleNamespace())
+    promote = _endpoint(router, "/api/companion/memory/semantic-proposals/{proposal_id}/promote")
+    promote(
+        proposal["id"],
+        route_module.SemanticProposalPromotion(
+            expected_revision=proposal["revision"], selections={"objective": [0], "facts": [0]},
+        ),
+        SimpleNamespace(),
+    )
+
+    cold_primary = ContextCompiler(ContinuityStore()).compile(
+        owner="alice", session_id="session", request="What is our current goal?", transcript=[],
+    )
+    assert cold_primary.thread_checkpoint is None
+    assert cold_primary.primary_project_brief is not None
+    assert cold_primary.primary_project_brief.summary == "Ship the Dust release"
+
+    cold_fork = ContextCompiler(ContinuityStore()).compile(
+        owner="alice", session_id="fork", request="What is our current goal?", transcript=[],
+    )
+    assert cold_fork.thread_checkpoint is None
+    assert cold_fork.primary_project_brief is not None
+    assert cold_fork.primary_project_brief.summary == "Ship the Dust release"
+    assert cold_fork.primary_project_brief.confirmed_facts == ["Dust is frozen"]
 
 
 @pytest.mark.asyncio
