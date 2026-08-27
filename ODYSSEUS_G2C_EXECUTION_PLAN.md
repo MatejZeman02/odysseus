@@ -286,6 +286,24 @@ server-disable the legacy global `manage_memory`, `manage_skills`, and
 `mcp__<server>__memory_save`; the browser cannot regain those cross-scope paths
 by switching from Chat to native Agent mode or by selecting another MCP server.
 
+### Companion tool-boundary hardening (2026-08)
+
+**Implemented and regression-tested.** An exact tool selection supplied for a
+Companion request is now authoritative all the way through the native Agent
+path. In particular, an explicit empty selection stays empty: it cannot be
+expanded later by domain heuristics, active documents, uploads, forced-tool
+rules, or skill discovery. Prompt-cache and provider-schema keys distinguish
+that empty selection from “no policy supplied,” so a cached full-tool prompt
+cannot reintroduce legacy capabilities. The execution backstop also resolves
+the durable session scope from the database before admitting a dynamically
+named MCP action, rather than trusting only in-memory request state.
+
+This closes the route that could otherwise expose legacy global memory/skill
+tools to Personal, project, or Computer homes after the UI had correctly
+hidden them. It does not grant any new capability; future permission UI must
+pass an exact, server-authorized selection rather than relying on browser state
+or heuristic expansion.
+
 ### C4 preflight audit (2026-08)
 
 The active native store is `src/memory.MemoryManager`, backed by the owner's
