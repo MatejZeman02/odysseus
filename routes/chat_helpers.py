@@ -57,6 +57,8 @@ def _is_casual_low_signal(text: str) -> bool:
 # the background work (extraction, auto-naming) silently never runs.
 # Mirrors WebhookManager._spawn_tracked from src/webhook_manager.py.
 _BG_TASKS: set[asyncio.Task] = set()
+_SEMANTIC_PROPOSAL_TASKS: dict[tuple[str, str], asyncio.Task] = {}
+_SEMANTIC_PROPOSAL_SETTLE_SECONDS = 4.0
 _INCOGNITO_CONTEXTS: dict[str, dict[str, Any]] = {}
 _INCOGNITO_CONTEXT_TTL_SECONDS = 6 * 60 * 60
 _INCOGNITO_CONTEXT_MAX_MESSAGES = 80
@@ -174,6 +176,60 @@ def _spawn_bg(coro) -> asyncio.Task:
     _BG_TASKS.add(task)
     task.add_done_callback(_BG_TASKS.discard)
     return task
+
+
+def _semantic_proposals_auto_enabled() -> bool:
+    """Allow owners to opt out of the bounded Companion proposal worker."""
+    return os.getenv("ODYSSEUS_SEMANTIC_PROPOSALS_AUTO", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
+def cancel_scheduled_semantic_proposal(owner: str | None, session_id: str | None) -> None:
+    """Cancel a queued derivation before a newer foreground turn begins."""
+    key = (str(owner or ""), str(session_id or ""))
+    task = _SEMANTIC_PROPOSAL_TASKS.pop(key, None)
+    if task and not task.done():
+        task.cancel()
+
+
+def _schedule_semantic_proposal(owner: str | None, session_id: str, message_count: int) -> None:
+    """Debounce a low-authority derivation after a completed Companion turn.
+
+    It is independent of the response stream. A fresh user turn cancels the
+    quiet-period task, so this worker cannot hold the local model slot while a
+    user is actively continuing the conversation.
+    """
+    if not owner or message_count < 4 or message_count % 4:
+        return
+    key = (str(owner), str(session_id))
+    cancel_scheduled_semantic_proposal(*key)
+
+    async def _run():
+        try:
+            await asyncio.sleep(_SEMANTIC_PROPOSAL_SETTLE_SECONDS)
+            if _is_session_stream_active(session_id):
+                return
+            from src.continuity.semantic_deriver import derive_semantic_proposal
+            result = await derive_semantic_proposal(
+                owner=str(owner), session_id=session_id, only_if_absent=True,
+            )
+            if result.created:
+                logger.info("[semantic-proposal] created bounded proposal for session %s", session_id)
+        except asyncio.CancelledError:
+            logger.debug("[semantic-proposal] cancelled for session %s", session_id)
+            raise
+        except Exception as exc:
+            # The safe failure is intentionally not injected into chat or
+            # accepted memory. The owner still has the explicit Context action.
+            code = getattr(exc, "code", "unknown")
+            logger.info("[semantic-proposal] skipped for session %s (%s)", session_id, code)
+        finally:
+            current = _SEMANTIC_PROPOSAL_TASKS.get(key)
+            if current is asyncio.current_task():
+                _SEMANTIC_PROPOSAL_TASKS.pop(key, None)
+
+    _SEMANTIC_PROPOSAL_TASKS[key] = _spawn_bg(_run())
 
 
 def _prune_incognito_contexts(now: float | None = None):
@@ -1388,6 +1444,19 @@ def run_post_response_tasks(
 
     if _extraction_jobs:
         _spawn_bg(_run_extraction_jobs_sequentially(session_id, _extraction_jobs))
+
+    # Semantic proposals are source-linked review material, not accepted
+    # memory. They use the session's stored route with no tools and run only
+    # after the foreground response has been saved.
+    if (
+        allow_background_extraction
+        and not incognito
+        and not compare_mode
+        and uprefs.get("auto_memory", True)
+        and _semantic_proposals_auto_enabled()
+        and getattr(sess, "scope_kind", "general") in {"personal", "project"}
+    ):
+        _schedule_semantic_proposal(owner, session_id, _msg_count)
 
     # Token accumulation
     if last_metrics:

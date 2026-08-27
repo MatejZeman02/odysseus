@@ -130,6 +130,10 @@ def test_semantic_proposal_is_immutable_source_linked_and_not_a_home_brief(store
     assert row.status == "active"
     assert row.source_hash == "proposal-source"
 
+    admitted, created = continuity.write_semantic_proposal_if_absent(owner="alice", proposal=proposal)
+    assert created is False
+    assert admitted.id == written.id
+
 
 def test_semantic_proposal_rejects_invalid_scope_or_promotion_status(store):
     continuity, _ = store

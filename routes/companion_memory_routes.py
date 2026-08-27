@@ -9,14 +9,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import ChatMessage as DbMessage, Project, Session as DbSession, SessionLocal
+from core.database import Project, Session as DbSession, SessionLocal
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.continuity.contracts import ContractError, PersonalBriefV1
-from src.continuity.semantic_proposals import bounded_source, derivation_messages, parse_semantic_proposal
+from src.continuity.semantic_deriver import SemanticDerivationError, derive_semantic_proposal
 from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictError
-from src.endpoint_resolver import resolve_endpoint_by_id
-from src.llm_core import llm_call_async
 
 
 logger = logging.getLogger(__name__)
@@ -155,60 +153,27 @@ def setup_companion_memory_routes() -> APIRouter:
     @router.post("/memory/sessions/{session_id}/semantic-proposals")
     async def create_semantic_proposal(session_id: str, request: Request):
         """Derive one bounded, tool-free proposal from an owner session."""
-        owner = _owner(request)
-        db = SessionLocal()
         try:
-            session = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
-            if not session:
-                raise HTTPException(404, "Companion session was not found")
-            scope_kind = session.scope_kind or "general"
-            if scope_kind not in {"personal", "project"}:
-                raise HTTPException(409, "Semantic proposals are available only for Personal and project homes")
-            endpoint_id = str(session.endpoint_id or "")
-            model = str(session.model or "")
-            if not endpoint_id or not model:
-                raise HTTPException(409, "Select a registered model before creating a semantic proposal")
-            rows = db.query(DbMessage).filter(DbMessage.session_id == session_id).order_by(
-                DbMessage.timestamp.asc(), DbMessage.id.asc()
-            ).all()
-            source = bounded_source([
-                {"id": row.id, "role": row.role, "content": row.content}
-                for row in rows
-            ])
-            source_ids = [item["id"] for item in source]
-            source_hash = ContinuityStore._source_message_hash(db, session_id=session_id, source_ids=source_ids)
-            if not source_hash:
-                raise HTTPException(409, "The selected source messages are no longer available")
-            project_id = session.project_id
-        except ContractError as exc:
-            raise HTTPException(422, "This conversation does not contain a bounded source span for a semantic proposal") from exc
-        finally:
-            db.close()
-
-        route = resolve_endpoint_by_id(endpoint_id, model=model, owner=owner, require_exact_model=True)
-        if not route:
-            raise HTTPException(409, "The selected model route is unavailable; choose a registered model and try again")
-        url, resolved_model, headers = route
-        try:
-            response = await llm_call_async(
-                url, resolved_model, derivation_messages(source), temperature=0, max_tokens=3_000,
-                headers=headers, timeout=90, max_retries=0, session_id=session_id,
-                workload="foreground",
-            )
-            proposal = parse_semantic_proposal(
-                response, session_id=session_id, scope_kind=scope_kind, project_id=project_id,
-                source_message_ids=source_ids, source_hash=source_hash, derivation_model=resolved_model,
-            )
-            result = ContinuityStore().write_semantic_proposal(owner=owner, proposal=proposal)
-        except ContractError as exc:
-            logger.info("Semantic proposal validation failed for session %s: %s", session_id, exc)
-            raise HTTPException(422, "The selected model did not return a valid semantic proposal. No memory was changed.") from exc
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.exception("Semantic proposal derivation failed for session %s", session_id)
-            raise HTTPException(502, "The selected model could not create a semantic proposal. No memory was changed.") from exc
-        return {"id": result.id, "revision": result.revision, "status": "proposed", "proposal": proposal.to_payload()}
+            result = await derive_semantic_proposal(owner=_owner(request), session_id=session_id)
+        except SemanticDerivationError as exc:
+            status = {
+                "session_not_found": 404,
+                "scope_denied": 409,
+                "model_unavailable": 409,
+                "source_stale": 409,
+                "source_unavailable": 422,
+                "proposal_invalid": 422,
+                "provider_failed": 502,
+            }.get(exc.code, 500)
+            if status >= 500:
+                logger.exception("Semantic proposal derivation failed for session %s", session_id, exc_info=exc)
+            raise HTTPException(status, str(exc)) from exc
+        return {
+            "id": result.record.id,
+            "revision": result.record.revision,
+            "status": "proposed",
+            "proposal": result.record.proposal.to_payload(),
+        }
 
     @router.get("/memory/semantic-proposals/{proposal_id}")
     def read_semantic_proposal(proposal_id: str, request: Request):

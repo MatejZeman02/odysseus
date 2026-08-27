@@ -248,6 +248,61 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def write_semantic_proposal_if_absent(
+        self, *, owner: str, proposal: SemanticCheckpointProposalV1,
+    ) -> tuple[SemanticProposalRecord, bool]:
+        """Write a proposal only if its session has no active review item.
+
+        Background derivation may finish after a user has manually created a
+        proposal.  It must not supersede that item merely because it started
+        first.  SQLite's immediate transaction gives the same admission rule
+        to concurrent local workers; other databases use a row lock when one
+        is available.
+        """
+        db = SessionLocal()
+        try:
+            if db.get_bind().dialect.name == "sqlite":
+                db.execute(text("BEGIN IMMEDIATE"))
+            session = self._session(db, owner, proposal.session_id)
+            scope = self._resolved(db, session, owner)
+            if scope.scope_kind != proposal.scope_kind or scope.project_id != proposal.project_id:
+                raise ScopeConflictError("semantic proposal does not match stable session binding")
+            query = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == proposal.session_id,
+                ContinuityArtifact.kind == "semantic_checkpoint_proposal_v1",
+                ContinuityArtifact.status == "active",
+            )
+            if db.get_bind().dialect.name != "sqlite":
+                query = query.with_for_update()
+            existing = query.order_by(ContinuityArtifact.revision.desc()).first()
+            if existing is not None:
+                db.commit()
+                return SemanticProposalRecord(
+                    id=existing.id,
+                    revision=existing.revision,
+                    status=existing.status,
+                    proposal=SemanticCheckpointProposalV1.from_payload(json.loads(existing.payload_json)),
+                ), False
+            write = self._write(
+                db,
+                owner=owner,
+                kind="semantic_checkpoint_proposal_v1",
+                session_id=proposal.session_id,
+                project_id=proposal.project_id,
+                payload=proposal.to_payload(),
+                source_through_message_id=proposal.source_through_message_id,
+                source_hash=proposal.source_hash,
+                commit=False,
+            )
+            db.commit()
+            return SemanticProposalRecord(write.id, write.revision, "active", proposal), True
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def latest_thread_checkpoint(self, *, owner: str, session_id: str) -> Optional[ThreadCheckpointV1]:
         artifact = self._latest(owner=owner, kind="thread_checkpoint_v1", session_id=session_id)
         return ThreadCheckpointV1.from_payload(json.loads(artifact.payload_json)) if artifact else None

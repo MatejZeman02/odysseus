@@ -58,6 +58,7 @@ from routes.chat_helpers import (
     clean_thinking_for_save,
     _allowed_models_for_request,
     _enforce_chat_privileges,
+    cancel_scheduled_semantic_proposal,
 )
 from src.action_intents import ToolIntent, classify_tool_intent as _classify_tool_intent
 from src.image_model_ids import looks_like_image_generation_model
@@ -806,6 +807,7 @@ def setup_chat_routes(
         # Verify the caller owns this session before loading it.
         # Without this, any authenticated user can post into another user's chat.
         _verify_session_owner(request, session)
+        cancel_scheduled_semantic_proposal(effective_user(request), session)
 
         try:
             sess = session_manager.get_session(session)
@@ -1738,6 +1740,7 @@ def setup_chat_routes(
             web_sources = ctx.web_sources
 
             # Register active stream for partial-save safety net
+            cancel_scheduled_semantic_proposal(_user, session)
             _active_streams[session] = {"status": "streaming", "partial": "", "query": message, "is_research": effective_do_research, "mode": _effective_mode}
 
             # The client sent a workspace the server refused to bind (deleted

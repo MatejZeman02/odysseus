@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from core.database import Base, ChatMessage as DbMessage, Session as DbSession
 import routes.companion_memory_routes as route_module
+import src.continuity.semantic_deriver as deriver_module
 import src.continuity.store as store_module
 from src.continuity.semantic_proposals import derivation_messages, parse_semantic_proposal
 from src.continuity.store import ContinuityStore
@@ -41,6 +42,7 @@ def _setup(monkeypatch):
     local_session = sessionmaker(bind=engine)
     monkeypatch.setattr(route_module, "SessionLocal", local_session)
     monkeypatch.setattr(store_module, "SessionLocal", local_session)
+    monkeypatch.setattr(deriver_module, "SessionLocal", local_session)
     monkeypatch.setattr(route_module, "_owner", lambda _request: "alice")
     db = local_session()
     db.add(DbSession(
@@ -63,7 +65,7 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     seen = {}
 
     monkeypatch.setattr(
-        route_module, "resolve_endpoint_by_id",
+        deriver_module, "resolve_endpoint_by_id",
         lambda endpoint_id, **kwargs: ("https://model.invalid/v1/chat/completions", kwargs["model"], {"Authorization": "secret"}),
     )
 
@@ -71,7 +73,7 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
         seen.update({"url": url, "model": model, "messages": messages, "kwargs": kwargs})
         return _json_payload()
 
-    monkeypatch.setattr(route_module, "llm_call_async", fake_llm)
+    monkeypatch.setattr(deriver_module, "llm_call_async", fake_llm)
     result = await endpoint("session", SimpleNamespace())
 
     assert result["status"] == "proposed"
@@ -105,12 +107,12 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
 @pytest.mark.asyncio
 async def test_semantic_proposal_route_rejects_malformed_model_output_without_persisting(monkeypatch):
     endpoint = _endpoint(_setup(monkeypatch), "/api/companion/memory/sessions/{session_id}/semantic-proposals")
-    monkeypatch.setattr(route_module, "resolve_endpoint_by_id", lambda *_args, **_kwargs: ("http://model", "model-a", {}))
+    monkeypatch.setattr(deriver_module, "resolve_endpoint_by_id", lambda *_args, **_kwargs: ("http://model", "model-a", {}))
 
     async def fake_llm(*_args, **_kwargs):
         return "```json\n{\"objective\": \"not the full schema\"}\n```"
 
-    monkeypatch.setattr(route_module, "llm_call_async", fake_llm)
+    monkeypatch.setattr(deriver_module, "llm_call_async", fake_llm)
     with pytest.raises(HTTPException) as raised:
         await endpoint("session", SimpleNamespace())
     assert raised.value.status_code == 422
