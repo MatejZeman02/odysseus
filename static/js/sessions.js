@@ -212,6 +212,14 @@ window.addEventListener('odysseus:tool-toggle', (event) => {
   });
 });
 
+window.addEventListener('odysseus:capability-updated', (event) => {
+  const detail = event?.detail || {};
+  const meta = sessions.find(item => item.id === detail.sessionId);
+  if (!meta) return;
+  meta.chat_capabilities = detail.capabilities || {};
+  if (currentSessionId === meta.id) _syncCapabilityControls(meta, meta.chat_capabilities);
+});
+
 async function openCompanionMemory(meta, initialTab = 'context') {
   if (!meta?.id) return;
   let payload;

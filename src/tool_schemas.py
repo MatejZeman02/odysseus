@@ -49,6 +49,21 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "request_capability",
+            "description": "Request one disabled chat capability instead of claiming a tool is unavailable. This shows the user an Enable/Not now card and ends the turn. Use only when that capability is necessary to complete the current request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "enum": ["web_search", "workspace_read", "system_observe", "sandbox_read"]},
+                    "reason": {"type": "string", "description": "One short, user-facing reason it is needed."},
+                },
+                "required": ["name", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "python",
             "description": "Execute Python code to compute a result or test something. Prefer a dedicated tool whenever one fits the job (reading, writing, or searching files); use python only for computation, data processing, or scripting no dedicated tool covers.",
             "parameters": {
@@ -1583,7 +1598,7 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")
-    elif tool_type == "ask_user":
+    elif tool_type in {"ask_user", "request_capability"}:
         # Keep user-facing labels readable in the tool trace.  The outer SSE
         # JSON encoder will escape them for transport and JSON.parse restores
         # them once; pre-escaping here caused literal ``\u00f1`` sequences to

@@ -72,7 +72,7 @@ def _register(
 
 
 _register(
-    {"ask_user", "update_plan"},
+    {"ask_user", "request_capability", "update_plan"},
     ToolEffect.USER_INTERACTION,
 )
 _register(

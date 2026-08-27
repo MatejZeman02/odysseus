@@ -2690,6 +2690,42 @@ export function renderAskUserCard(payload, options) {
 
   const send = (text) => {
     if (!text) return;
+    if (aq.kind === 'capability_request' && aq.capability) {
+      const enable = text === aq.enable_label;
+      const continueCapabilityRequest = async () => {
+        if (enable) {
+          const sid = window.sessionModule?.getCurrentSessionId?.();
+          if (!sid) { uiModule.showError?.('Open the chat again before enabling this capability.'); return; }
+          try {
+            const response = await fetch(`/api/g1/sessions/${encodeURIComponent(sid)}/chat-capabilities`, {
+              method: 'PUT', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({name: aq.capability, enabled: true}),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Could not enable capability');
+            const current = window.sessionModule?.getSessions?.().find(item => item.id === sid);
+            if (current) current.chat_capabilities = data.capabilities || {};
+            window.dispatchEvent(new CustomEvent('odysseus:capability-updated', {
+              detail: {sessionId: sid, capabilities: data.capabilities || {}},
+            }));
+          } catch (error) {
+            uiModule.showError?.(error.message || 'Could not enable capability');
+            return;
+          }
+        }
+        card.remove();
+        const input = uiModule.el('message');
+        if (input) {
+          input.value = enable
+            ? `I enabled ${aq.capability}. Continue the previous task now.`
+            : 'Not now. Continue without that capability if possible.';
+        }
+        const sendButton = document.querySelector('.send-btn');
+        if (sendButton) sendButton.click();
+      };
+      void continueCapabilityRequest();
+      return;
+    }
     if (onSubmit) {
       const accepted = onSubmit({
         kind: 'answer',

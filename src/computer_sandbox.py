@@ -11,6 +11,7 @@ import os
 import re
 import selectors
 import secrets
+import shlex
 import signal
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from core.constants import DATA_DIR
 
@@ -88,6 +90,61 @@ class SandboxRunResult:
 
     output: str
     duration_ms: int
+
+
+@dataclass(frozen=True)
+class ReadOnlyCommand:
+    """One broker-admitted command; arguments are never parsed as shell text."""
+
+    argv: tuple[str, ...]
+
+
+_READ_ONLY_COMMANDS = frozenset({
+    "find", "fd", "rg", "grep", "wc", "head", "tail", "sed", "awk", "cut", "tr",
+    "sort", "uniq", "stat", "file", "ls", "git",
+})
+_FORBIDDEN_ARGUMENTS = frozenset({
+    "-delete", "-exec", "-execdir", "-ok", "-okdir", "-i", "--in-place", "-o", "--output",
+})
+_READ_ONLY_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "ls-files", "grep"})
+
+
+def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """Reject a command before it reaches a shell or container process.
+
+    This is defense in depth. The Podman profile is authoritative; validation
+    prevents accidental expansion of the command language and keeps the
+    process display safe to persist. Paths are confined to the supplied
+    read-only /inputs mount rather than the container root.
+    """
+    if not isinstance(argv, Sequence) or isinstance(argv, (str, bytes)):
+        raise SandboxRunError("command_denied")
+    values = tuple(argv)
+    if not values or len(values) > 64 or any(not isinstance(item, str) or not item or "\x00" in item or len(item) > 4096 for item in values):
+        raise SandboxRunError("command_denied")
+    command = values[0]
+    if command not in _READ_ONLY_COMMANDS:
+        raise SandboxRunError("command_denied")
+    if command == "git" and (len(values) < 2 or values[1] not in _READ_ONLY_GIT_SUBCOMMANDS):
+        raise SandboxRunError("command_denied")
+    for argument in values[1:]:
+        if argument in _FORBIDDEN_ARGUMENTS or argument.startswith("--output=") or argument.startswith("--in-place="):
+            raise SandboxRunError("command_denied")
+        # Shell control characters are ordinary data to execve, but rejecting
+        # them makes the plan representation unambiguous and prevents later
+        # code from accidentally converting this structured format to text.
+        if any(char in argument for char in ("\n", "\r", "\x00", "`", "$", ";", "&", "|", ">", "<")):
+            raise SandboxRunError("command_denied")
+        if argument.startswith("/") and not argument.startswith("/inputs/") and argument != "/inputs":
+            raise SandboxRunError("command_denied")
+        if argument == ".." or argument.startswith("../") or "/../" in argument:
+            raise SandboxRunError("command_denied")
+    return values
+
+
+def _display_pipeline(commands: Sequence[ReadOnlyCommand]) -> str:
+    """Render a bounded shell-like preview from already-validated argv."""
+    return " | ".join(shlex.join(command.argv) for command in commands)[:4096]
 
 
 def _terminate_group(process: subprocess.Popen[bytes]) -> None:
@@ -211,6 +268,21 @@ def _podman_task_command(image: str, *, input_dir: Path, script: str, name: str 
     return command
 
 
+def _podman_readonly_pipeline_command(image: str, *, input_dir: Path, commands: Sequence[ReadOnlyCommand]) -> list[str]:
+    """Build a shell command from validated argv only; no caller text is used.
+
+    A pipeline is useful for routine inspection (for example ``find | wc``),
+    but the shell is only a transport for the broker-rendered argv vectors.
+    The user/model cannot inject redirects, substitutions, loops, or a second
+    command into this string.
+    """
+    rendered = _display_pipeline(commands)
+    base = _podman_task_command(image, input_dir=input_dir, script="true")
+    # Strip ``--entrypoint /bin/sh IMAGE -ec SCRIPT`` and replace it with the
+    # controlled pipeline.  Keep every isolation flag from the base command.
+    return base[:-5] + ["--workdir", "/inputs", "--entrypoint", "/bin/sh", image, "-ec", f"set -f; {rendered}"]
+
+
 def _container_exists(name: str) -> bool:
     try:
         return _run(["podman", "container", "exists", name], timeout=5).returncode == 0
@@ -249,6 +321,43 @@ def run_server_owned_scratch(script: str, *, input_dir: Path, timeout: float = 3
     try:
         result = _run_bounded(
             _podman_task_command(_image(), input_dir=mounted_input, script=script),
+            timeout=min(max(timeout, 1.0), 30.0), output_limit=256 * 1024,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise SandboxRunError("worker_died") from None
+    if result.failure:
+        raise SandboxRunError(result.failure)
+    if result.returncode != 0:
+        raise SandboxRunError("command_failed")
+    return SandboxRunResult(output=result.stdout, duration_ms=int((time.monotonic() - started) * 1000))
+
+
+def run_admitted_readonly_pipeline(
+    commands: Sequence[ReadOnlyCommand], *, input_dir: Path, timeout: float = 30.0,
+) -> SandboxRunResult:
+    """Run an allowlisted inspection pipeline inside the qualified sandbox.
+
+    This is deliberately an internal broker primitive. A future agent tool
+    must construct ``ReadOnlyCommand`` values from a strict schema; browser
+    callers never submit a raw command, shell text, mount, or image option.
+    The input tree is supplied by the server and is mounted read-only.
+    """
+    if not isinstance(commands, Sequence) or isinstance(commands, (str, bytes)) or not commands or len(commands) > 4:
+        raise SandboxRunError("command_denied")
+    admitted = tuple(ReadOnlyCommand(_validate_readonly_argv(command.argv)) if isinstance(command, ReadOnlyCommand) else None for command in commands)
+    if any(command is None for command in admitted):
+        raise SandboxRunError("command_denied")
+    state = readiness()
+    if not state.qualified:
+        raise SandboxRunError("sandbox_unavailable")
+    try:
+        mounted_input = _validate_input_directory(input_dir)
+    except (OSError, RuntimeError):
+        raise SandboxRunError("input_denied") from None
+    started = time.monotonic()
+    try:
+        result = _run_bounded(
+            _podman_readonly_pipeline_command(_image(), input_dir=mounted_input, commands=admitted),
             timeout=min(max(timeout, 1.0), 30.0), output_limit=256 * 1024,
         )
     except (OSError, subprocess.SubprocessError):

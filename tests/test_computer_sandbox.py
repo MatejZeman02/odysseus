@@ -72,3 +72,49 @@ def test_server_owned_scratch_never_converts_bounded_failures_to_success(monkeyp
         assert exc.code == "command_output_limited"
     else:
         raise AssertionError("output exhaustion must fail the task")
+
+
+def test_readonly_pipeline_is_structured_allowlisted_and_never_uses_caller_shell_text(tmp_path):
+    command = computer_sandbox.ReadOnlyCommand(("find", ".", "-name", "*.md"))
+    rendered = computer_sandbox._display_pipeline((command,))
+    assert rendered == "find . -name '*.md'"
+    built = computer_sandbox._podman_readonly_pipeline_command(
+        "example.invalid/sandbox@sha256:" + "a" * 64,
+        input_dir=tmp_path, commands=(command,),
+    )
+    assert "--network=none" in built
+    assert "--read-only" in built
+    assert built[-1] == "set -f; find . -name '*.md'"
+
+
+def test_readonly_pipeline_rejects_writes_shell_control_and_untrusted_paths():
+    denied = [
+        ("rm", "-rf", "/inputs"),
+        ("find", ".", "-delete"),
+        ("sed", "-i", "s/a/b/", "file.md"),
+        ("git", "commit", "-m", "no"),
+        ("rg", "token", "/etc"),
+        ("grep", "x", "file; touch pwned"),
+    ]
+    for argv in denied:
+        try:
+            computer_sandbox._validate_readonly_argv(argv)
+        except computer_sandbox.SandboxRunError as exc:
+            assert exc.code == "command_denied"
+        else:
+            raise AssertionError(f"command must be denied: {argv!r}")
+
+
+def test_readonly_pipeline_never_starts_when_sandbox_is_unqualified(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        computer_sandbox, "readiness",
+        lambda: computer_sandbox.ComputerSandboxReadiness(True, True, True, False, "probe_required"),
+    )
+    try:
+        computer_sandbox.run_admitted_readonly_pipeline(
+            (computer_sandbox.ReadOnlyCommand(("ls", ".")),), input_dir=tmp_path,
+        )
+    except computer_sandbox.SandboxRunError as exc:
+        assert exc.code == "sandbox_unavailable"
+    else:
+        raise AssertionError("unqualified sandbox must never run a command")
