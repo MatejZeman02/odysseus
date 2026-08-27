@@ -20,7 +20,7 @@ from src.computer_observe import ObservationError, collect_observations
 from src.computer_sandbox import SandboxQualificationError, qualify_containment, readiness
 from src.companion_memory import CompanionMemoryStore, MemoryScopeError
 from src.continuity.contracts import DeviceProfileV1
-from src.continuity.store import ContinuityStore
+from src.continuity.store import ScopeConflictError
 
 
 class ObserveRequest(BaseModel):
@@ -202,19 +202,17 @@ def setup_computer_help_routes(session_manager) -> APIRouter:
             raise HTTPException(400, str(exc)) from exc
         try:
             if scope_kind == "computer":
-                CompanionMemoryStore().write_computer_artifact(
+                CompanionMemoryStore().write_computer_device_profile(
                     owner=owner,
                     session_id=payload.session_id,
                     path="computer/device-profile.md",
                     content=_device_profile_markdown(observations),
-                )
-                ContinuityStore().write_device_profile(
-                    owner=owner,
-                    session_id=payload.session_id,
                     profile=_device_profile(owner, payload.session_id, observations),
                 )
-        except MemoryScopeError as exc:
+        except (MemoryScopeError, ScopeConflictError) as exc:
             raise HTTPException(409, "The verified device profile could not be updated") from exc
+        except Exception as exc:
+            raise HTTPException(503, "The verified device profile could not be refreshed safely") from exc
         content, process = _observation_message(observations)
         process["elapsed_seconds"] = max(0, round(time.monotonic() - started, 2))
         message = ChatMessage("assistant", content, metadata={

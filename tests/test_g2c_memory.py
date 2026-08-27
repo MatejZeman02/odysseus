@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from core.database import Base, Document, Project, ScopedMemoryRecord, Session as DbSession
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.continuity.compiler import ContextCompiler
-from src.continuity.contracts import PersonalBriefV1, ProjectBriefV1
+from src.continuity.contracts import DeviceProfileV1, PersonalBriefV1, ProjectBriefV1
 from src.continuity.store import ContinuityStore
 import src.companion_memory as memory_module
 import src.scoped_memory as scoped_memory_module
@@ -134,6 +134,33 @@ def test_computer_artifacts_are_private_revisioned_records_and_sync_from_documen
         db.close()
     assert memory.get_computer_artifact(owner="alice", artifact_id=artifact["id"])["content"].endswith("Capture the error")
     assert memory.list_artifacts(owner="alice", scope_kind="computer")[0]["path"] == "computer/incidents/nvidia.md"
+
+
+def test_verified_device_profile_refresh_is_atomic(store, monkeypatch):
+    continuity, memory = store
+    profile = DeviceProfileV1(
+        session_id="computer", facts=["System: OS: Fedora"], source_hash="safe-observation",
+        collected_at="2026-08-27T12:00:00",
+    )
+    stored = memory.write_computer_device_profile(
+        owner="alice", session_id="computer", path="computer/device-profile.md",
+        content="# Device profile\n\n- OS: Fedora\n", profile=profile,
+    )
+    assert stored["path"] == "computer/device-profile.md"
+    assert continuity.latest_device_profile(owner="alice", session_id="computer") == profile
+
+    def fail_profile(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(ContinuityStore, "write_device_profile_in_transaction", fail_profile)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        memory.write_computer_device_profile(
+            owner="alice", session_id="computer", path="computer/device-profile-failed.md",
+            content="# Failed profile\n", profile=profile,
+        )
+    assert [item["path"] for item in memory.list_artifacts(owner="alice", scope_kind="computer")] == [
+        "computer/device-profile.md",
+    ]
 
 
 def test_computer_long_paste_is_kept_in_owner_private_artifacts_and_mounted_by_reference(store):

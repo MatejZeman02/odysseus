@@ -354,18 +354,37 @@ class ContinuityStore:
             raise ValueError("device profile session does not match its destination")
         db = SessionLocal()
         try:
-            session = self._session(db, owner, session_id)
-            if (session.scope_kind or "general") != "computer":
-                raise ScopeConflictError("device profile requires a Computer Help session")
-            return self._write(
-                db, owner=owner, kind="device_profile_v1", session_id=session_id,
-                project_id=None, payload=profile.to_payload(),
-                source_through_message_id=None, source_hash=profile.source_hash,
+            result = self.write_device_profile_in_transaction(
+                db, owner=owner, session_id=session_id, profile=profile,
             )
+            db.commit()
+            return result
         except Exception:
             db.rollback(); raise
         finally:
             db.close()
+
+    def write_device_profile_in_transaction(
+        self, db, *, owner: str, session_id: str, profile: DeviceProfileV1,
+    ) -> ArtifactWrite:
+        """Stage a profile in an existing owner-private DB transaction.
+
+        The safe diagnostic broker writes its readable Markdown record and
+        this typed context record together.  Keeping both in one transaction
+        means a failed refresh cannot claim a profile changed when only one of
+        the two durable representations reached disk.
+        """
+        if profile.session_id != session_id:
+            raise ValueError("device profile session does not match its destination")
+        session = self._session(db, owner, session_id)
+        if (session.scope_kind or "general") != "computer":
+            raise ScopeConflictError("device profile requires a Computer Help session")
+        return self._write(
+            db, owner=owner, kind="device_profile_v1", session_id=session_id,
+            project_id=None, payload=profile.to_payload(),
+            source_through_message_id=None, source_hash=profile.source_hash,
+            commit=False,
+        )
 
     def write_semantic_proposal(
         self, *, owner: str, proposal: SemanticCheckpointProposalV1,

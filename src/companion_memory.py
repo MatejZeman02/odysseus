@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import timedelta
 from pathlib import Path, PurePosixPath
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 from core.database import (
     ContextGrant, Project, Session as DbSession, SessionLocal, WorkingArtifact,
@@ -357,6 +357,7 @@ class CompanionMemoryStore:
     def _write_private_artifact(
         self, *, owner: str, session_id: str, scope_kind: str, path: str, content: str,
         expected_revision: int | None = None, source_message_id: str | None = None,
+        before_commit: Callable[[Any], None] | None = None,
     ) -> dict:
         path = normalise_artifact_path(path)
         if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
@@ -397,6 +398,8 @@ class CompanionMemoryStore:
                 db.add(row)
             self._sync_artifact_recall(db, row, session_id=session_id)
             self._sync_document_from_artifact(db, row, session_id)
+            if before_commit:
+                before_commit(db)
             db.commit(); db.refresh(row)
             result = self.serialise_artifact(row, include_content=True)
             return result
@@ -417,6 +420,24 @@ class CompanionMemoryStore:
         return self._write_private_artifact(
             owner=owner, session_id=session_id, scope_kind="computer", path=path, content=content,
             expected_revision=expected_revision, source_message_id=source_message_id,
+        )
+
+    def write_computer_device_profile(
+        self, *, owner: str, session_id: str, path: str, content: str, profile: "DeviceProfileV1",
+    ) -> dict:
+        """Atomically refresh the human-readable and typed device profile.
+
+        This is intentionally a server-only helper for the safe observation
+        broker.  A browser can still edit an ordinary Computer Help artifact,
+        but cannot submit a claimed verified profile or choose its source hash.
+        """
+        from src.continuity.store import ContinuityStore
+
+        return self._write_private_artifact(
+            owner=owner, session_id=session_id, scope_kind="computer", path=path, content=content,
+            before_commit=lambda db: ContinuityStore().write_device_profile_in_transaction(
+                db, owner=owner, session_id=session_id, profile=profile,
+            ),
         )
 
     def capture_long_paste(self, *, owner: str, session_id: str, content: str) -> dict:
