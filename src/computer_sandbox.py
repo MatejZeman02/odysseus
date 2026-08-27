@@ -27,7 +27,7 @@ from core.constants import DATA_DIR
 _DIGEST_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 # Bump whenever the qualification contract gets a materially stronger gate so
 # an old report can never authorize a newer execution profile.
-_REPORT_VERSION = 4
+_REPORT_VERSION = 5
 _REPORT_PATH = Path(DATA_DIR) / "computer_sandbox_qualification.json"
 _REQUIRED_FINAL_CHECKS = frozenset({
     "rootless_podman", "read_only_input", "private_writable_task", "network_none",
@@ -104,12 +104,93 @@ class ReadOnlyCommand:
 
 _READ_ONLY_COMMANDS = frozenset({
     "find", "fd", "rg", "grep", "wc", "head", "tail", "sed", "awk", "cut", "tr",
-    "sort", "uniq", "stat", "file", "ls", "git",
+    "sort", "uniq", "stat", "file", "ls", "git", "xargs",
 })
 _FORBIDDEN_ARGUMENTS = frozenset({
     "-delete", "-exec", "-execdir", "-ok", "-okdir", "-i", "--in-place", "-o", "--output",
+    "-fprint", "-fprint0", "-fprintf", "-fls",
+    "--exec", "--exec-batch", "--execdir", "--delete",
+    "--compress-program", "--ext-diff", "--pre", "--pre-glob",
 })
 _READ_ONLY_GIT_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "ls-files", "grep"})
+_XARGS_FLAGS = frozenset({"-0", "-r", "-x", "--no-run-if-empty", "--exit"})
+_XARGS_VALUE_FLAGS = frozenset({"-n", "--max-args", "-s", "--max-chars"})
+_XARGS_RUNNERS = frozenset({
+    "wc", "grep", "rg", "stat", "file", "head", "tail", "sed", "awk", "cut", "tr", "sort", "uniq",
+})
+
+
+def _validate_xargs_argv(values: tuple[str, ...]) -> None:
+    """Allow only a bounded, read-only ``xargs`` invocation.
+
+    ``xargs`` is useful for a listing/counting pipeline, but it otherwise
+    converts ordinary data into an arbitrary subprocess launch surface.  Its
+    nested command must therefore be one of the same read-only inventory and
+    pass the regular validation recursively.
+    """
+    index = 1
+    while index < len(values):
+        argument = values[index]
+        if argument == "--":
+            index += 1
+            break
+        if argument in _XARGS_FLAGS:
+            index += 1
+            continue
+        if argument in _XARGS_VALUE_FLAGS:
+            if index + 1 >= len(values):
+                raise SandboxRunError("command_denied")
+            try:
+                value = int(values[index + 1])
+            except ValueError:
+                raise SandboxRunError("command_denied") from None
+            if not 1 <= value <= 64:
+                raise SandboxRunError("command_denied")
+            index += 2
+            continue
+        if argument.startswith("-n") and argument != "-n":
+            try:
+                value = int(argument[2:])
+            except ValueError:
+                raise SandboxRunError("command_denied") from None
+            if not 1 <= value <= 64:
+                raise SandboxRunError("command_denied")
+            index += 1
+            continue
+        break
+    # With no program, xargs defaults to ``echo``.  It cannot write outside
+    # the disposable container and is harmless, though usually not useful.
+    if index >= len(values):
+        return
+    nested = values[index:]
+    if nested[0] not in _XARGS_RUNNERS:
+        raise SandboxRunError("command_denied")
+    _validate_readonly_argv(nested)
+
+
+def _validate_command_specific_arguments(values: tuple[str, ...]) -> None:
+    """Reject interpreter-style escape forms hidden in read-tool arguments."""
+    command = values[0]
+    arguments = values[1:]
+    if command == "xargs":
+        _validate_xargs_argv(values)
+        return
+    if command == "awk":
+        # These forms can spawn commands or open arbitrary files.  They are
+        # not necessary for the bounded transformations this profile offers.
+        if any(re.search(r"\b(?:system|getline|@include)\b", arg) for arg in arguments):
+            raise SandboxRunError("command_denied")
+    elif command == "sed":
+        # GNU sed's e/r/w commands execute, read, or write files.  The normal
+        # substitution/selection forms remain available.
+        if any(
+            re.search(r"(?:^|[;\n])\s*[erw](?:\s|$)", arg)
+            or re.search(r"s[^\n]*/[^\n]*/[^\n]*/e$", arg)
+            for arg in arguments
+        ):
+            raise SandboxRunError("command_denied")
+    elif command == "git" and any(arg in {"--ext-diff", "--no-index"} for arg in arguments):
+        raise SandboxRunError("command_denied")
 
 
 def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
@@ -142,6 +223,7 @@ def _validate_readonly_argv(argv: Sequence[str]) -> tuple[str, ...]:
             raise SandboxRunError("command_denied")
         if argument == ".." or argument.startswith("../") or "/../" in argument:
             raise SandboxRunError("command_denied")
+    _validate_command_specific_arguments(values)
     return values
 
 

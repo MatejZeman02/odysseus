@@ -178,6 +178,35 @@ def test_readonly_pipeline_rejects_writes_shell_control_and_untrusted_paths():
             raise AssertionError(f"command must be denied: {argv!r}")
 
 
+def test_readonly_pipeline_rejects_command_specific_execution_escapes():
+    """Read-tool names must not conceal a second arbitrary executor."""
+    denied = [
+        ("xargs", "rm", "-rf", "/inputs"),
+        ("xargs", "-P", "8", "wc", "-l"),
+        ("awk", "BEGIN { system(\"id\") }"),
+        ("awk", "{ getline line; print line }"),
+        ("sed", "e id"),
+        ("sed", "s/x/y/e"),
+        ("find", ".", "-fprint", "/tmp/out"),
+        ("fd", "--exec", "id"),
+        ("rg", "--pre", "id", "needle"),
+        ("sort", "--compress-program", "id"),
+        ("git", "diff", "--ext-diff"),
+    ]
+    for argv in denied:
+        try:
+            computer_sandbox._validate_readonly_argv(argv)
+        except computer_sandbox.SandboxRunError as exc:
+            assert exc.code == "command_denied"
+        else:
+            raise AssertionError(f"command-specific escape must be denied: {argv!r}")
+
+
+def test_readonly_pipeline_allows_bounded_xargs_readonly_runner():
+    argv = ("xargs", "-0", "-n", "16", "wc", "-l")
+    assert computer_sandbox._validate_readonly_argv(argv) == argv
+
+
 def test_readonly_pipeline_never_starts_when_sandbox_is_unqualified(monkeypatch, tmp_path):
     monkeypatch.setattr(
         computer_sandbox, "readiness",
