@@ -107,6 +107,26 @@ def test_task_root_rejects_non_computer_scope_and_sensitive_or_broad_paths(monke
         create(route_module.TaskRootCreate(session_id="computer", label="Credentials", path=str(protected)), SimpleNamespace())
     assert denied.value.status_code == 422
 
+    hidden = tmp_path / ".local" / "share" / "keyrings" / "task"; hidden.mkdir(parents=True)
+    with pytest.raises(HTTPException) as hidden_denied:
+        create(route_module.TaskRootCreate(session_id="computer", label="Hidden", path=str(hidden)), SimpleNamespace())
+    assert hidden_denied.value.status_code == 422
+
     with pytest.raises(HTTPException) as broad:
         create(route_module.TaskRootCreate(session_id="computer", label="Home", path=str(tmp_path)), SimpleNamespace())
     assert broad.value.status_code == 422
+
+
+def test_task_root_rejects_a_symlink_even_when_its_target_is_inside_home(monkeypatch, tmp_path):
+    router, task_dir, _local = _task_root_router(monkeypatch, tmp_path)
+    link = tmp_path / "linked-task-root"
+    try:
+        link.symlink_to(task_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+    create = _endpoint(router, "/api/companion/computer/task-roots")
+    with pytest.raises(HTTPException) as denied:
+        create(route_module.TaskRootCreate(
+            session_id="computer", label="Linked", path=str(link),
+        ), SimpleNamespace())
+    assert denied.value.status_code == 422

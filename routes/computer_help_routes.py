@@ -102,8 +102,13 @@ def _safe_task_root(path: str) -> Path:
         raise ValueError("Choose an existing dedicated folder inside your home directory") from exc
     if relative == Path(".") or not stat.S_ISDIR(metadata.st_mode):
         raise ValueError("Choose an existing dedicated folder inside your home directory")
-    if any(part in _TASK_ROOT_DENIED_NAMES for part in relative.parts):
-        raise ValueError("Choose a task folder outside protected credential and configuration directories")
+    # A future task broker must never inherit a root that lives below a hidden
+    # user-data directory.  The short explicit list documents the most common
+    # credential/config locations, while the general hidden-directory rule
+    # also closes paths such as ``~/.mozilla`` and ``~/.local/share/keyrings``
+    # that are not safe write targets for Computer Help.
+    if any(part in _TASK_ROOT_DENIED_NAMES or part.startswith(".") for part in relative.parts):
+        raise ValueError("Choose a visible task folder outside protected credential and configuration directories")
     current_uid = getattr(os, "getuid", lambda: None)()
     if current_uid is not None and metadata.st_uid != current_uid:
         raise ValueError("Choose a folder owned by the current desktop user")
