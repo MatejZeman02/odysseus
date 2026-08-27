@@ -373,8 +373,11 @@ accepted Personal/project brief promotion; the browser still supplies only
 field/index pairs. Mounts now have a bounded owner-selected expiry (one to 30
 days; 14 by default), expire durably before compilation or promotion, and carry
 a `standard` or explicitly acknowledged `sensitive` label. Expired mounts are
-never compiled or promotable. Two-checkpoint synthesis and richer review remain
-the next C3 work.
+never compiled or promotable. An owner may also create a fresh non-primary
+Personal/project synthesis chat with exactly two selected immutable mounts; it
+inherits only the destination chat's stored route and scope, never merges
+transcripts, and calls no provider until the owner sends a reconciliation
+request. Richer synthesis review remains the next C3 work.
 
 Implement the user-facing alternative to transcript merging:
 
