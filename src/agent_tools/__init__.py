@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 from .subprocess_tools import BashTool, PythonTool
 from .web_tools import WebSearchTool, WebFetchTool
 from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, ApplyPatchTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
+from .sandbox_tools import SandboxedReadTool
 from .coding_tools import TodoWriteTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
 from .interaction_tools import AskUserTool, RequestCapabilityTool, UpdatePlanTool
@@ -53,6 +54,7 @@ TOOL_HANDLERS = {
     "suggest_document": SuggestDocumentTool().execute,
     "manage_documents": ManageDocumentTool().execute,
     "get_workspace": GetWorkspaceTool().execute,
+    "sandbox_read": SandboxedReadTool().execute,
     "ask_user": AskUserTool().execute,
     "request_capability": RequestCapabilityTool().execute,
     "update_plan": UpdatePlanTool().execute,
@@ -80,6 +82,7 @@ PYTHON_TIMEOUT = 30
 TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_file", "edit_file",
              "apply_patch", "todowrite",
              "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
+             "sandbox_read",
              "create_document", "update_document", "edit_document",
              "search_chats",
              "chat_with_model", "create_session", "list_sessions",

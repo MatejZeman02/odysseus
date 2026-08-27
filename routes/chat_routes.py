@@ -1552,6 +1552,22 @@ def setup_chat_routes(
 
         # Build disabled-tools set from frontend toggles + user privileges
         disabled_tools = set()
+        # Sandboxed inspection is deliberately independent from the legacy
+        # browser bash switch.  It is a new, broker-owned capability and stays
+        # absent until this chat has explicitly enabled it *and* readiness has
+        # admitted the qualified Podman profile.
+        try:
+            from src.companion_capabilities import SANDBOX_READ, normalize as normalize_chat_capabilities
+            _chat_capabilities = normalize_chat_capabilities(
+                getattr(sess, "capability_grants", None),
+                scope_kind=getattr(sess, "scope_kind", "general") or "general",
+            )
+            if not _chat_capabilities.get(SANDBOX_READ, False):
+                disabled_tools.add("sandbox_read")
+        except Exception:
+            # Never turn a capability metadata failure into an unguarded
+            # command runner. This tool did not exist for legacy sessions.
+            disabled_tools.add("sandbox_read")
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
         # Web search is per-turn opt-in: either the chat pre-search setting

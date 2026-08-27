@@ -35,6 +35,30 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "sandbox_read",
+            "description": "Run a short read-only command pipeline inside the qualified Podman sandbox against a disposable snapshot of the attached working directory. This is not host shell access. Provide argv arrays only; no shell syntax, paths outside /inputs, redirects, loops, or write commands. Prefer ordinary structured read/list/search tools for simple requests.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "commands": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "description": "One to four argv vectors, connected by a broker-owned pipe.",
+                        "items": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+                "required": ["commands"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "bash",
             "description": "Run a shell command (full access). Prefer a dedicated tool whenever one fits the job (reading, writing, editing, searching, or listing files); use bash only for what no dedicated tool covers (installs, git, builds, running programs, system info). Do NOT create or edit files via bash redirects/heredocs/sed -- use the dedicated file tools.",
             "parameters": {
