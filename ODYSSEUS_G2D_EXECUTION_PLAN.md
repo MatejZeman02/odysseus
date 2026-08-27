@@ -14,6 +14,14 @@ that it lacks the broker's declared `fd` and `file` utilities. It must not be
 configured as the Computer Help image. Qualification now proves the complete
 declared command inventory before any image can become ready.
 
+**Pre-qualification hardening (2026-08):** the broker admits bounded `xargs`
+only when its nested runner is independently validated from the read-only
+inventory. Interpreter-style `awk`/`sed` execution forms, external diff/search
+helpers, and file-output predicates are rejected before Podman starts. The
+working-directory snapshot uses no-follow file descriptors and verifies the
+opened descriptor remains inside the approved root, so a source-file symlink
+swap cannot enter the container input.
+
 **Depends on:** G2C C1/C2 validated checkpoints and transfer semantics, plus a
 command-only, rootless Podman execution broker. The rejected Qwen `0.21.3`
 Podman sandbox is not reused:
