@@ -12,6 +12,13 @@ import src.teacher_escalation as teacher_escalation
 import routes.skills_routes as skills_routes
 
 
+async def _run_inline(func, /, *args, **kwargs):
+    """Execute mocked model resolution in the test event loop."""
+    result = func(*args, **kwargs)
+    await asyncio.sleep(0)
+    return result
+
+
 def test_call_teacher_scopes_model_resolution_to_owner(monkeypatch):
     seen = {}
 
@@ -27,6 +34,7 @@ def test_call_teacher_scopes_model_resolution_to_owner(monkeypatch):
     from src.agent_tools import model_interaction_tools
 
     monkeypatch.setattr("src.ai_interaction._resolve_model", fake_resolve_model)
+    monkeypatch.setattr(teacher_escalation.asyncio, "to_thread", _run_inline)
     monkeypatch.setattr(
         model_interaction_tools,
         "_TEACHER_SYSTEM_PROMPT",
