@@ -1,5 +1,6 @@
 """Regression tests for owner-scoped model resolution in scheduled actions."""
 
+import asyncio
 import sqlite3
 from datetime import datetime
 from types import SimpleNamespace
@@ -49,6 +50,13 @@ class _Db:
 
     def close(self):
         self.closed = True
+
+
+async def _run_inline(func, /, *args, **kwargs):
+    """Production-shaped async seam for synchronous fake I/O in these tests."""
+    result = func(*args, **kwargs)
+    await asyncio.sleep(0)
+    return result
 
 
 def _resolver_spy(monkeypatch, candidates=None):
@@ -125,6 +133,7 @@ async def test_learn_sender_signatures_resolves_llm_for_task_owner(monkeypatch):
         return FakeImap(owner)
 
     monkeypatch.setattr(email_helpers, "_imap_connect", fake_imap_connect)
+    monkeypatch.setattr(asyncio, "to_thread", _run_inline)
 
     message, ok = await action_learn_sender_signatures("alice")
 
@@ -203,6 +212,20 @@ async def test_learn_sender_signatures_writes_owner_scoped_cache(monkeypatch, tm
         "resolve_task_candidates",
         lambda *args, **kwargs: [("http://llm", "alice-model", {})],
     )
+
+    # This is a unit test for owner-scoped cache writes.  The production
+    # background scheduler correctly waits while a foreground chat is active;
+    # leaving that global gate live makes this test wait behind any developer
+    # browser session instead of exercising the fake LLM below.
+    async def no_interactive_wait(_label):
+        return False
+
+    monkeypatch.setattr("src.builtin_actions.wait_for_interactive_quiet", no_interactive_wait)
+
+    # The fake IMAP client is already synchronous.  Keep the test out of the
+    # process-wide executor so Python 3.13's test loop cannot strand the
+    # otherwise completed to_thread future.
+    monkeypatch.setattr(asyncio, "to_thread", _run_inline)
 
     async def fake_llm_call_async(_candidates, **_kwargs):
         return "Writer Example\nExample Co.\nwriter@example.com"
