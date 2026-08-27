@@ -9,7 +9,14 @@ from typing import Iterable, Optional
 
 from core.database import ContinuityArtifact, Project, Session as DbSession, SessionLocal
 
-from .contracts import PersonalBriefV1, ProjectBriefV1, ResolvedScope, SCOPES, ThreadCheckpointV1
+from .contracts import (
+    PersonalBriefV1,
+    ProjectBriefV1,
+    ResolvedScope,
+    SCOPES,
+    SemanticCheckpointProposalV1,
+    ThreadCheckpointV1,
+)
 
 
 class ContinuityError(RuntimeError):
@@ -203,6 +210,32 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def write_semantic_proposal(
+        self, *, owner: str, proposal: SemanticCheckpointProposalV1,
+    ) -> ArtifactWrite:
+        """Persist a validated proposal without promoting it into home state."""
+        db = SessionLocal()
+        try:
+            session = self._session(db, owner, proposal.session_id)
+            scope = self._resolved(db, session, owner)
+            if scope.scope_kind != proposal.scope_kind or scope.project_id != proposal.project_id:
+                raise ScopeConflictError("semantic proposal does not match stable session binding")
+            return self._write(
+                db,
+                owner=owner,
+                kind="semantic_checkpoint_proposal_v1",
+                session_id=proposal.session_id,
+                project_id=proposal.project_id,
+                payload=proposal.to_payload(),
+                source_through_message_id=proposal.source_through_message_id,
+                source_hash=proposal.source_hash,
+            )
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def latest_thread_checkpoint(self, *, owner: str, session_id: str) -> Optional[ThreadCheckpointV1]:
         artifact = self._latest(owner=owner, kind="thread_checkpoint_v1", session_id=session_id)
         return ThreadCheckpointV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
@@ -214,6 +247,10 @@ class ContinuityStore:
     def latest_personal_brief(self, *, owner: str, session_id: str) -> Optional[PersonalBriefV1]:
         artifact = self._latest(owner=owner, kind="personal_brief_v1", session_id=session_id)
         return PersonalBriefV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
+
+    def latest_semantic_proposal(self, *, owner: str, session_id: str) -> Optional[SemanticCheckpointProposalV1]:
+        artifact = self._latest(owner=owner, kind="semantic_checkpoint_proposal_v1", session_id=session_id)
+        return SemanticCheckpointProposalV1.from_payload(json.loads(artifact.payload_json)) if artifact else None
 
     def project_catalog(self, *, owner: str) -> list[dict[str, str]]:
         db = SessionLocal()

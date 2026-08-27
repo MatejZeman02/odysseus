@@ -5,7 +5,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from core.database import Base, ContinuityArtifact, Session as DbSession
-from src.continuity import ProjectBriefV1, ScopeConflictError, ThreadCheckpointV1
+from src.continuity import (
+    ProjectBriefV1,
+    ScopeConflictError,
+    SemanticCheckpointProposalV1,
+    ThreadCheckpointV1,
+)
 from src.continuity.store import ContinuityStore, NotFoundError
 import src.continuity.store as continuity_store_module
 
@@ -92,3 +97,56 @@ def test_cross_project_context_requires_explicit_direct_relationship(store):
     with pytest.raises(ScopeConflictError):
         continuity.related_project_brief(owner="alice", home_project_id=home, requested_project_id=unrelated)
     assert continuity.latest_project_brief(owner="bob", project_id=related) is None
+
+
+def test_semantic_proposal_is_immutable_source_linked_and_not_a_home_brief(store):
+    continuity, local_session = store
+    project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")
+    continuity.bind_session(
+        owner="alice", session_id="alice-session", scope_kind="project", project_id=project_id
+    )
+    proposal = SemanticCheckpointProposalV1(
+        session_id="alice-session", scope_kind="project", project_id=project_id,
+        objective="Prepare a reliable release", facts=["The release branch is frozen"],
+        decision_candidates=["Ship the small fix first"], proposals=["Run a canary"],
+        failed_approaches=["The previous rollout timed out"], open_questions=["Which model is used?"],
+        next_actions=["Review the canary"], artifact_refs=["plans/release.md"],
+        source_message_ids=["m1", "m2"], source_through_message_id="m2", source_hash="proposal-source",
+        derivation_model="selected-model",
+    )
+
+    written = continuity.write_semantic_proposal(owner="alice", proposal=proposal)
+    repeated = continuity.write_semantic_proposal(owner="alice", proposal=proposal)
+    loaded = continuity.latest_semantic_proposal(owner="alice", session_id="alice-session")
+
+    assert (written.revision, written.created) == (1, True)
+    assert (repeated.revision, repeated.created) == (1, False)
+    assert loaded == proposal
+    assert continuity.latest_project_brief(owner="alice", project_id=project_id) is None
+    db = local_session()
+    row = db.query(ContinuityArtifact).filter_by(id=written.id).one()
+    db.close()
+    assert row.kind == "semantic_checkpoint_proposal_v1"
+    assert row.status == "active"
+    assert row.source_hash == "proposal-source"
+
+
+def test_semantic_proposal_rejects_invalid_scope_or_promotion_status(store):
+    continuity, _ = store
+    project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="personal")
+
+    with pytest.raises(ValueError, match="derivation_status"):
+        SemanticCheckpointProposalV1(
+            session_id="alice-session", scope_kind="personal", source_message_ids=["m1"],
+            source_through_message_id="m1", source_hash="hash", derivation_model="model",
+            derivation_status="accepted",
+        )
+
+    mismatch = SemanticCheckpointProposalV1(
+        session_id="alice-session", scope_kind="project", project_id=project_id,
+        source_message_ids=["m1"], source_through_message_id="m1", source_hash="hash",
+        derivation_model="model",
+    )
+    with pytest.raises(ScopeConflictError, match="stable session binding"):
+        continuity.write_semantic_proposal(owner="alice", proposal=mismatch)
