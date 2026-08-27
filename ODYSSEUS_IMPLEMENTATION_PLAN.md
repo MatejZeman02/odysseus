@@ -26,6 +26,9 @@ conversation transfer, and provider-backed scoped recall are the active path.
 **G2C scoped-memory and working-artifact plan:**
 [`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md)
 
+**Owner-run validation gates:**
+[`ODYSSEUS_OWNER_CANARY_GUIDE.md`](ODYSSEUS_OWNER_CANARY_GUIDE.md)
+
 **Deferred architecture backlog:**
 [`ODYSSEUS_ARCHITECTURE_BACKLOG.md`](ODYSSEUS_ARCHITECTURE_BACKLOG.md)
 
