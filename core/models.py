@@ -113,11 +113,14 @@ class Session:
     endpoint_id: Optional[str] = None
     harness_kind: str = "native"
     capability_profile: str = "project_read"
+    capability_grants: Optional[Dict[str, bool]] = None
     is_scope_primary: bool = False
 
     def __post_init__(self):
         if self.headers is None:
             self.headers = {}
+        if self.capability_grants is None:
+            self.capability_grants = {}
         # Ensure each session gets its OWN list (not the shared dataclass default)
         if self.history is None:
             self.history = []

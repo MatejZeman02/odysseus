@@ -22,6 +22,7 @@ from src.companion_runs import CompanionRunRegistry
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
 from src.qwen_inspection import effective_capability, inspection_readiness
 from src.computer_sandbox import readiness as computer_sandbox_readiness
+from src.companion_capabilities import capability_payload, can_change, defaults_for_scope, normalize
 from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure, safe_turn_failure_detail
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,14 @@ class CapabilityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     capability_profile: str
+
+
+class ChatCapabilityRequest(BaseModel):
+    """One explicit owner-controlled UI capability update."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=64)
+    enabled: bool
 
 
 class FeedbackRequest(BaseModel):
@@ -122,14 +131,23 @@ def _endpoint(owner: str, endpoint_id: str, model: str) -> tuple[str, dict]:
 
 def _session_payload(row: DbSession, project_name: str | None = None, workspace_root: str | None = None) -> dict:
     requested = getattr(row, "capability_profile", None) or "project_read"
+    scope_kind = row.scope_kind or "general"
+    resolved_workspace = workspace_root or ""
+    sandbox = computer_sandbox_readiness()
     return {
         "id": row.id, "name": row.name, "model": row.model, "endpoint_id": row.endpoint_id,
-        "scope_kind": row.scope_kind or "general", "project_id": row.project_id,
+        "scope_kind": scope_kind, "project_id": row.project_id,
         "project_name": project_name, "workspace_root": workspace_root,
         "harness_kind": row.harness_kind or "native",
         "capability_profile": requested,
         "requested_capability": requested,
         "effective_capability": effective_capability(requested),
+        "chat_capabilities": capability_payload(
+            getattr(row, "capability_grants", None),
+            scope_kind=scope_kind,
+            workspace_attached=bool(resolved_workspace),
+            sandbox_ready=sandbox.qualified,
+        ),
         "is_scope_primary": bool(row.is_scope_primary),
     }
 
@@ -172,6 +190,7 @@ def _get_or_create_home_locked(session_manager, *, owner: str, scope_kind: str, 
         row.headers = headers
         row.scope_kind, row.project_id = scope_kind, project.id if project else None
         row.endpoint_id, row.harness_kind, row.is_scope_primary = endpoint_id, harness, True
+        row.capability_grants = defaults_for_scope(scope_kind)
         row.updated_at = utcnow_naive()
         db.commit()
         return _session_payload(
@@ -467,6 +486,66 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
             if live:
                 live.capability_profile = payload.capability_profile
             return _session_payload(row)
+        finally:
+            db.close()
+
+    @router.get("/sessions/{session_id}/chat-capabilities")
+    def get_chat_capabilities(session_id: str, request: Request):
+        owner = _owner(request)
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
+            if not row:
+                raise HTTPException(404, "Session not found")
+            project = db.query(Project).filter(Project.id == row.project_id).first() if row.project_id else None
+            workspace_attached = bool(project and project.workspace_root)
+            return {
+                "session_id": row.id,
+                "scope_kind": row.scope_kind or "general",
+                "capabilities": capability_payload(
+                    getattr(row, "capability_grants", None),
+                    scope_kind=row.scope_kind or "general",
+                    workspace_attached=workspace_attached,
+                    sandbox_ready=computer_sandbox_readiness().qualified,
+                ),
+            }
+        finally:
+            db.close()
+
+    @router.put("/sessions/{session_id}/chat-capabilities")
+    def set_chat_capability(session_id: str, payload: ChatCapabilityRequest, request: Request):
+        """Persist a fixed capability grant; no commands or roots are accepted."""
+        owner = _owner(request)
+        db = SessionLocal()
+        try:
+            row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).first()
+            if not row:
+                raise HTTPException(404, "Session not found")
+            project = db.query(Project).filter(Project.id == row.project_id).first() if row.project_id else None
+            workspace_attached = bool(project and project.workspace_root)
+            allowed, reason = can_change(
+                payload.name,
+                scope_kind=row.scope_kind or "general",
+                workspace_attached=workspace_attached,
+                sandbox_ready=computer_sandbox_readiness().qualified,
+            )
+            if not allowed:
+                raise HTTPException(409, reason)
+            grants = normalize(getattr(row, "capability_grants", None), scope_kind=row.scope_kind or "general")
+            grants[payload.name] = payload.enabled
+            row.capability_grants = grants
+            row.updated_at = utcnow_naive()
+            db.commit()
+            live = getattr(session_manager, "sessions", {}).get(session_id)
+            if live:
+                live.capability_grants = dict(grants)
+            return {
+                "session_id": row.id,
+                "capabilities": capability_payload(
+                    grants, scope_kind=row.scope_kind or "general", workspace_attached=workspace_attached,
+                    sandbox_ready=computer_sandbox_readiness().qualified,
+                ),
+            }
         finally:
             db.close()
 

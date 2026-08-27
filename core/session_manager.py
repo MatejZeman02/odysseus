@@ -155,6 +155,7 @@ class SessionManager:
             endpoint_id=getattr(db_session, "endpoint_id", None),
             harness_kind=getattr(db_session, "harness_kind", None) or "native",
             capability_profile=getattr(db_session, "capability_profile", None) or "project_read",
+            capability_grants=getattr(db_session, "capability_grants", None) or {},
             is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
         session.message_count = getattr(db_session, "message_count", 0) or 0
@@ -219,6 +220,7 @@ class SessionManager:
             endpoint_id=getattr(db_session, "endpoint_id", None),
             harness_kind=getattr(db_session, "harness_kind", None) or "native",
             capability_profile=getattr(db_session, "capability_profile", None) or "project_read",
+            capability_grants=getattr(db_session, "capability_grants", None) or {},
             is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
 
@@ -528,6 +530,7 @@ class SessionManager:
             session.endpoint_id = getattr(db_session, "endpoint_id", None)
             session.harness_kind = getattr(db_session, "harness_kind", None) or "native"
             session.capability_profile = getattr(db_session, "capability_profile", None) or "project_read"
+            session.capability_grants = getattr(db_session, "capability_grants", None) or {}
             session.is_scope_primary = bool(getattr(db_session, "is_scope_primary", False))
             return True
         except Exception as e:
