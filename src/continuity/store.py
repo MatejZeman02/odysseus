@@ -288,6 +288,38 @@ class ContinuityStore:
         finally:
             db.close()
 
+    def semantic_proposal_history(
+        self, *, owner: str, session_id: str, limit: int = 20,
+    ) -> list[SemanticProposalRecord]:
+        """Return the immutable, owner-scoped review history for one home.
+
+        Proposals carry compact extracted fields and source fingerprints, not
+        raw transcript text.  Keeping superseded and promoted records visible
+        lets an owner audit what was considered without making an old proposal
+        part of active context.
+        """
+        if not 1 <= limit <= 100:
+            raise ValueError("semantic proposal history limit must be between 1 and 100")
+        db = SessionLocal()
+        try:
+            self._session(db, owner, session_id)
+            rows = db.query(ContinuityArtifact).filter(
+                ContinuityArtifact.owner == owner,
+                ContinuityArtifact.session_id == session_id,
+                ContinuityArtifact.kind == "semantic_checkpoint_proposal_v1",
+            ).order_by(ContinuityArtifact.revision.desc()).limit(limit).all()
+            return [
+                SemanticProposalRecord(
+                    id=row.id,
+                    revision=row.revision,
+                    status=row.status,
+                    proposal=SemanticCheckpointProposalV1.from_payload(json.loads(row.payload_json)),
+                )
+                for row in rows
+            ]
+        finally:
+            db.close()
+
     def promote_semantic_proposal(
         self,
         *,

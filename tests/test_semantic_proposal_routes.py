@@ -13,8 +13,11 @@ from src.continuity.semantic_proposals import derivation_messages, parse_semanti
 from src.continuity.store import ContinuityStore
 
 
-def _endpoint(router, path):
-    return next(route.endpoint for route in router.routes if getattr(route, "path", "") == path)
+def _endpoint(router, path, method="POST"):
+    return next(
+        route.endpoint for route in router.routes
+        if getattr(route, "path", "") == path and method in getattr(route, "methods", set())
+    )
 
 
 def _json_payload(**overrides):
@@ -91,6 +94,12 @@ async def test_semantic_proposal_route_uses_stored_model_without_tools_and_persi
     assert promoted["brief"]["derivation_status"] == "accepted"
     assert promoted["brief"]["confirmed_facts"] == ["The branch is frozen"]
     assert promoted["brief"]["ongoing_goals"] == ["Ask the reviewer"]
+
+    history = _endpoint(router, "/api/companion/memory/sessions/{session_id}/semantic-proposals", "GET")
+    listed = history("session", SimpleNamespace())
+    assert [(item["id"], item["status"]) for item in listed["proposals"]] == [
+        (result["id"], "promoted"),
+    ]
 
 
 @pytest.mark.asyncio

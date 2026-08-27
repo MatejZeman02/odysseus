@@ -111,6 +111,7 @@ def setup_companion_memory_routes() -> APIRouter:
             project_brief = store.latest_project_brief(owner=owner, project_id=project_id) if project_id else None
             personal_brief = store.latest_personal_brief(owner=owner, session_id=session_id) if scope_kind == "personal" else None
             proposal = store.latest_semantic_proposal_record(owner=owner, session_id=session_id)
+            proposal_history = store.semantic_proposal_history(owner=owner, session_id=session_id)
             return {
                 "scope_kind": scope_kind, "project_id": project_id,
                 "thread_checkpoint": checkpoint.to_payload() if checkpoint else None,
@@ -122,6 +123,15 @@ def setup_companion_memory_routes() -> APIRouter:
                     "status": proposal.status,
                     "proposal": proposal.proposal.to_payload(),
                 } if proposal else None),
+                "semantic_proposal_history": [
+                    {
+                        "id": record.id,
+                        "revision": record.revision,
+                        "status": record.status,
+                        "proposal": record.proposal.to_payload(),
+                    }
+                    for record in proposal_history
+                ],
                 "artifacts": memory.list_artifacts(owner=owner, scope_kind=scope_kind, project_id=project_id),
                 "grants": memory.approved_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
                 "pending_grants": memory.pending_grants(owner=owner, personal_session_id=session_id) if scope_kind == "personal" else [],
@@ -207,6 +217,28 @@ def setup_companion_memory_routes() -> APIRouter:
             return {"id": record.id, "revision": record.revision, "status": record.status, "proposal": record.proposal.to_payload()}
         except NotFoundError as exc:
             raise HTTPException(404, "Semantic proposal was not found") from exc
+
+    @router.get("/memory/sessions/{session_id}/semantic-proposals")
+    def list_semantic_proposals(session_id: str, request: Request):
+        try:
+            owner = _owner(request)
+            scope_kind, _project_id = _scope(owner, session_id)
+            if scope_kind not in {"personal", "project"}:
+                raise HTTPException(409, "Semantic proposals are available only for Personal and project homes")
+            records = ContinuityStore().semantic_proposal_history(owner=owner, session_id=session_id)
+            return {
+                "proposals": [
+                    {
+                        "id": record.id,
+                        "revision": record.revision,
+                        "status": record.status,
+                        "proposal": record.proposal.to_payload(),
+                    }
+                    for record in records
+                ]
+            }
+        except NotFoundError as exc:
+            raise HTTPException(404, "Companion session was not found") from exc
 
     @router.post("/memory/semantic-proposals/{proposal_id}/promote")
     def promote_semantic_proposal(proposal_id: str, payload: SemanticProposalPromotion, request: Request):
