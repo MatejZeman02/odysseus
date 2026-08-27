@@ -80,6 +80,9 @@ class SemanticProposalPromotion(BaseModel):
 class CheckpointMountCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_checkpoint_id: str = Field(min_length=1, max_length=128)
+    expires_in_days: int = Field(default=14, ge=1, le=30)
+    sensitivity: str = Field(default="standard", pattern="^(standard|sensitive)$")
+    acknowledge_sensitive: bool = False
 
 
 class CheckpointMountDetach(BaseModel):
@@ -163,6 +166,9 @@ def setup_companion_memory_routes() -> APIRouter:
                         "derivation_status": mount.checkpoint.derivation_status,
                         "source_through_message_id": mount.checkpoint.source_through_message_id,
                         "source_message_count": len(mount.checkpoint.source_message_ids),
+                        "sensitivity": mount.sensitivity,
+                        "expires_at": mount.expires_at,
+                        "status": mount.status,
                         "checkpoint": mount.checkpoint.to_payload(),
                     }
                     for mount in mounts
@@ -227,6 +233,9 @@ def setup_companion_memory_routes() -> APIRouter:
             record = ContinuityStore().attach_checkpoint(
                 owner=_owner(request), destination_session_id=session_id,
                 source_checkpoint_id=payload.source_checkpoint_id,
+                expires_in_days=payload.expires_in_days,
+                sensitivity=payload.sensitivity,
+                acknowledge_sensitive=payload.acknowledge_sensitive,
             )
             return {
                 "id": record.id, "revision": record.revision,
@@ -234,11 +243,16 @@ def setup_companion_memory_routes() -> APIRouter:
                 "source_session_id": record.source_session_id,
                 "objective": record.checkpoint.objective,
                 "derivation_status": record.checkpoint.derivation_status,
+                "sensitivity": record.sensitivity,
+                "expires_at": record.expires_at,
+                "status": record.status,
             }
         except NotFoundError as exc:
             raise HTTPException(404, "Checkpoint or Companion session was not found") from exc
         except ScopeConflictError as exc:
             raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @router.delete("/memory/sessions/{session_id}/checkpoint-mounts/{mount_id}")
     def detach_checkpoint_mount(session_id: str, mount_id: str, payload: CheckpointMountDetach, request: Request):

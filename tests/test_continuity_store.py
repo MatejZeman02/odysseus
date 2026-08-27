@@ -1,5 +1,7 @@
 """Regression tests for durable, owner-scoped continuity persistence."""
 
+import json
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -221,6 +223,50 @@ def test_checkpoint_mount_is_owner_scoped_read_only_and_detachable(store):
     with pytest.raises(NotFoundError):
         continuity.attach_checkpoint(
             owner="bob", destination_session_id="bob-session", source_checkpoint_id=source_write.id,
+        )
+
+
+def test_checkpoint_mount_expires_and_sensitive_mount_requires_acknowledgement(store):
+    continuity, local_session = store
+    project_id = continuity.create_project(owner="alice", name="Dust", workspace_root="/work/dust")
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="personal")
+    db = local_session()
+    db.add(DbSession(id="alice-destination", owner="alice", name="Dust fork", endpoint_url="http://a", model="m"))
+    db.commit(); db.close()
+    continuity.bind_session(owner="alice", session_id="alice-destination", scope_kind="project", project_id=project_id)
+    source = continuity.write_thread_checkpoint(owner="alice", checkpoint=ThreadCheckpointV1(
+        session_id="alice-session", objective="Sensitive release plan", source_message_ids=["m1"],
+        source_through_message_id="m1", source_hash="source-hash",
+    ))
+
+    with pytest.raises(ScopeConflictError, match="acknowledge sensitive"):
+        continuity.attach_checkpoint(
+            owner="alice", destination_session_id="alice-destination", source_checkpoint_id=source.id,
+            sensitivity="sensitive",
+        )
+    mount = continuity.attach_checkpoint(
+        owner="alice", destination_session_id="alice-destination", source_checkpoint_id=source.id,
+        sensitivity="sensitive", acknowledge_sensitive=True, expires_in_days=1,
+    )
+    assert mount.sensitivity == "sensitive"
+    assert mount.expires_at
+
+    # An expired payload is durably removed from active compiler context and
+    # cannot later be promoted as if it were still consented context.
+    db = local_session()
+    row = db.query(ContinuityArtifact).filter_by(id=mount.id).one()
+    payload = json.loads(row.payload_json)
+    payload["expires_at"] = "2000-01-01T00:00:00"
+    row.payload_json = json.dumps(payload)
+    db.commit(); db.close()
+    assert continuity.checkpoint_mounts(owner="alice", destination_session_id="alice-destination") == []
+    db = local_session()
+    assert db.query(ContinuityArtifact).filter_by(id=mount.id).one().status == "expired"
+    db.close()
+    with pytest.raises(NotFoundError):
+        continuity.promote_checkpoint_mount(
+            owner="alice", destination_session_id="alice-destination", mount_id=mount.id,
+            expected_revision=mount.revision, selections={"objective": [0]},
         )
 
 

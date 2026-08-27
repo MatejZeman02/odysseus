@@ -6,6 +6,7 @@ import json
 import uuid
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from sqlalchemy import text
@@ -66,6 +67,9 @@ class CheckpointMountRecord:
     source_checkpoint_id: str
     source_session_id: str
     checkpoint: ThreadCheckpointV1
+    sensitivity: str = "standard"
+    expires_at: str | None = None
+    status: str = "active"
 
 
 def _settings(project: Project) -> dict:
@@ -83,6 +87,56 @@ def _direct_relations(project: Project) -> set[str]:
 
 class ContinuityStore:
     """Small transactional repository; it never owns or rewrites raw messages."""
+
+    _CHECKPOINT_MOUNT_SENSITIVITIES = {"standard", "sensitive"}
+    _DEFAULT_CHECKPOINT_MOUNT_DAYS = 14
+    _MAX_CHECKPOINT_MOUNT_DAYS = 30
+
+    @staticmethod
+    def _utcnow() -> datetime:
+        """Match the application's existing naive-UTC database convention."""
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    @classmethod
+    def _checkpoint_mount_payload(cls, row: ContinuityArtifact) -> tuple[str, str, str | None]:
+        """Return validated source/lifecycle data without trusting browser input."""
+        try:
+            payload = json.loads(row.payload_json)
+            source_id = str(payload["source_checkpoint_id"])
+            sensitivity = str(payload.get("sensitivity", "standard"))
+            expires_at = payload.get("expires_at")
+            if sensitivity not in cls._CHECKPOINT_MOUNT_SENSITIVITIES:
+                raise ValueError("unsupported checkpoint mount sensitivity")
+            if expires_at is not None:
+                expires_at = str(expires_at)
+                datetime.fromisoformat(expires_at)
+            return source_id, sensitivity, expires_at
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ScopeConflictError("checkpoint mount metadata is invalid") from exc
+
+    @classmethod
+    def _expire_checkpoint_mounts(cls, db, *, owner: str, destination_session_id: str) -> bool:
+        """Make expiration durable before a read, compile, or promotion can use it."""
+        changed = False
+        now = cls._utcnow()
+        rows = db.query(ContinuityArtifact).filter(
+            ContinuityArtifact.owner == owner,
+            ContinuityArtifact.session_id == destination_session_id,
+            ContinuityArtifact.kind == "checkpoint_mount_v1",
+            ContinuityArtifact.status == "active",
+        ).all()
+        for row in rows:
+            try:
+                _source_id, _sensitivity, expires_at = cls._checkpoint_mount_payload(row)
+            except ScopeConflictError:
+                # Corrupt legacy mount payloads are never admitted as context.
+                row.status = "expired"
+                changed = True
+                continue
+            if expires_at is not None and datetime.fromisoformat(expires_at) <= now:
+                row.status = "expired"
+                changed = True
+        return changed
 
     def create_project(self, *, owner: str, name: str, workspace_root: str) -> str:
         if not owner or not name.strip() or not workspace_root.strip():
@@ -548,9 +602,22 @@ class ContinuityStore:
             db.close()
 
     def attach_checkpoint(
-        self, *, owner: str, destination_session_id: str, source_checkpoint_id: str,
+        self,
+        *,
+        owner: str,
+        destination_session_id: str,
+        source_checkpoint_id: str,
+        expires_in_days: int = _DEFAULT_CHECKPOINT_MOUNT_DAYS,
+        sensitivity: str = "standard",
+        acknowledge_sensitive: bool = False,
     ) -> CheckpointMountRecord:
         """Attach one immutable owner checkpoint as read-only destination context."""
+        if isinstance(expires_in_days, bool) or not isinstance(expires_in_days, int) or not 1 <= expires_in_days <= self._MAX_CHECKPOINT_MOUNT_DAYS:
+            raise ValueError(f"checkpoint mount expiry must be between 1 and {self._MAX_CHECKPOINT_MOUNT_DAYS} days")
+        if sensitivity not in self._CHECKPOINT_MOUNT_SENSITIVITIES:
+            raise ValueError("checkpoint mount sensitivity is invalid")
+        if sensitivity == "sensitive" and not acknowledge_sensitive:
+            raise ScopeConflictError("acknowledge sensitive checkpoint context before attaching it")
         db = SessionLocal()
         try:
             if db.get_bind().dialect.name == "sqlite":
@@ -579,12 +646,14 @@ class ContinuityStore:
             ).order_by(ContinuityArtifact.revision.desc()).all()
             for row in existing_rows:
                 try:
-                    if json.loads(row.payload_json).get("source_checkpoint_id") == source_checkpoint_id:
+                    existing_source_id, existing_sensitivity, existing_expires_at = self._checkpoint_mount_payload(row)
+                    if existing_source_id == source_checkpoint_id:
                         db.commit()
                         return CheckpointMountRecord(
                             row.id, row.revision, source_checkpoint_id, checkpoint.session_id, checkpoint,
+                            existing_sensitivity, existing_expires_at, row.status,
                         )
-                except (TypeError, json.JSONDecodeError):
+                except ScopeConflictError:
                     continue
             if len(existing_rows) >= 2:
                 raise ScopeConflictError("a Companion home may mount at most two checkpoints")
@@ -605,6 +674,8 @@ class ContinuityStore:
                     "schema_version": 1,
                     "source_checkpoint_id": source_checkpoint_id,
                     "source_session_id": checkpoint.session_id,
+                    "sensitivity": sensitivity,
+                    "expires_at": (self._utcnow() + timedelta(days=expires_in_days)).isoformat(timespec="seconds"),
                 }, sort_keys=True, separators=(",", ":")),
                 source_through_message_id=checkpoint.source_through_message_id,
                 source_hash=hashlib.sha256(
@@ -615,6 +686,7 @@ class ContinuityStore:
             db.commit()
             return CheckpointMountRecord(
                 mount.id, mount.revision, source_checkpoint_id, checkpoint.session_id, checkpoint,
+                sensitivity, json.loads(mount.payload_json)["expires_at"], mount.status,
             )
         except Exception:
             db.rollback()
@@ -626,6 +698,9 @@ class ContinuityStore:
         db = SessionLocal()
         try:
             self._session(db, owner, destination_session_id)
+            changed = self._expire_checkpoint_mounts(
+                db, owner=owner, destination_session_id=destination_session_id,
+            )
             rows = db.query(ContinuityArtifact).filter(
                 ContinuityArtifact.owner == owner,
                 ContinuityArtifact.session_id == destination_session_id,
@@ -635,8 +710,7 @@ class ContinuityStore:
             mounts: list[CheckpointMountRecord] = []
             for row in rows:
                 try:
-                    payload = json.loads(row.payload_json)
-                    source_id = str(payload["source_checkpoint_id"])
+                    source_id, sensitivity, expires_at = self._checkpoint_mount_payload(row)
                     source = db.query(ContinuityArtifact).filter(
                         ContinuityArtifact.id == source_id,
                         ContinuityArtifact.owner == owner,
@@ -645,11 +719,14 @@ class ContinuityStore:
                     if source is None:
                         continue
                     checkpoint = ThreadCheckpointV1.from_payload(json.loads(source.payload_json))
-                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                except ScopeConflictError:
                     continue
                 mounts.append(CheckpointMountRecord(
                     row.id, row.revision, source_id, checkpoint.session_id, checkpoint,
+                    sensitivity, expires_at, row.status,
                 ))
+            if changed:
+                db.commit()
             return mounts
         finally:
             db.close()
@@ -664,6 +741,7 @@ class ContinuityStore:
             if db.get_bind().dialect.name == "sqlite":
                 db.execute(text("BEGIN IMMEDIATE"))
             self._session(db, owner, destination_session_id)
+            self._expire_checkpoint_mounts(db, owner=owner, destination_session_id=destination_session_id)
             mount = db.query(ContinuityArtifact).filter(
                 ContinuityArtifact.id == mount_id,
                 ContinuityArtifact.owner == owner,
@@ -703,6 +781,7 @@ class ContinuityStore:
             scope = self._resolved(db, destination, owner)
             if scope.scope_kind not in {"personal", "project"}:
                 raise ScopeConflictError("checkpoint promotion requires a Personal or project destination")
+            self._expire_checkpoint_mounts(db, owner=owner, destination_session_id=destination_session_id)
             mount = db.query(ContinuityArtifact).filter(
                 ContinuityArtifact.id == mount_id,
                 ContinuityArtifact.owner == owner,
@@ -714,8 +793,7 @@ class ContinuityStore:
                 raise NotFoundError("active checkpoint mount was not found")
             if mount.revision != expected_revision:
                 raise ScopeConflictError("checkpoint mount revision is stale")
-            payload = json.loads(mount.payload_json)
-            source_id = str(payload["source_checkpoint_id"])
+            source_id, _sensitivity, _expires_at = self._checkpoint_mount_payload(mount)
             source = db.query(ContinuityArtifact).filter(
                 ContinuityArtifact.id == source_id,
                 ContinuityArtifact.owner == owner,
