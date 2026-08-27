@@ -2328,7 +2328,12 @@ def _build_system_prompt(
         active_document = None
 
     # With RAG tools, cache key includes the selected tools
-    _rt_key = frozenset(relevant_tools) if relevant_tools else None
+    # ``None`` means the caller has no selected-tool policy and needs the
+    # legacy full prompt. An explicit empty set is materially different: it
+    # means this turn must remain tool-less (apart from irreducible loop
+    # primitives). Keep those cache entries distinct or a previous full-tool
+    # prompt can leak into a deliberately restricted turn.
+    _rt_key = None if relevant_tools is None else frozenset(relevant_tools)
     # Include a signature of the built-in overrides so editing one in the
     # Skills UI takes effect without a restart (busts the prompt cache).
     # Hash the full dict so content edits (not just key add/remove) bust it.

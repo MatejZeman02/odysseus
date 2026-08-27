@@ -446,6 +446,29 @@ def test_document_my_style_does_not_infer_public_persona(monkeypatch):
     assert "do NOT infer that style from memories, identity, public persona" in payload
 
 
+def test_prompt_cache_keeps_an_explicit_empty_tool_policy_distinct(monkeypatch):
+    """A tool-less turn must never reuse the legacy full-tool prompt."""
+    monkeypatch.setattr(al, "get_setting", lambda _key, default=None: default, raising=False)
+    monkeypatch.setattr(al, "get_builtin_overrides", lambda: {}, raising=False)
+    monkeypatch.setattr(al, "_cached_base_prompt", None, raising=False)
+    monkeypatch.setattr(al, "_cached_base_prompt_key", None, raising=False)
+
+    full, _ = al._build_system_prompt(
+        [{"role": "user", "content": "hello"}], "test-model", None, None,
+        relevant_tools=None, suppress_skills=True,
+    )
+    tool_less, _ = al._build_system_prompt(
+        [{"role": "user", "content": "hello"}], "test-model", None, None,
+        relevant_tools=set(), suppress_skills=True,
+    )
+    full_text = "\n".join(str(message.get("content") or "") for message in full)
+    tool_less_text = "\n".join(str(message.get("content") or "") for message in tool_less)
+
+    assert "```manage_memory" in full_text
+    assert "```manage_memory" not in tool_less_text
+    assert "```request_capability" in tool_less_text
+
+
 def test_guide_only_skips_teacher_escalation(monkeypatch):
     _patch_loop_basics(monkeypatch)
 
