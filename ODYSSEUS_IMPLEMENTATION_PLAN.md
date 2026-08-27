@@ -168,9 +168,10 @@ expiry/provenance filters. An owner-confirmed, aggregate-only inventory is now
 available; a separately approved backup report and scoped contract extension
 remain mandatory before attempting AgentMemory recall or writes.
 
-The local fallback index already rejects mismatched home/project bindings and
-filters expired episodic records before ranking. This is a containment fix, not
-approval to migrate legacy records or enable AgentMemory.
+The local fallback index already rejects mismatched home/project bindings,
+filters expired episodic records before ranking, and replaces prior accepted
+home-brief recall entries when an owner revises that brief. This is a
+containment fix, not approval to migrate legacy records or enable AgentMemory.
 
 The provider-neutral scoped contract now fixes owner, home/project binding,
 session/source provenance, sensitivity, expiry, and opaque grant audit IDs

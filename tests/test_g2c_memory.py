@@ -400,6 +400,34 @@ def test_personal_brief_is_separate_from_project_and_checkpoint(store):
     assert bundle.primary_project_brief is None
 
 
+def test_replacing_an_accepted_home_brief_removes_its_stale_recall_entry(store):
+    _continuity, _memory = store
+    from routes.companion_memory_routes import _index_accepted_home_brief
+
+    first = PersonalBriefV1(owner_id="alice", summary="Old fish preference")
+    second = PersonalBriefV1(owner_id="alice", summary="Current orchid preference")
+    _index_accepted_home_brief(
+        owner="alice", session_id="personal", scope_kind="personal", project_id=None,
+        source_id="brief-one", brief=first,
+    )
+    _index_accepted_home_brief(
+        owner="alice", session_id="personal", scope_kind="personal", project_id=None,
+        source_id="brief-two", brief=second,
+    )
+    db = memory_module.SessionLocal()
+    try:
+        records = db.query(ScopedMemoryRecord).filter(
+            ScopedMemoryRecord.owner == "alice",
+            ScopedMemoryRecord.source_kind == "accepted_home_brief",
+        ).all()
+        assert len(records) == 1
+        assert records[0].source_id == "brief-two"
+        assert "orchid" in records[0].content
+        assert "fish" not in records[0].content
+    finally:
+        db.close()
+
+
 def test_episodic_recall_filters_owner_home_and_project(store):
     from src.scoped_memory import ScopedMemoryIndex
     index = ScopedMemoryIndex()

@@ -316,9 +316,11 @@ scoped contract until a separately reviewed migration.
 **Indexing correction:** automatic heuristic checkpoints remain local compact
 context only. They no longer enter episodic retrieval, where a later prompt
 could mistake provisional model output for memory. The local index receives
-only explicitly owner-promoted home briefs and explicit working artifacts;
-failure to update that optional index cannot affect the accepted brief or raw
-history.
+only explicitly owner-promoted home briefs and explicit working artifacts.
+An accepted brief is indexed as one scope-wide singleton: replacing it removes
+the prior brief’s recall record, so obsolete owner state cannot reappear as an
+episodic hit. Failure to update that optional index cannot affect the accepted
+brief or raw history.
 
 Personal Advisor’s migration preflight now exposes a disabled-until-inventory
 **Create owner-private backup** action. On an explicit authenticated click it

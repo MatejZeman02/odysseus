@@ -238,7 +238,7 @@ def _index_accepted_home_brief(
         if not content:
             return
         from src.scoped_memory import ScopedMemoryIndex
-        ScopedMemoryIndex().index(
+        ScopedMemoryIndex().replace_scope_source(
             owner=owner, scope_kind=scope_kind, project_id=project_id,
             session_id=session_id, source_kind="accepted_home_brief",
             source_id=source_id, content=content,

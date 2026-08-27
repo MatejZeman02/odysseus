@@ -17,6 +17,49 @@ from src.memory_provider import MemoryRecord, MemorySearchHit, ScopedMemoryProvi
 
 
 class ScopedMemoryIndex:
+    def replace_scope_source(
+        self, *, owner: str, scope_kind: str, project_id: str | None,
+        session_id: str | None, source_kind: str, source_id: str, content: str,
+        sensitivity: str = "normal", expires_at: datetime | None = None,
+    ) -> None:
+        """Replace a scope-wide singleton source in one transaction.
+
+        Accepted home briefs are revisions of one authority, not independent
+        episodic facts.  Leaving an earlier revision indexed would let an old
+        preference or project decision reappear after the owner replaced it.
+        Other source kinds (artifacts, mounts) remain independently indexed.
+        """
+        if not source_kind:
+            raise ValueError("scoped memory singleton source kind is required")
+        self._validate_scope(
+            owner=owner, scope_kind=scope_kind, project_id=project_id, sensitivity=sensitivity,
+        )
+        if not source_id:
+            raise ValueError("scoped memory singleton source ID is required")
+        text = " ".join(str(content or "").split())[:4000]
+        db = SessionLocal()
+        try:
+            query = db.query(ScopedMemoryRecord).filter(
+                ScopedMemoryRecord.owner == owner,
+                ScopedMemoryRecord.scope_kind == scope_kind,
+                ScopedMemoryRecord.project_id == project_id,
+                ScopedMemoryRecord.source_kind == source_kind,
+            )
+            query.delete(synchronize_session=False)
+            if text:
+                db.add(ScopedMemoryRecord(
+                    id=uuid.uuid4().hex, owner=owner, scope_kind=scope_kind,
+                    project_id=project_id, session_id=session_id, source_kind=source_kind,
+                    source_id=source_id, content=text, sensitivity=sensitivity,
+                    expires_at=expires_at,
+                ))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
     def index(self, *, owner: str, scope_kind: str, project_id: str | None, session_id: str | None,
               source_kind: str, source_id: str, content: str, sensitivity: str = "normal",
               expires_at: datetime | None = None) -> None:
