@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from core.database import ContinuityArtifact, Project, Session as DbSession, SessionLocal, utcnow_naive
+from core.database import ChatMessage as DbChatMessage, ContinuityArtifact, Project, Session as DbSession, SessionLocal, utcnow_naive
 from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.companion_capabilities import defaults_for_scope
@@ -21,6 +21,72 @@ from src.continuity.store import ContinuityStore, NotFoundError, ScopeConflictEr
 
 
 logger = logging.getLogger(__name__)
+
+
+def _last_compiled_context(*, owner: str, session_id: str) -> dict | None:
+    """Return a deliberately small audit record for the latest scoped turn.
+
+    Context manifests are persisted with assistant messages so a restart cannot
+    erase the answer to the useful owner question, "what did this reply use?".
+    The inspector must not turn that metadata into another transcript reader:
+    it exposes only boolean/count/path summaries already safe for this chat's
+    owner, never message tails, provider data, grant IDs, or recalled text.
+    """
+    def count(value: object, maximum: int) -> int:
+        try:
+            return min(max(int(value or 0), 0), maximum)
+        except (TypeError, ValueError):
+            return 0
+
+    db = SessionLocal()
+    try:
+        session = db.query(DbSession).filter(
+            DbSession.id == session_id, DbSession.owner == owner,
+        ).first()
+        if not session:
+            return None
+        rows = db.query(DbChatMessage).filter(
+            DbChatMessage.session_id == session_id,
+            DbChatMessage.role == "assistant",
+        ).order_by(DbChatMessage.timestamp.desc()).limit(50).all()
+        for row in rows:
+            try:
+                metadata = json.loads(row.meta_data) if row.meta_data else {}
+            except (TypeError, ValueError):
+                continue
+            manifest = metadata.get("context_manifest") if isinstance(metadata, dict) else None
+            if not isinstance(manifest, dict):
+                continue
+            scope = manifest.get("scope") if isinstance(manifest.get("scope"), dict) else {}
+            artifacts = manifest.get("working_artifacts") if isinstance(manifest.get("working_artifacts"), list) else []
+            selected = manifest.get("selected_working_artifact_paths")
+            mounts = manifest.get("checkpoint_mounts") if isinstance(manifest.get("checkpoint_mounts"), list) else []
+            related = manifest.get("related_project_ids") if isinstance(manifest.get("related_project_ids"), list) else []
+            grants = manifest.get("context_grants") if isinstance(manifest.get("context_grants"), list) else []
+            tail = manifest.get("transcript_tail_message_ids") if isinstance(manifest.get("transcript_tail_message_ids"), list) else []
+            return {
+                "recorded_at": row.timestamp.isoformat() if row.timestamp else None,
+                "scope_kind": scope.get("kind") if isinstance(scope.get("kind"), str) else None,
+                "thread_checkpoint": bool(manifest.get("thread_checkpoint")),
+                "project_brief": bool(manifest.get("primary_project_brief")),
+                "personal_brief": bool(manifest.get("personal_brief")),
+                "related_project_count": min(len(related), 3),
+                "mounted_checkpoint_count": min(len(mounts), 2),
+                "episodic_hit_count": count(manifest.get("episodic_hit_count"), 20),
+                "working_artifact_paths": [
+                    item.get("path") for item in artifacts[:20]
+                    if isinstance(item, dict) and isinstance(item.get("path"), str)
+                ],
+                "selected_working_artifact_paths": [
+                    path for path in (selected if isinstance(selected, list) else [])[:20]
+                    if isinstance(path, str)
+                ],
+                "context_grant_count": min(len(grants), 3),
+                "transcript_tail_count": min(len(tail), 80),
+            }
+        return None
+    finally:
+        db.close()
 
 
 class PersonalArtifactWrite(BaseModel):
@@ -331,6 +397,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                     for mount in mounts
                 ],
                 "checkpoint_catalog": store.checkpoint_catalog(owner=owner) if scope_kind in {"personal", "project"} else [],
+                "last_compiled_context": _last_compiled_context(owner=owner, session_id=session_id),
                 "related_project_catalog": (
                     store.related_project_catalog(owner=owner, project_id=project_id)
                     if scope_kind == "project" and project_id else []
@@ -374,10 +441,10 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         except (ScopeConflictError, ValueError) as exc:
             raise HTTPException(422, str(exc)) from exc
         except Exception as exc:
-            logger.exception("Companion memory could not load for session %s", session_id)
+            logger.exception("Companion project relation update failed for project %s", project_id)
             raise HTTPException(
                 500,
-                "Companion memory could not be loaded. Check the server log for details.",
+                "Related project access could not be updated. No project context was shared.",
             ) from exc
 
     @router.post("/memory/sessions/{session_id}/semantic-proposals")

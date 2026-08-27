@@ -422,6 +422,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     assert "Related project access" in ui
     assert "@Project Name" in ui
     assert "companion-save-related-projects" in ui
+    assert "Last compiled context" in ui
+    assert "Scope-verified episodic hits" in ui
 
 
 def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store, monkeypatch):

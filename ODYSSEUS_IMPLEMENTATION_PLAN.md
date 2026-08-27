@@ -239,6 +239,9 @@ platforms, and production safety architecture remain outside the active scope.
 - [x] Share typed project artifacts across conversations, not raw transcripts.
 - [x] Let directly related projects contribute explicitly requested, clearly
   labeled artifacts without merging their state into the home project.
+- [x] Show a reload-safe, sanitized audit of the latest compiled scoped context
+  in the Companion Context panel (categories and counts only; no prompt or
+  recalled text).
 - [x] Keep **Chat / Agent** as a preference, not as separate products.
 - [x] Use Qwen Code early for its existing agent loop, project tools, planning,
   permissions, sessions, and compaction.

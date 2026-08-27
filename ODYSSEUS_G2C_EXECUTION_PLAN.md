@@ -436,6 +436,13 @@ turn, and only the related project's accepted brief may then be compiled.
 Remaining C5 work is richer inspector coverage for eventual episodic hits and
 native question-callout rendering/export only if ordinary projects use it.
 
+The Context panel now also includes a reload-safe **Last compiled context**
+audit for the latest scoped assistant reply. It reports only the owner-safe
+categories/counts that were admitted (checkpoint, home brief, related brief,
+mount, episodic hit, artifact, one-request grant, and transcript-tail count).
+It intentionally excludes prompt text, recalled text, raw message IDs, grant
+IDs, provider routes, and any other session's transcript.
+
 ## Acceptance tests
 
 - Existing heuristic records are labelled and cannot be selected as accepted

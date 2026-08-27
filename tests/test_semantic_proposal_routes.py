@@ -175,6 +175,51 @@ def test_checkpoint_mount_routes_attach_and_detach_owner_checkpoint(monkeypatch)
     ) == {"detached": True}
 
 
+def test_memory_context_exposes_a_sanitized_last_compiled_context(monkeypatch):
+    router = _setup(monkeypatch)
+    db = route_module.SessionLocal()
+    db.add(DbMessage(
+        id="compiled", session_id="session", role="assistant", content="Private answer",
+        meta_data=json.dumps({
+            "context_manifest": {
+                "scope": {"kind": "personal", "project_id": None},
+                "thread_checkpoint": True,
+                "personal_brief": True,
+                "related_project_ids": ["other"],
+                "checkpoint_mounts": [{"source_session_id": "source"}],
+                "episodic_hit_count": 2,
+                "working_artifacts": [{"id": "artifact", "path": "drafts/letter.md", "revision": 2}],
+                "selected_working_artifact_paths": ["drafts/letter.md"],
+                "context_grants": [{"id": "secret-grant", "project_id": "other"}],
+                "transcript_tail_message_ids": ["m1", "m2"],
+                "provider_url": "https://must-not-leak.invalid",
+            },
+        }),
+    ))
+    db.commit(); db.close()
+
+    context = _endpoint(router, "/api/companion/memory/sessions/{session_id}", "GET")
+    result = context("session", SimpleNamespace())
+
+    assert result["last_compiled_context"] == {
+        "recorded_at": result["last_compiled_context"]["recorded_at"],
+        "scope_kind": "personal",
+        "thread_checkpoint": True,
+        "project_brief": False,
+        "personal_brief": True,
+        "related_project_count": 1,
+        "mounted_checkpoint_count": 1,
+        "episodic_hit_count": 2,
+        "working_artifact_paths": ["drafts/letter.md"],
+        "selected_working_artifact_paths": ["drafts/letter.md"],
+        "context_grant_count": 1,
+        "transcript_tail_count": 2,
+    }
+    assert "secret-grant" not in json.dumps(result["last_compiled_context"])
+    assert "must-not-leak" not in json.dumps(result["last_compiled_context"])
+    assert "Private answer" not in json.dumps(result["last_compiled_context"])
+
+
 def test_checkpoint_synthesis_creates_fresh_scoped_chat_with_exactly_two_mounts(monkeypatch):
     _setup(monkeypatch)
 
