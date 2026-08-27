@@ -50,6 +50,10 @@ def test_personal_artifact_is_revisioned_and_owner_scoped(store):
     assert memory.undo_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=2)["content"].endswith("hello")
     with pytest.raises(ArtifactConflict):
         memory.write_personal_artifact(owner="alice", session_id="personal", path="drafts/love-letter.md", content="new", expected_revision=1)
+    with pytest.raises(ArtifactConflict, match="already exists"):
+        memory.write_personal_artifact(
+            owner="alice", session_id="personal", path="drafts/love-letter.md", content="new", create_only=True,
+        )
     with pytest.raises(MemoryScopeError):
         memory.write_personal_artifact(owner="alice", session_id="personal", path="../secrets.md", content="x")
     with pytest.raises(MemoryScopeError):
@@ -655,6 +659,8 @@ def test_g2c_routes_and_ui_keep_scopes_explicit():
     renderer = open("static/js/chatRenderer.js", encoding="utf-8").read()
     assert "['personal', 'computer'].includes(scopeKind)" in renderer
     assert "/api/companion/artifacts/${encodeURIComponent(scopeKind)}" in renderer
+    assert "odysseus-artifact-create" in renderer
+    assert "create_only: true" in renderer
     assert "selected model ${model}" in ui
     assert "no tools" in ui
     assert "Background proposal paused" in ui

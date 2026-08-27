@@ -141,6 +141,18 @@ def _continuity_prompt_message(bundle) -> dict:
                 ),
             },
         })
+    if bundle.scope.scope_kind in {"personal", "computer"}:
+        sections.append({
+            "artifact_creation_protocol": {
+                "instruction": (
+                    "When the owner explicitly asks for a new private Markdown artifact, emit exactly one "
+                    "<odysseus-artifact-create path=\"relative/path.md\">…</odysseus-artifact-create> "
+                    "containing its complete UTF-8 Markdown. Use a new relative .md path; do not create a "
+                    "paste source, overwrite an existing artifact, or claim it was saved. The owner must "
+                    "review and press Create."
+                ),
+            },
+        })
     if source_pastes:
         sections.append({
             "source_paste_policy": {

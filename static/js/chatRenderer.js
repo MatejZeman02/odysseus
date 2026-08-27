@@ -22,27 +22,34 @@ const CHECK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" 
 const PAPERCLIP_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
 
 const _ARTIFACT_REVISION_RE = /<odysseus-artifact-revision\s+path=(?:"([^"]+)"|'([^']+)')\s*>\s*([\s\S]*?)\s*<\/odysseus-artifact-revision>/i;
+const _ARTIFACT_CREATE_RE = /<odysseus-artifact-create\s+path=(?:"([^"]+)"|'([^']+)')\s*>\s*([\s\S]*?)\s*<\/odysseus-artifact-create>/i;
 
-function _extractArtifactRevision(text) {
-  const match = String(text || '').match(_ARTIFACT_REVISION_RE);
+function _extractArtifactProposal(text) {
+  const source = String(text || '');
+  const revisionMatch = source.match(_ARTIFACT_REVISION_RE);
+  const createMatch = source.match(_ARTIFACT_CREATE_RE);
+  const match = revisionMatch || createMatch;
   if (!match) return null;
   const path = String(match[1] || match[2] || '').trim();
   const content = String(match[3] || '').replace(/^\n+|\n+$/g, '');
   if (!path || !content || content.length > 512 * 1024) return null;
-  return { path, content, fullMatch: match[0] };
+  return { path, content, operation: createMatch ? 'create' : 'revision', fullMatch: match[0] };
 }
 
-function _buildArtifactRevisionCard(proposal) {
+function _buildArtifactProposalCard(proposal) {
   const card = document.createElement('section');
   card.className = 'personal-artifact-proposal';
-  const title = document.createElement('strong'); title.textContent = `Draft revision · ${proposal.path}`;
-  const detail = document.createElement('span'); detail.textContent = 'The Companion prepared a complete replacement. It is not saved until you apply it.';
+  const creating = proposal.operation === 'create';
+  const title = document.createElement('strong'); title.textContent = `${creating ? 'New artifact' : 'Draft revision'} · ${proposal.path}`;
+  const detail = document.createElement('span'); detail.textContent = creating
+    ? 'The Companion prepared a new artifact. It is not saved until you create it.'
+    : 'The Companion prepared a complete replacement. It is not saved until you apply it.';
   const disclosure = document.createElement('details');
   const summary = document.createElement('summary'); summary.textContent = 'Review proposed Markdown';
   const preview = document.createElement('pre'); preview.textContent = proposal.content;
   disclosure.append(summary, preview);
   const actions = document.createElement('div'); actions.className = 'personal-artifact-proposal-actions';
-  const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'personal-artifact-proposal-apply'; apply.textContent = 'Apply to artifact';
+  const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'personal-artifact-proposal-apply'; apply.textContent = creating ? 'Create artifact' : 'Apply to artifact';
   const status = document.createElement('span'); status.className = 'personal-artifact-proposal-status'; status.setAttribute('role', 'status');
   apply.addEventListener('click', async (event) => {
     event.preventDefault(); event.stopPropagation();
@@ -57,19 +64,23 @@ function _buildArtifactRevisionCard(proposal) {
         throw new Error(context.detail || 'This revision can be applied only from Personal Advisor or Computer Help.');
       }
       const artifact = (context.artifacts || []).find(item => item.path === proposal.path);
-      if (!artifact) throw new Error('The target artifact no longer exists. Open Artifacts to create or select it.');
+      if (!creating && !artifact) throw new Error('The target artifact no longer exists. Open Documents to select it.');
+      if (creating && artifact) throw new Error('An artifact with this path already exists. Reload it before proposing a revision.');
       apply.textContent = 'Saving…';
       const saveResponse = await fetch(`/api/companion/artifacts/${encodeURIComponent(scopeKind)}`, {
         method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({session_id: sessionId, path: proposal.path, content: proposal.content, expected_revision: artifact.revision}),
+        body: JSON.stringify({
+          session_id: sessionId, path: proposal.path, content: proposal.content,
+          ...(creating ? {create_only: true} : {expected_revision: artifact.revision}),
+        }),
       });
       const saved = await saveResponse.json().catch(() => ({}));
       if (!saveResponse.ok) throw new Error(saved.detail || 'Could not apply the artifact revision.');
-      apply.textContent = 'Applied'; status.textContent = `Saved as revision ${saved.revision}.`;
-      uiModule.showToast?.(`${scopeKind === 'computer' ? 'Computer Help' : 'Personal'} artifact revision applied`, 2200);
+      apply.textContent = creating ? 'Created' : 'Applied'; status.textContent = `Saved as revision ${saved.revision}.`;
+      uiModule.showToast?.(`${scopeKind === 'computer' ? 'Computer Help' : 'Personal'} artifact ${creating ? 'created' : 'revision applied'}`, 2200);
     } catch (error) {
       status.textContent = error.message || 'Could not apply the artifact revision.';
-      apply.disabled = false; apply.textContent = 'Apply to artifact';
+      apply.disabled = false; apply.textContent = creating ? 'Create artifact' : 'Apply to artifact';
     }
   });
   actions.append(apply, status); card.append(title, detail, disclosure, actions);
@@ -3118,10 +3129,12 @@ export function addMessage(role, content, modelName, metadata) {
     const b = document.createElement('div');
     b.className = 'body';
 
-    const artifactRevision = role === 'assistant' ? _extractArtifactRevision(textRaw) : null;
+    const artifactProposal = role === 'assistant' ? _extractArtifactProposal(textRaw) : null;
     let text = markdownModule.squashOutsideCode(stripToolBlocks(textRaw || ''));
-    if (artifactRevision) {
-      text = text.replace(artifactRevision.fullMatch, '\n\n*Draft revision available below.*\n');
+    if (artifactProposal) {
+      text = text.replace(artifactProposal.fullMatch, artifactProposal.operation === 'create'
+        ? '\n\n*New artifact available below.*\n'
+        : '\n\n*Draft revision available below.*\n');
     }
     if (role === 'assistant') {
       text = resolveDocumentPlaceholderLinks(text, metadata);
@@ -3384,8 +3397,8 @@ export function addMessage(role, content, modelName, metadata) {
       if (processCard) box.appendChild(processCard);
     }
     box.appendChild(wrap);
-    if (role === 'assistant' && artifactRevision) {
-      const artifactCard = _buildArtifactRevisionCard(artifactRevision);
+    if (role === 'assistant' && artifactProposal) {
+      const artifactCard = _buildArtifactProposalCard(artifactProposal);
       if (artifactCard) box.appendChild(artifactCard);
     }
     if (role === 'assistant' && metadata?.project_patch) {

@@ -357,7 +357,7 @@ class CompanionMemoryStore:
     def _write_private_artifact(
         self, *, owner: str, session_id: str, scope_kind: str, path: str, content: str,
         expected_revision: int | None = None, source_message_id: str | None = None,
-        before_commit: Callable[[Any], None] | None = None,
+        before_commit: Callable[[Any], None] | None = None, create_only: bool = False,
     ) -> dict:
         path = normalise_artifact_path(path)
         if not isinstance(content, str) or len(content.encode("utf-8")) > MAX_ARTIFACT_BYTES:
@@ -374,6 +374,8 @@ class CompanionMemoryStore:
                 WorkingArtifact.project_id == None, WorkingArtifact.path == path,
                 WorkingArtifact.status == "active",
             ).first()
+            if row and create_only:
+                raise ArtifactConflict("Artifact already exists; reload it before proposing a revision")
             if row and expected_revision is not None and row.revision != expected_revision:
                 raise ArtifactConflict("Artifact changed elsewhere; reload it before saving")
             digest = _hash(content)
@@ -409,17 +411,19 @@ class CompanionMemoryStore:
             db.close()
 
     def write_personal_artifact(self, *, owner: str, session_id: str, path: str, content: str,
-                                expected_revision: int | None = None, source_message_id: str | None = None) -> dict:
+                                expected_revision: int | None = None, source_message_id: str | None = None,
+                                create_only: bool = False) -> dict:
         return self._write_private_artifact(
             owner=owner, session_id=session_id, scope_kind="personal", path=path, content=content,
-            expected_revision=expected_revision, source_message_id=source_message_id,
+            expected_revision=expected_revision, source_message_id=source_message_id, create_only=create_only,
         )
 
     def write_computer_artifact(self, *, owner: str, session_id: str, path: str, content: str,
-                                expected_revision: int | None = None, source_message_id: str | None = None) -> dict:
+                                expected_revision: int | None = None, source_message_id: str | None = None,
+                                create_only: bool = False) -> dict:
         return self._write_private_artifact(
             owner=owner, session_id=session_id, scope_kind="computer", path=path, content=content,
-            expected_revision=expected_revision, source_message_id=source_message_id,
+            expected_revision=expected_revision, source_message_id=source_message_id, create_only=create_only,
         )
 
     def write_computer_device_profile(

@@ -114,6 +114,7 @@ class PersonalArtifactWrite(BaseModel):
     path: str = Field(min_length=1, max_length=240)
     content: str = Field(max_length=512 * 1024)
     expected_revision: int | None = Field(default=None, ge=1)
+    create_only: bool = False
     source_message_id: str | None = Field(default=None, max_length=128)
 
 

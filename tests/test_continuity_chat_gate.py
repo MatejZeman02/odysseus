@@ -63,6 +63,15 @@ def test_named_personal_artifact_adds_reviewed_revision_protocol():
     assert "odysseus-artifact-revision" in protocol["instruction"]
 
 
+def test_private_companion_scope_gets_reviewed_artifact_creation_protocol():
+    bundle = ContextBundle("", ResolvedScope("alice", "computer", "computer"), "create an incident")
+    message = _continuity_prompt_message(bundle)
+    payload = json.loads(message["content"].split("\n", 1)[1])
+    protocol = next(item["artifact_creation_protocol"] for item in payload if "artifact_creation_protocol" in item)
+    assert "odysseus-artifact-create" in protocol["instruction"]
+    assert "owner must" in protocol["instruction"]
+
+
 def test_automatic_paste_is_source_material_not_revision_target():
     path = "pastes/2026-08-23-140401-deadbeef.md"
     bundle = ContextBundle(

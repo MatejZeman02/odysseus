@@ -300,10 +300,12 @@ steps that the executor cannot perform.
    The first persistence slice is now implemented: safe diagnostics refresh
    the private `computer/device-profile.md` artifact and a typed
    `DeviceProfileV1` compiled only into the same Computer Help home; Computer
-   Help can create/revise private incident Markdown records in the existing
-   Documents editor, and its incident/paste index is available to continuity
-   with an exact-name body mount. Long-paste capture accepts the Computer Help
-   scope. Automatic
+Help can create/revise private incident Markdown records in the existing
+Documents editor, and its incident/paste index is available to continuity
+with an exact-name body mount. Long-paste capture accepts the Computer Help
+scope. Native Companion replies can now propose a complete new incident or a
+revision through an owner-reviewed artifact card; creation is create-only and
+cannot overwrite an existing path. Automatic
    model-authored incident updates wait for the controlled task/turn broker;
    they must not be bolted onto the unrestricted native chat route.
 4. **G2D-3 — scratch only.** Enable `computer_assist` only after G2D-0 passes,
