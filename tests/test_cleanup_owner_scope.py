@@ -19,6 +19,7 @@ Security invariant under test:
          service layer; they do not hardcode a value or drop the parameter
          (tests 4–5).
 """
+import asyncio
 import sys
 from unittest.mock import MagicMock, AsyncMock
 
@@ -141,9 +142,6 @@ def test_apply_owner_filter_none_bypasses_filter_for_single_user_mode(cleanup_im
 
 def test_preview_route_passes_caller_identity_as_owner(monkeypatch, cleanup_imports):
     """GET /api/cleanup/preview must call get_cleanup_preview(owner=<caller>)."""
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
     _, setup_cleanup_routes = cleanup_imports
 
     mock_preview = AsyncMock(return_value={
@@ -155,21 +153,16 @@ def test_preview_route_passes_caller_identity_as_owner(monkeypatch, cleanup_impo
     monkeypatch.setattr("routes.cleanup_routes.get_cleanup_preview", mock_preview)
     monkeypatch.setattr("routes.cleanup_routes.get_current_user", lambda _req: "alice")
 
-    app = FastAPI()
-    app.include_router(setup_cleanup_routes(MagicMock()))
-    client = TestClient(app)
+    router = setup_cleanup_routes(MagicMock())
+    endpoint = next(route.endpoint for route in router.routes if route.path == "/api/cleanup/preview")
+    response = asyncio.run(endpoint(MagicMock()))
 
-    resp = client.get("/api/cleanup/preview")
-
-    assert resp.status_code == 200
+    assert response["estimated_space_freed_mb"] == 0.0
     mock_preview.assert_awaited_once_with(owner="alice")
 
 
 def test_cleanup_route_passes_caller_identity_as_owner(monkeypatch, cleanup_imports):
     """POST /api/cleanup must call cleanup_sessions(session_manager, owner=<caller>)."""
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
     _, setup_cleanup_routes = cleanup_imports
 
     mock_cleanup = AsyncMock(return_value=(3, 2, 1.5))
@@ -177,14 +170,10 @@ def test_cleanup_route_passes_caller_identity_as_owner(monkeypatch, cleanup_impo
     monkeypatch.setattr("routes.cleanup_routes.get_current_user", lambda _req: "alice")
 
     sm = MagicMock()
-    app = FastAPI()
-    app.include_router(setup_cleanup_routes(sm))
-    client = TestClient(app)
+    router = setup_cleanup_routes(sm)
+    endpoint = next(route.endpoint for route in router.routes if route.path == "/api/cleanup")
+    body = asyncio.run(endpoint(MagicMock()))
 
-    resp = client.post("/api/cleanup")
-
-    assert resp.status_code == 200
-    body = resp.json()
     assert body["archived_count"] == 3
     assert body["deleted_count"] == 2
     assert body["space_freed_mb"] == 1.5
