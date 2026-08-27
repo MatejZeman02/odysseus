@@ -546,6 +546,35 @@ def test_legacy_memory_dry_run_classifies_only_an_explicit_owner_backup(monkeypa
     assert stale.value.status_code == 409
 
     apply = _endpoint(router, "/api/companion/memory/legacy-migration-reviews/{review_id}/apply", "POST")
+    with pytest.raises(HTTPException) as missing_confirmation:
+        apply(
+            review_id,
+            route_module.LegacyMigrationApply(
+                expected_revision=2, confirm_additive_local_migration=False,
+            ),
+            SimpleNamespace(),
+        )
+    assert missing_confirmation.value.status_code == 422
+    db = route_module.SessionLocal()
+    moved_source = db.query(DbSession).filter(DbSession.id == "source-two").one()
+    moved_source.project_id = "moved-project"
+    db.commit(); db.close()
+    with pytest.raises(HTTPException) as moved_home:
+        apply(
+            review_id,
+            route_module.LegacyMigrationApply(
+                expected_revision=2, confirm_additive_local_migration=True,
+            ),
+            SimpleNamespace(),
+        )
+    assert moved_home.value.status_code == 409
+    db = route_module.SessionLocal()
+    assert db.query(ScopedMemoryRecord).filter(
+        ScopedMemoryRecord.source_kind == "legacy_native_migration",
+    ).count() == 0
+    moved_source = db.query(DbSession).filter(DbSession.id == "source-two").one()
+    moved_source.project_id = "dust"
+    db.commit(); db.close()
     applied = apply(
         review_id,
         route_module.LegacyMigrationApply(
