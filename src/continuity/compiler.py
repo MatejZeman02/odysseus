@@ -298,7 +298,7 @@ class ContextCompiler:
                 hits = ()
         working_artifacts: tuple[dict[str, Any], ...] = ()
         context_grants: tuple[dict[str, Any], ...] = ()
-        if scope.scope_kind in {"personal", "project"}:
+        if scope.scope_kind in {"personal", "project", "computer"}:
             # This service is DB-only and failure is non-fatal: exact
             # transcript/checkpoint continuity remains available.
             try:

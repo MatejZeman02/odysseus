@@ -136,11 +136,38 @@ def test_computer_artifacts_are_private_revisioned_records_and_sync_from_documen
     assert memory.list_artifacts(owner="alice", scope_kind="computer")[0]["path"] == "computer/incidents/nvidia.md"
 
 
-def test_computer_long_paste_is_kept_in_owner_private_artifacts(store):
-    _continuity, memory = store
+def test_computer_long_paste_is_kept_in_owner_private_artifacts_and_mounted_by_reference(store):
+    continuity, memory = store
     paste = memory.capture_long_paste(owner="alice", session_id="computer", content="x" * 3000)
     assert paste["scope_kind"] == "computer"
     assert paste["path"].startswith("pastes/")
+    bundle = ContextCompiler(continuity).compile(
+        owner="alice", session_id="computer",
+        request=f"Read the complete paste in `{paste['path']}` and summarize it.", transcript=[],
+    )
+    selected = next(item for item in bundle.working_artifacts if item["id"] == paste["id"])
+    assert selected["content"] == "x" * 3000
+    assert bundle.manifest["selected_working_artifact_paths"] == [paste["path"]]
+
+
+def test_computer_incident_index_stays_metadata_only_until_explicitly_named(store):
+    continuity, memory = store
+    incident = memory.write_computer_artifact(
+        owner="alice", session_id="computer", path="computer/incidents/nvidia.md",
+        content="# NVIDIA issue\n\n- [ ] Inspect the loaded driver",
+    )
+
+    index_only = ContextCompiler(continuity).compile(
+        owner="alice", session_id="computer", request="What incident records do I have?", transcript=[],
+    )
+    indexed = next(item for item in index_only.working_artifacts if item["id"] == incident["id"])
+    assert "content" not in indexed
+
+    named = ContextCompiler(continuity).compile(
+        owner="alice", session_id="computer", request="Continue the nvidia incident from where we left off.", transcript=[],
+    )
+    selected = next(item for item in named.working_artifacts if item["id"] == incident["id"])
+    assert selected["content"].endswith("Inspect the loaded driver")
 
 
 def test_agent_document_writes_keep_a_linked_personal_artifact_authoritative(store, monkeypatch):

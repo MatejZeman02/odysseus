@@ -241,8 +241,10 @@ stable facts such as GPU model, driver family, OS version, filesystem layout,
 and recurring constraints. The first persistence slice is complete: every
 safe diagnostic refresh writes both the existing private Markdown document and
 this typed, hash-linked record, and the continuity compiler injects it only
-into that Computer Help home. It is explicitly labelled as a server
-observation, not model-authored memory. Incident conclusions may be promoted
+into that Computer Help home. Computer incident and paste artifacts likewise
+appear as a private index, with full contents mounted only when the owner
+names one in the request. It is explicitly labelled as a server observation,
+not model-authored memory. Incident conclusions may be promoted
 into this profile only when source-linked and verified. Raw logs, credentials,
 entire command outputs, and transient guesses are not durable memory. This
 lets a later NVIDIA problem reuse relevant machine facts without silently
@@ -298,7 +300,9 @@ steps that the executor cannot perform.
    the private `computer/device-profile.md` artifact and a typed
    `DeviceProfileV1` compiled only into the same Computer Help home; Computer
    Help can create/revise private incident Markdown records in the existing
-   Documents editor. Long-paste capture accepts the Computer Help scope. Automatic
+   Documents editor, and its incident/paste index is available to continuity
+   with an exact-name body mount. Long-paste capture accepts the Computer Help
+   scope. Automatic
    model-authored incident updates wait for the controlled task/turn broker;
    they must not be bolted onto the unrestricted native chat route.
 4. **G2D-3 — scratch only.** Enable `computer_assist` only after G2D-0 passes,
