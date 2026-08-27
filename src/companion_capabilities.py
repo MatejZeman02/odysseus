@@ -42,6 +42,15 @@ _COMPANION_LEGACY_MEMORY_MCP_ACTIONS = frozenset({
     "memory_update",
 })
 
+# AgentMemory and other MCP implementations do not have a stable server id or
+# a complete, version-independent action inventory.  They do consistently
+# namespace their legacy-memory operations with ``memory`` (or use the direct
+# verbs below).  Companion homes have no contract for that global store, so a
+# newly added MCP action must fail closed until it gets a scoped contract—not
+# become callable merely because we did not know its exact leaf name in
+# advance.
+_COMPANION_LEGACY_MEMORY_MCP_VERBS = frozenset({"remember", "recall", "forget"})
+
 _LABELS = {
     WEB_SEARCH: "Web search",
     WORKSPACE_READ: "Working directory",
@@ -91,7 +100,11 @@ def legacy_tool_denied_for_scope(tool_name: str, scope_kind: str) -> bool:
     # ``split`` rather than a positional server-id assumption: installed MCP
     # server IDs can themselves be generated identifiers.
     leaf = normalized.rsplit("__", 1)[-1]
-    return leaf in _COMPANION_LEGACY_MEMORY_MCP_ACTIONS
+    return (
+        leaf in _COMPANION_LEGACY_MEMORY_MCP_ACTIONS
+        or leaf in _COMPANION_LEGACY_MEMORY_MCP_VERBS
+        or "memory" in leaf
+    )
 
 
 def normalize(raw: Any, *, scope_kind: str) -> dict[str, bool]:

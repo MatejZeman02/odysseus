@@ -543,6 +543,30 @@ async def test_executor_backstop_denies_dynamic_legacy_memory_mcp_tool(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", [
+    "mcp__new_agentmemory_server__memory_archive",
+    "mcp__new_agentmemory_server__remember",
+    "mcp__new_agentmemory_server__recall",
+])
+async def test_executor_backstop_fails_closed_for_unlisted_legacy_memory_mcp_tools(monkeypatch, tool_name):
+    """A new AgentMemory action must not bypass Companion scope by its name."""
+    from collections import namedtuple
+    import src.tool_execution as tool_execution
+
+    block = namedtuple("ToolBlock", ["tool_type", "content"])(tool_name, "{}")
+    monkeypatch.setattr(tool_execution, "_scope_kind_for_session", lambda _session_id: "personal")
+
+    desc, result = await tool_execution.execute_tool_block(
+        block,
+        session_id="personal-home",
+        security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+    )
+
+    assert desc.endswith(": BLOCKED")
+    assert result["policy"] == "companion_scope"
+
+
+@pytest.mark.asyncio
 async def test_executor_backstop_reads_the_durable_companion_scope(store, monkeypatch):
     """The shared executor must not depend on route-provided scope hints."""
     from collections import namedtuple
@@ -588,6 +612,30 @@ def test_companion_prompt_filters_dynamic_legacy_memory_mcp_schemas():
     names = {schema["function"]["name"] for schema in schemas}
 
     assert "mcp__server_7f3a__memory_save" not in names
+    assert "mcp__calendar__list_events" in names
+
+
+def test_companion_prompt_filters_unlisted_legacy_memory_mcp_schemas():
+    """Schema filtering uses the same fail-closed rule as the executor."""
+    from src.agent_loop import _build_system_prompt
+
+    class FakeMcp:
+        def get_all_openai_schemas(self, _disabled):
+            return [
+                {"type": "function", "function": {"name": "mcp__agentmemory__memory_archive"}},
+                {"type": "function", "function": {"name": "mcp__agentmemory__remember"}},
+                {"type": "function", "function": {"name": "mcp__calendar__list_events"}},
+            ]
+
+    _messages, schemas = _build_system_prompt(
+        [{"role": "user", "content": "help me"}],
+        model="test-model", active_document=None, mcp_mgr=FakeMcp(),
+        suppress_skills=True, companion_scope=True,
+    )
+    names = {schema["function"]["name"] for schema in schemas}
+
+    assert "mcp__agentmemory__memory_archive" not in names
+    assert "mcp__agentmemory__remember" not in names
     assert "mcp__calendar__list_events" in names
 
 
