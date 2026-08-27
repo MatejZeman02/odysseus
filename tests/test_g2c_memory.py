@@ -467,6 +467,20 @@ def test_project_artifact_reads_reject_leaf_and_parent_symlinks(store, tmp_path)
                 owner="alice", scope_kind="project", project_id="dust", path=unsafe,
             )
 
+    swapped_root = tmp_path / "dust-link"
+    swapped_root.symlink_to(workspace, target_is_directory=True)
+    db = memory_module.SessionLocal()
+    try:
+        db.query(Project).filter(Project.id == "dust").update({Project.workspace_root: str(swapped_root)})
+        db.commit()
+    finally:
+        db.close()
+    assert memory.list_artifacts(owner="alice", scope_kind="project", project_id="dust") == []
+    with pytest.raises(MemoryScopeError, match="Project workspace is not available"):
+        memory.get_scoped_artifact_by_path(
+            owner="alice", scope_kind="project", project_id="dust", path=".artifacts/plans/release.md",
+        )
+
 
 def test_scoped_recall_outage_does_not_break_exact_artifact_or_checkpoint_context(store, monkeypatch):
     continuity, memory = store

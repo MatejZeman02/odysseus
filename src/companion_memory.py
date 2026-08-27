@@ -112,6 +112,18 @@ def _read_project_artifact_no_follow(root: Path, path: str) -> str:
             os.close(root_fd)
 
 
+def _project_workspace_root_no_follow(workspace_root: str) -> Path:
+    """Resolve a project root only while its registered leaf stays regular."""
+    candidate = Path(workspace_root)
+    try:
+        info = candidate.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise MemoryScopeError("Project workspace is not available")
+        return candidate.resolve(strict=True)
+    except OSError as exc:
+        raise MemoryScopeError("Project workspace is not available") from exc
+
+
 def _json_list(value: str) -> list[str]:
     try:
         data = json.loads(value or "[]")
@@ -360,8 +372,8 @@ class CompanionMemoryStore:
             # under .artifacts. Captured user pastes remain in owner-private
             # Odysseus storage and are merged into this read-only index.
             try:
-                root = Path(workspace_root).resolve(strict=True)
-            except (OSError, RuntimeError):
+                root = _project_workspace_root_no_follow(workspace_root)
+            except (MemoryScopeError, RuntimeError):
                 return captured
             artifact_root = root / ".artifacts"
             if not artifact_root.is_dir() or artifact_root.is_symlink():
@@ -614,7 +626,7 @@ class CompanionMemoryStore:
             if scope_kind != "project" or not project_id or not path.startswith(".artifacts/"):
                 raise MemoryScopeError("Artifact was not found")
             project = self._project(db, owner, project_id)
-            root = Path(project.workspace_root).resolve(strict=True)
+            root = _project_workspace_root_no_follow(project.workspace_root)
             content = _read_project_artifact_no_follow(root, path)
             return {
                 "id": f"project:{project_id}:{path}",
