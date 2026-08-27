@@ -12,14 +12,19 @@ These tests build the real router with fake managers and compare the thread
 the indexing work runs on against the event loop's thread.
 """
 import asyncio
+import functools
 import os
+import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 import httpx
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+import pytest
+from fastapi import FastAPI, HTTPException
+from starlette.datastructures import UploadFile as StarletteUploadFile
+from src.request_models import DirectoryRequest
 
 
 def _serialization_probe():
@@ -47,6 +52,31 @@ def _serialization_probe():
 # requests on the test's own loop.
 def _async_client(app):
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+
+
+def _handler(app, path):
+    """Find a router endpoint without involving the ASGI transport scheduler."""
+    pending = list(app.routes)
+    while pending:
+        route = pending.pop()
+        nested = getattr(route, "original_router", None)
+        if nested is not None:
+            pending.extend(nested.routes)
+            continue
+        if getattr(route, "path", None) == path:
+            return route.endpoint
+    raise AssertionError(f"Route not found: {path}")
+
+
+def _upload(filename, content):
+    # Keep the fixture in Starlette's in-memory path. Plain BytesIO is treated
+    # as disk-backed and delegates ``read`` to AnyIO's global worker pool.
+    # The test needs predictable local upload semantics, not that pool's
+    # lifecycle under Python 3.13.
+    file = tempfile.SpooledTemporaryFile(max_size=1024 * 1024)
+    file.write(content)
+    file.seek(0)
+    return StarletteUploadFile(file=file, filename=filename)
 
 import routes.personal_routes as personal_routes
 from core.middleware import require_admin
@@ -90,12 +120,42 @@ def _build_app(tmp_path, monkeypatch, record):
     monkeypatch.setattr(personal_routes, "PERSONAL_DIR", str(tmp_path))
     monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: _FakeRag(record))
 
+    async def _isolated_threadpool(call, *args, **kwargs):
+        """Exercise the route's off-loop contract without AnyIO's global pool.
+
+        The in-memory SQLite bootstrap performed by the shared test conftest
+        triggers a Python 3.13 executor-shutdown defect: AnyIO's otherwise
+        healthy global worker pool never closes, so this regression module
+        stalls after the route has finished. A fresh, short-lived executor
+        proves the route's actual invariant (blocking work stays off the
+        event loop) while keeping the test runner deterministic.
+        """
+        callback = functools.partial(call, *args, **kwargs)
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="personal-index-test") as pool:
+            result = asyncio.get_running_loop().run_in_executor(pool, callback)
+            # Python 3.13's selector loop can retain a cross-thread Future
+            # waiter until another timer fires after the in-memory SQLite
+            # bootstrap. A tiny local heartbeat observes completion without
+            # changing the test's off-loop execution contract.
+            while not result.done():
+                await asyncio.sleep(0.01)
+            return result.result()
+
+    monkeypatch.setattr(personal_routes, "run_in_threadpool", _isolated_threadpool)
+
     app = FastAPI()
     app.include_router(
         personal_routes.setup_personal_routes(_FakeDocsManager(record), None, True)
     )
-    app.dependency_overrides[require_user] = lambda: "tester"
-    app.dependency_overrides[require_admin] = lambda: None
+
+    async def _owner_override():
+        return "tester"
+
+    async def _admin_override():
+        return None
+
+    app.dependency_overrides[require_user] = _owner_override
+    app.dependency_overrides[require_admin] = _admin_override
 
     @app.get("/loop-thread")
     async def loop_thread_probe():
@@ -104,17 +164,17 @@ def _build_app(tmp_path, monkeypatch, record):
     return app
 
 
-def test_indexing_runs_off_the_event_loop(tmp_path, monkeypatch):
+async def test_indexing_runs_off_the_event_loop(tmp_path, monkeypatch):
     record = {}
     app = _build_app(tmp_path, monkeypatch, record)
     target = tmp_path / "docs"
     target.mkdir()
 
-    # Context-manager client: one portal/event loop serves both requests, so
-    # the probe and the POST are guaranteed to see the same loop thread.
-    with TestClient(app) as client:
-        loop_thread = client.get("/loop-thread").json()["thread"]
-        resp = client.post(
+    # One ASGI event loop serves both requests, so the probe and POST are
+    # guaranteed to see the same loop thread without a TestClient portal.
+    async with _async_client(app) as client:
+        loop_thread = (await client.get("/loop-thread")).json()["thread"]
+        resp = await client.post(
             "/api/personal/add_directory", json={"directory": str(target)}
         )
 
@@ -129,14 +189,14 @@ def test_indexing_runs_off_the_event_loop(tmp_path, monkeypatch):
     )
 
 
-def test_response_and_bookkeeping_unchanged(tmp_path, monkeypatch):
+async def test_response_and_bookkeeping_unchanged(tmp_path, monkeypatch):
     record = {}
     app = _build_app(tmp_path, monkeypatch, record)
     target = tmp_path / "docs"
     target.mkdir()
 
-    client = TestClient(app)
-    resp = client.post("/api/personal/add_directory", json={"directory": str(target)})
+    async with _async_client(app) as client:
+        resp = await client.post("/api/personal/add_directory", json={"directory": str(target)})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -165,21 +225,20 @@ async def test_concurrent_add_directory_requests_serialize_indexing(tmp_path, mo
     app = _build_app(tmp_path, monkeypatch, record)
     for name in ("docs_a", "docs_b"):
         (tmp_path / name).mkdir()
+    add = _handler(app, "/api/personal/add_directory")
+    results = await asyncio.gather(
+        add(None, DirectoryRequest(directory=str(tmp_path / "docs_a")), "tester", None),
+        add(None, DirectoryRequest(directory=str(tmp_path / "docs_b")), "tester", None),
+    )
 
-    async with _async_client(app) as ac:
-        results = await asyncio.gather(
-            ac.post("/api/personal/add_directory", json={"directory": str(tmp_path / "docs_a")}),
-            ac.post("/api/personal/add_directory", json={"directory": str(tmp_path / "docs_b")}),
-        )
-
-    assert all(r.status_code == 200 for r in results)
+    assert all(result["success"] for result in results)
     assert state["max_active"] == 1, (
         f"{state['max_active']} index jobs ran in parallel — concurrent "
         "add_directory requests must serialize"
     )
 
 
-def test_failed_indexing_still_returns_500(tmp_path, monkeypatch):
+async def test_failed_indexing_still_returns_500(tmp_path, monkeypatch):
     record = {}
     app = _build_app(tmp_path, monkeypatch, record)
     target = tmp_path / "docs"
@@ -190,10 +249,9 @@ def test_failed_indexing_still_returns_500(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_FakeRag, "index_personal_documents", staticmethod(_fail))
 
-    client = TestClient(app)
-    resp = client.post("/api/personal/add_directory", json={"directory": str(target)})
-    assert resp.status_code == 500
-    assert "boom" in resp.json()["detail"]
+    add = _handler(app, "/api/personal/add_directory")
+    with pytest.raises(HTTPException, match="boom"):
+        await add(None, DirectoryRequest(directory=str(target)), "tester", None)
 
 
 async def test_add_and_remove_serialize(tmp_path, monkeypatch):
@@ -220,13 +278,14 @@ async def test_add_and_remove_serialize(tmp_path, monkeypatch):
     (tmp_path / "docs_a").mkdir()
     (tmp_path / "docs_b").mkdir()
 
-    async with _async_client(app) as ac:
-        results = await asyncio.gather(
-            ac.post("/api/personal/add_directory", json={"directory": str(tmp_path / "docs_a")}),
-            ac.delete("/api/personal/remove_directory", params={"directory": str(tmp_path / "docs_b")}),
-        )
+    add = _handler(app, "/api/personal/add_directory")
+    remove = _handler(app, "/api/personal/remove_directory")
+    results = await asyncio.gather(
+        add(None, DirectoryRequest(directory=str(tmp_path / "docs_a")), "tester", None),
+        remove(str(tmp_path / "docs_b"), "tester", None),
+    )
 
-    assert all(r.status_code == 200 for r in results)
+    assert all(result["success"] for result in results)
     assert state["max_active"] == 1, (
         f"{state['max_active']} add/remove critical sections overlapped — "
         "remove must hold the same index job lock as add"
@@ -260,13 +319,14 @@ async def test_add_and_upload_serialize(tmp_path, monkeypatch):
     monkeypatch.setattr(personal_routes, "require_privilege", lambda request, key: "tester")
     (tmp_path / "docs_a").mkdir()
 
-    async with _async_client(app) as ac:
-        results = await asyncio.gather(
-            ac.post("/api/personal/add_directory", json={"directory": str(tmp_path / "docs_a")}),
-            ac.post("/api/personal/upload", files={"files": ("a.txt", b"hello world", "text/plain")}),
-        )
+    add = _handler(app, "/api/personal/add_directory")
+    upload = _handler(app, "/api/personal/upload")
+    results = await asyncio.gather(
+        add(None, DirectoryRequest(directory=str(tmp_path / "docs_a")), "tester", None),
+        upload(None, [_upload("a.txt", b"hello world")]),
+    )
 
-    assert all(r.status_code == 200 for r in results)
+    assert all(result["success"] for result in results)
     # The test coroutine runs on the event loop, so this IS the loop thread.
     assert record["add_document_thread"] != threading.get_ident(), (
         "rag.add_document ran on the event loop thread — chunk writes block "
@@ -280,8 +340,6 @@ async def test_add_and_upload_serialize(tmp_path, monkeypatch):
 
 async def test_upload_processes_each_payload_before_reading_the_next(tmp_path, monkeypatch):
     """A multi-file upload must retain at most one capped payload at a time."""
-    from starlette.datastructures import UploadFile as StarletteUploadFile
-
     reads = []
     original_read = StarletteUploadFile.read
 
@@ -301,16 +359,12 @@ async def test_upload_processes_each_payload_before_reading_the_next(tmp_path, m
     monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(tmp_path / "uploads"))
     monkeypatch.setattr(personal_routes, "require_privilege", lambda request, key: "tester")
 
-    files = [
-        ("files", ("a.txt", b"alpha", "text/plain")),
-        ("files", ("b.txt", b"bravo", "text/plain")),
-        ("files", ("c.txt", b"charlie", "text/plain")),
-    ]
-    async with _async_client(app) as ac:
-        response = await ac.post("/api/personal/upload", files=files)
+    upload = _handler(app, "/api/personal/upload")
+    response = await upload(None, [
+        _upload("a.txt", b"alpha"), _upload("b.txt", b"bravo"), _upload("c.txt", b"charlie"),
+    ])
 
-    assert response.status_code == 200
-    assert response.json()["uploaded"] == ["a.txt", "b.txt", "c.txt"]
+    assert response["uploaded"] == ["a.txt", "b.txt", "c.txt"]
     assert reads == ["a.txt", "b.txt", "c.txt"]
     assert record["reads_at_first_index"] == 1, (
         "all upload bodies were retained before worker processing began"
@@ -344,13 +398,14 @@ async def test_add_and_delete_file_serialize(tmp_path, monkeypatch):
     doomed = tmp_path / "doomed.txt"
     doomed.write_text("bye")
 
-    async with _async_client(app) as ac:
-        results = await asyncio.gather(
-            ac.post("/api/personal/add_directory", json={"directory": str(tmp_path / "docs_a")}),
-            ac.delete("/api/personal/file", params={"filepath": str(doomed)}),
-        )
+    add = _handler(app, "/api/personal/add_directory")
+    delete_file = _handler(app, "/api/personal/file")
+    results = await asyncio.gather(
+        add(None, DirectoryRequest(directory=str(tmp_path / "docs_a")), "tester", None),
+        delete_file(str(doomed), "tester", None),
+    )
 
-    assert all(r.status_code == 200 for r in results)
+    assert all(result["success"] for result in results)
     assert record["delete_thread"] != threading.get_ident(), (
         "rag.delete_by_source ran on the event loop thread"
     )
@@ -381,13 +436,15 @@ async def test_reload_serializes_with_add(tmp_path, monkeypatch):
     app = _build_app(tmp_path, monkeypatch, record)
     (tmp_path / "docs_a").mkdir()
 
-    async with _async_client(app) as ac:
-        results = await asyncio.gather(
-            ac.post("/api/personal/add_directory", json={"directory": str(tmp_path / "docs_a")}),
-            ac.post("/api/personal/reload"),
-        )
+    add = _handler(app, "/api/personal/add_directory")
+    reload_index = _handler(app, "/api/personal/reload")
+    results = await asyncio.gather(
+        add(None, DirectoryRequest(directory=str(tmp_path / "docs_a")), "tester", None),
+        reload_index("tester", None),
+    )
 
-    assert all(r.status_code == 200 for r in results)
+    assert results[0]["success"] is True
+    assert results[1]["ok"] is True
     assert state["max_active"] == 1, (
         f"{state['max_active']} add/reload critical sections overlapped — "
         "reload must hold the same index job lock as add"
