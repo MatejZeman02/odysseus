@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -384,6 +385,36 @@ def test_episodic_recall_filters_owner_home_and_project(store):
     index.index(owner="alice", scope_kind="personal", project_id=None, session_id="personal", source_kind="brief", source_id="personal", content="Fish dinner preference")
     assert [item["source_id"] for item in index.recall(owner="alice", scope_kind="project", project_id="dust", query="fish")] == ["dust"]
     assert [item["source_id"] for item in index.recall(owner="alice", scope_kind="personal", project_id=None, query="fish")] == ["personal"]
+
+
+def test_episodic_recall_excludes_expired_records_and_rejects_ambiguous_scope(store):
+    from src.scoped_memory import ScopedMemoryIndex
+
+    index = ScopedMemoryIndex()
+    index.index(
+        owner="alice", scope_kind="project", project_id="dust", session_id="project",
+        source_kind="brief", source_id="expired", content="Fish enemy design",
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1),
+    )
+    index.index(
+        owner="alice", scope_kind="project", project_id="dust", session_id="project",
+        source_kind="brief", source_id="current", content="Fish enemy design",
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
+    )
+
+    assert [item["source_id"] for item in index.recall(
+        owner="alice", scope_kind="project", project_id="dust", query="fish",
+    )] == ["current"]
+    with pytest.raises(ValueError, match="project binding"):
+        index.index(
+            owner="alice", scope_kind="project", project_id=None, session_id="project",
+            source_kind="brief", source_id="bad", content="must not persist",
+        )
+    with pytest.raises(ValueError, match="project binding"):
+        index.index(
+            owner="alice", scope_kind="personal", project_id="dust", session_id="personal",
+            source_kind="brief", source_id="bad-personal", content="must not persist",
+        )
 
 
 def test_g2c_routes_and_ui_keep_scopes_explicit():

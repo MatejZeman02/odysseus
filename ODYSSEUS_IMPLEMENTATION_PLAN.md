@@ -157,6 +157,10 @@ expiry/provenance filters. An owner-confirmed, aggregate-only inventory is now
 available; a separately approved backup report and scoped contract extension
 remain mandatory before attempting AgentMemory recall or writes.
 
+The local fallback index already rejects mismatched home/project bindings and
+filters expired episodic records before ranking. This is a containment fix, not
+approval to migrate legacy records or enable AgentMemory.
+
 ### Stage C5 — Continuity and project UX closure
 
 **Outcome:** long-running work is understandable and remains fast.

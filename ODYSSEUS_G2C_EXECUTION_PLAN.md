@@ -299,6 +299,11 @@ The next C4 gate is a separately approved owner-scoped export/backup report;
 no legacy record, vector collection, or AgentMemory backend may be re-indexed
 or written until that report is reviewed.
 
+The current local `ScopedMemoryIndex` now enforces exact Personal/project
+bindings and excludes expired records before ranking. It is still only the
+rebuildable local fallback, not an AgentMemory migration or a general-purpose
+auto-memory writer.
+
 ## Conversation attachment, not transcript merging
 
 G2C may add a read-only context mount from one conversation checkpoint to
