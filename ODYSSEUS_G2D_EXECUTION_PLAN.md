@@ -1,9 +1,10 @@
 # Odysseus G2D Execution Plan — Sandboxed Computer Help
 
 **Status:** the G2D-0 broker implementation and G2D-1 fixed-observation path
-exist, but the containment gate is **not qualified on this host**: the current
-Podman runtime is not rootless and no reviewed digest-pinned image is
-configured locally. The non-executing D2 continuity layer is implemented.
+exist, but the containment gate is **not qualified yet**: rootless Podman is
+available on this host, but no reviewed digest-pinned image is configured in
+`ODYSSEUS_COMPUTER_SANDBOX_IMAGE` and no passing containment report exists.
+The non-executing D2 continuity layer is implemented.
 Command assistance waits for the configured-provider C1/C2 canary, a reviewed
 digest-pinned sandbox image, and a passing containment qualification report.
 
@@ -37,9 +38,10 @@ The intended experience is closer to Codex than a command-confirmation loop:
 
 Odysseus has the G2D-0 server-owned, command-only Podman broker *code* and a
 fixed G2D-1 safe diagnostic snapshot. Neither makes `computer_assist` ready:
-the local runtime must still prove rootless Podman, a reviewed digest-pinned
-image, and hostile-fixture containment. Live command admission remains
-disabled until that evidence exists. G2D-2 private incident records,
+the local rootless runtime must still receive an explicit reviewed
+digest-pinned image configuration and pass hostile-fixture containment. Live
+command admission remains disabled until that evidence exists. G2D-2 private
+incident records,
 long-paste references, verified device context, and reviewed create/revision
 cards are present. The first D3 configuration primitive is now present:
 Computer Help can register
@@ -300,8 +302,9 @@ steps that the executor cannot perform.
 
 1. **G2D-0 — qualify containment first.** The server-owned Podman broker and
    hostile-probe contract exist, but the current host has not passed them.
-   Configure rootless Podman and a reviewed digest-pinned image, then run the
-   actual qualification. A failure ends before any Computer Help execution; it
+   Configure a reviewed digest-pinned image for the available rootless Podman
+   runtime, then run the actual qualification. A failure ends before any
+   Computer Help execution; it
    does not produce a weaker executor. The Codex Desktop sandbox is a product
    implementation rather than an embeddable Odysseus dependency, so the
    compatible boundary is specified, owned, and tested here.
