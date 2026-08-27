@@ -161,8 +161,8 @@ remain mandatory before attempting AgentMemory recall or writes.
 
 **Outcome:** long-running work is understandable and remains fast.
 
-- paginate/virtualize chat history while retaining an explicit older-history
-  action;
+- retain page-bounded chat history with the explicit **Load older messages**
+  action now implemented;
 - add project home/related-project editing, `@project` resolution, and explicit
   related-context caps;
 - provide a concise context inspector for checkpoint, brief, mounted transfer,

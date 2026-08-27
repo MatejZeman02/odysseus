@@ -426,10 +426,12 @@ raw transcript/auto-memory writes.
 
 ### C5 — Long-history and scope UX
 
-Paginate/virtualize history, expose bounded `@project` and related-project
-selection, and show a compact context inspector covering checkpoint state,
-brief, mounts, episodic hits, artifacts, and grants. Add native question-callout
-rendering/export only if ordinary projects use it.
+History is already page-bounded (desktop/mobile limits) and now has an explicit
+**Load older messages** action in addition to the existing scroll trigger. It
+preserves the visible scroll anchor and never alters stored messages or the
+continuity compiler. Remaining C5 work is bounded `@project`/related-project
+selection, richer inspector coverage for eventual episodic hits, and native
+question-callout rendering/export only if ordinary projects use it.
 
 ## Acceptance tests
 
