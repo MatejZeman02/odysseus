@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import threading
 import uuid
 from pathlib import Path
@@ -107,8 +108,12 @@ def _qwen_error_payload(exc: Exception) -> dict:
 
 
 def _safe_workspace(value: str) -> str:
+    candidate = Path(value).expanduser()
     try:
-        root = Path(value).expanduser().resolve(strict=True)
+        info = candidate.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise HTTPException(400, "Workspace must be a regular Git checkout, not a symlink")
+        root = candidate.resolve(strict=True)
     except (OSError, RuntimeError):
         raise HTTPException(400, "Workspace folder is unavailable")
     if not root.is_dir() or not (root / ".git").exists():

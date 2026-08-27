@@ -54,6 +54,19 @@ def test_companion_owner_honors_established_loopback_bypass(monkeypatch):
     assert project_routes._owner(request) == "__odysseus_local__"
 
 
+def test_project_creation_rejects_a_symlinked_workspace_root(tmp_path):
+    import routes.g1_continuity_routes as project_routes
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    swapped = tmp_path / "workspace-link"
+    swapped.symlink_to(workspace, target_is_directory=True)
+
+    with pytest.raises(HTTPException, match="not a symlink"):
+        project_routes._safe_workspace(str(swapped))
+
+
 def test_missing_stored_project_workspace_does_not_override_ordinary_chat(monkeypatch):
     import routes.chat_routes as chat_routes
 
