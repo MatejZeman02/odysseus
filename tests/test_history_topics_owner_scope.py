@@ -182,6 +182,81 @@ def test_route_rejects_unauthenticated_loopback_when_bypass_is_off(monkeypatch):
     assert exc_info.value.status_code == 401
 
 
+def test_route_rejects_a_bypassing_middleware_through_the_real_stack(monkeypatch):
+    """
+    Same guarantee, but composed: a real ASGI request travels through a
+    middleware that short-circuits exactly as the LOCALHOST_BYPASS branch does
+    (it calls the app without ever assigning ``request.state.current_user``),
+    then through routing and the dependency into the handler.
+
+    The direct-handler test above cannot see this: it hands the route a request
+    object built by the test, so it proves the handler's own check and nothing
+    about the stack that reaches it. The leak this file exists to pin was a
+    *composition* bug — middleware trusting the peer, route trusting the
+    middleware — so the composition needs its own test.
+
+    Driven over ``httpx.ASGITransport`` rather than ``TestClient`` for the
+    reason documented in tests/test_notes_fail_closed_auth.py: TestClient's
+    blocking portal thread deadlocks on some anyio/httpx combinations. The
+    bypass shim is pure ASGI for the same reason, and it reproduces the
+    unset-identity state faithfully either way.
+    """
+    import httpx
+    from fastapi import FastAPI
+    from routes.history_routes import setup_history_routes
+
+    sessions = {
+        "s-alice-1": _make_session(
+            "s-alice-1", "alice",
+            [{"role": "user", "content": "AI safety is a fascinating topic."}],
+        ),
+        "s-bob-1": _make_session(
+            "s-bob-1", "bob",
+            [{"role": "user", "content": "I need to fix a python bug."}],
+        ),
+        "s-carol-1": _make_session(
+            "s-carol-1", "carol",
+            [{"role": "user", "content": "Family dinner planning tonight."}],
+        ),
+    }
+    monkeypatch.delenv("LOCALHOST_BYPASS", raising=False)
+
+    app = FastAPI()
+    app.include_router(setup_history_routes(_stub_session_manager(sessions)))
+    app.state.auth_manager = MagicMock(
+        is_configured=True, users={"alice": {}, "bob": {}, "carol": {}},
+    )
+
+    class LoopbackBypassMiddleware:
+        """The app.py LOCALHOST_BYPASS branch: pass through, set no identity."""
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            await self.app(scope, receive, send)
+
+    app.add_middleware(LoopbackBypassMiddleware)
+
+    async def _get():
+        transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 51234))
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1:8000",
+        ) as client:
+            return await client.get("/api/conversations/topics")
+
+    response = asyncio.run(_get())
+
+    assert response.status_code == 401, (
+        f"An anonymous caller reached topic aggregation through a bypassing "
+        f"middleware and got {response.status_code}. Cross-tenant topics must "
+        f"not be reachable without an identified owner."
+    )
+    body = response.text.lower()
+    for owner in ("alice", "bob", "carol"):
+        assert owner not in body, f"the rejection leaked the owner name {owner!r}"
+
+
 def test_route_data_flow_on_paper():
     """
     White-box check: prove the data flow on the page.
