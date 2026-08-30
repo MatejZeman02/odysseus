@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import stat
 import time
 import uuid
 from pathlib import Path
@@ -22,6 +21,7 @@ from src.computer_sandbox import SandboxQualificationError, qualify_containment,
 from src.companion_memory import CompanionMemoryStore, MemoryScopeError
 from src.continuity.contracts import DeviceProfileV1
 from src.continuity.store import ScopeConflictError
+from src.path_identity import PathIdentityError, pin_directory
 
 
 class ObserveRequest(BaseModel):
@@ -92,16 +92,20 @@ def _safe_task_root(path: str) -> Path:
     can never turn a stale path into a persistent authority grant.
     """
     raw = Path(str(path or "").strip()).expanduser()
-    if not raw.is_absolute() or raw.is_symlink():
+    if not raw.is_absolute():
         raise ValueError("Choose an existing dedicated folder inside your home directory")
     try:
-        resolved = raw.resolve(strict=True)
+        # ``is_symlink()`` followed by ``resolve()`` reads the filesystem twice
+        # and believes both answers, so a swap between them was invisible here.
+        # ``pin_directory`` settles type, symlink status, and inode identity in
+        # one checked sequence.
+        pinned = pin_directory(raw)
+        resolved = pinned.path
         home = Path.home().resolve(strict=True)
         relative = resolved.relative_to(home)
-        metadata = resolved.stat()
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (PathIdentityError, OSError, RuntimeError, ValueError) as exc:
         raise ValueError("Choose an existing dedicated folder inside your home directory") from exc
-    if relative == Path(".") or not stat.S_ISDIR(metadata.st_mode):
+    if relative == Path("."):
         raise ValueError("Choose an existing dedicated folder inside your home directory")
     # A future task broker must never inherit a root that lives below a hidden
     # user-data directory.  The short explicit list documents the most common
@@ -111,7 +115,7 @@ def _safe_task_root(path: str) -> Path:
     if any(part in _TASK_ROOT_DENIED_NAMES or part.startswith(".") for part in relative.parts):
         raise ValueError("Choose a visible task folder outside protected credential and configuration directories")
     current_uid = getattr(os, "getuid", lambda: None)()
-    if current_uid is not None and metadata.st_uid != current_uid:
+    if current_uid is not None and pinned.st_uid != current_uid:
         raise ValueError("Choose a folder owned by the current desktop user")
     return resolved
 

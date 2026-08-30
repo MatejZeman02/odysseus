@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.database import ProjectChangeSet, utcnow_naive
+from src.path_identity import PathIdentityError, pin_directory
 from src.protected_workspace import WorkspaceSnapshot, snapshot_workspace
 
 
@@ -98,15 +99,11 @@ def _project_root(workspace: Path) -> Path:
     ``_safe_target``; this completes the same rule for the root itself.
     """
     try:
-        info = workspace.lstat()
-    except FileNotFoundError as exc:
-        raise PatchError("path_denied", "Project workspace is no longer available", 409) from exc
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        raise PatchError("path_denied", "Project workspace is no longer a regular directory", 409)
-    try:
-        return workspace.resolve(strict=True)
-    except OSError as exc:
-        raise PatchError("path_denied", "Project workspace could not be resolved safely", 409) from exc
+        return pin_directory(workspace).path
+    except PathIdentityError as exc:
+        raise PatchError(
+            "path_denied", "Project workspace is no longer a usable checkout", 409,
+        ) from exc
 
 
 def _dirty_tracked_targets(root: Path, changes: list[dict[str, Any]]) -> bool:

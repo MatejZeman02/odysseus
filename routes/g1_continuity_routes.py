@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import shutil
-import stat
 import threading
 import uuid
 from pathlib import Path
@@ -17,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.database import ChatMessage as DbMessage, ContinuityArtifact, ModelEndpoint, Project, Session as DbSession, SessionLocal, utcnow_naive
+from src.path_identity import PathIdentityError, pin_directory
 from src.auth_helpers import effective_user, owner_filter, require_user
 from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.companion_runs import CompanionRunRegistry
@@ -108,15 +108,17 @@ def _qwen_error_payload(exc: Exception) -> dict:
 
 
 def _safe_workspace(value: str) -> str:
-    candidate = Path(value).expanduser()
+    """Turn an owner-named folder into the stored project path grant.
+
+    This is where the grant is created, so it gets the same pin every later
+    consumer uses.  The string persisted here becomes a Qwen launch workspace,
+    a protected snapshot root, and a patch target root.
+    """
     try:
-        info = candidate.lstat()
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            raise HTTPException(400, "Workspace must be a regular Git checkout, not a symlink")
-        root = candidate.resolve(strict=True)
-    except (OSError, RuntimeError):
-        raise HTTPException(400, "Workspace folder is unavailable")
-    if not root.is_dir() or not (root / ".git").exists():
+        root = pin_directory(Path(value).expanduser()).path
+    except (PathIdentityError, RuntimeError):
+        raise HTTPException(400, "Workspace must be an existing Git checkout, not a symlink")
+    if not (root / ".git").exists():
         raise HTTPException(400, "Workspace must be an existing Git checkout")
     return str(root)
 
