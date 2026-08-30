@@ -82,3 +82,24 @@ On success, restart Odysseus from the same environment and verify that the
 Computer Help capability panel reports sandboxed read-only commands as
 available. This authorizes neither host shell, writes, network egress, package
 installation, nor **Approve for me**.
+
+> [!WARNING]
+> `ODYSSEUS_COMPUTER_SANDBOX_IMAGE` must have no default anywhere. Until
+> 2026-08-30 `run-companion.sh` defaulted it to the cached Qwen image, so a
+> plain `./run-companion.sh start` reported `containment_probe_incomplete`
+> instead of `pinned_sandbox_image_required` and a passing report for that
+> rejected image was written to `data/`. Containment held only because the
+> report version gate retired it. A launcher default makes this canary's
+> decision on the owner's behalf.
+
+## Recorded results
+
+| Canary | Last run | Result |
+| --- | --- | --- |
+| 1. Semantic continuity | never | Not run. Needs an owner: a configured model, browser interaction, and a real provider call. |
+| 2. Reviewed project patch | never | Not run. Needs an owner: a throwaway Git checkout and a Qwen turn. |
+| 3. Computer Help containment | probe run 2026-08-27 against the cached Qwen image | Does not count. That image is rejected for Computer Help, and the report predates the `command_inventory` gate. Readiness for it now reads `sandbox_report_outdated`. No approved image has been chosen. |
+
+Gates 1 and 2 have not run at any point on this branch. Automated coverage is
+not a substitute: 6135 passing tests say the parts behave, not that the product
+flow works end to end.
