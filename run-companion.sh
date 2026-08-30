@@ -5,7 +5,14 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$repo_root"
 export ODYSSEUS_QWEN_HARNESS=1
 export ODYSSEUS_QWEN_BINARY="${ODYSSEUS_QWEN_BINARY:-$repo_root/data/qwen/0.21.3/node_modules/.bin/qwen}"
-export ODYSSEUS_COMPUTER_SANDBOX_IMAGE="${ODYSSEUS_COMPUTER_SANDBOX_IMAGE:-ghcr.io/qwenlm/qwen-code@sha256:216bd08d6ba6819245b78bffd9ef9ecb2442af6ec0e2ed26f9a8727386795946}"
+# Computer Help's base image is an owner decision: a reviewed image pinned by
+# digest, reviewed and pulled deliberately. The launcher must never make that
+# choice, so it only forwards an image the owner already exported. With none
+# set the server reports pinned_sandbox_image_required, which is the honest
+# state, and computer_assist stays disabled.
+if [[ -n "${ODYSSEUS_COMPUTER_SANDBOX_IMAGE:-}" ]]; then
+  export ODYSSEUS_COMPUTER_SANDBOX_IMAGE
+fi
 export APP_PORT=7001
 # Some desktop/editor environments export DEBUG=release. AppConfig correctly
 # expects a boolean, so make this launcher deterministic instead of inheriting

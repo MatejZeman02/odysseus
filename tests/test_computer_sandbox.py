@@ -290,3 +290,72 @@ def test_readonly_pipeline_never_starts_when_sandbox_is_unqualified(monkeypatch,
         assert exc.code == "sandbox_unavailable"
     else:
         raise AssertionError("unqualified sandbox must never run a command")
+
+
+def test_readiness_distinguishes_a_superseded_report_from_a_missing_one(monkeypatch, tmp_path):
+    """A stronger contract must explain itself, not look like "never probed".
+
+    Both states leave the sandbox unqualified. They differ in what the owner
+    does next, so collapsing them into one reason hides the fact that this
+    exact image already passed an earlier, weaker fixture.
+    """
+    image = "example.invalid/sandbox@sha256:" + "a" * 64
+    report = tmp_path / "qualification.json"
+    monkeypatch.setenv("ODYSSEUS_COMPUTER_SANDBOX_IMAGE", image)
+    monkeypatch.setattr(computer_sandbox.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(computer_sandbox, "_is_local", lambda value: True)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: True)
+    monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
+
+    assert computer_sandbox.readiness().reason == "containment_probe_incomplete"
+
+    report.write_text(json.dumps({
+        "version": computer_sandbox._REPORT_VERSION - 1, "image": image,
+        "passed": True, "complete": True,
+        "checks": ["rootless_podman", "read_only_input", "private_writable_task",
+                   "network_none", "socket_absence", "host_path_absence",
+                   "resource_limits", "descendant_cleanup"],
+    }), encoding="utf-8")
+
+    state = computer_sandbox.readiness()
+
+    assert state.qualified is False
+    assert state.reason == "sandbox_report_outdated"
+
+
+def test_superseded_report_never_authorizes_another_image(monkeypatch, tmp_path):
+    """Outdated evidence is scoped to the image it was produced for."""
+    image = "example.invalid/sandbox@sha256:" + "a" * 64
+    report = tmp_path / "qualification.json"
+    report.write_text(json.dumps({
+        "version": computer_sandbox._REPORT_VERSION - 1,
+        "image": "example.invalid/other@sha256:" + "b" * 64,
+        "passed": True, "complete": True, "checks": ["rootless_podman"],
+    }), encoding="utf-8")
+    monkeypatch.setenv("ODYSSEUS_COMPUTER_SANDBOX_IMAGE", image)
+    monkeypatch.setattr(computer_sandbox.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(computer_sandbox, "_is_local", lambda value: True)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: True)
+    monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
+
+    state = computer_sandbox.readiness()
+
+    assert state.qualified is False
+    assert state.reason == "containment_probe_incomplete"
+
+
+def test_a_failed_superseded_report_reads_as_an_incomplete_probe(monkeypatch, tmp_path):
+    """Only previously-passing evidence earns the "run it again" wording."""
+    image = "example.invalid/sandbox@sha256:" + "a" * 64
+    report = tmp_path / "qualification.json"
+    report.write_text(json.dumps({
+        "version": computer_sandbox._REPORT_VERSION - 1, "image": image,
+        "passed": False, "complete": True, "checks": ["rootless_podman"],
+    }), encoding="utf-8")
+    monkeypatch.setenv("ODYSSEUS_COMPUTER_SANDBOX_IMAGE", image)
+    monkeypatch.setattr(computer_sandbox.shutil, "which", lambda name: "/usr/bin/podman")
+    monkeypatch.setattr(computer_sandbox, "_is_local", lambda value: True)
+    monkeypatch.setattr(computer_sandbox, "_is_rootless_runtime", lambda: True)
+    monkeypatch.setattr(computer_sandbox, "_REPORT_PATH", report)
+
+    assert computer_sandbox.readiness().reason == "containment_probe_incomplete"

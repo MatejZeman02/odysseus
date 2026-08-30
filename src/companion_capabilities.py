@@ -68,6 +68,7 @@ _SANDBOX_UNAVAILABLE_REASONS = {
     "pinned_sandbox_image_required": "A reviewed digest-pinned sandbox image must be configured and qualified.",
     "sandbox_image_not_local": "The reviewed sandbox image must be present locally and qualified.",
     "containment_probe_incomplete": "The sandbox containment check has not passed yet.",
+    "sandbox_report_outdated": "The containment check must run again under the current, stricter gates.",
 }
 
 

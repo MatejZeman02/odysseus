@@ -354,11 +354,22 @@ def _is_rootless_runtime() -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
 
-def _load_report() -> dict | None:
+def _stored_report() -> dict | None:
+    """Read the stored report without applying the version gate.
+
+    Only readiness *explanation* uses this. Admission still goes through
+    ``_load_report``, so a superseded report can say why it no longer counts
+    without ever authorizing the current execution profile.
+    """
     try:
         data = json.loads(_REPORT_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) else None
+
+
+def _load_report() -> dict | None:
+    data = _stored_report()
     return data if isinstance(data, dict) and data.get("version") == _REPORT_VERSION else None
 
 
@@ -400,9 +411,28 @@ def readiness() -> ComputerSandboxReadiness:
         reason = "pinned_sandbox_image_required"
     elif not image_local:
         reason = "sandbox_image_not_local"
+    elif _report_superseded(image):
+        reason = "sandbox_report_outdated"
     else:
         reason = "containment_probe_incomplete"
     return ComputerSandboxReadiness(podman, configured, image_local, qualified, reason)
+
+
+def _report_superseded(image: str) -> bool:
+    """True when passing evidence exists but a stronger contract retired it.
+
+    Without this an owner cannot tell "never probed this image" from "probed it
+    before the gates got stricter", because both collapse into
+    ``containment_probe_incomplete``. The distinction changes what they do next,
+    and it grants nothing: admission still requires a current report.
+    """
+    stored = _stored_report()
+    return bool(
+        isinstance(stored, dict)
+        and stored.get("image") == image
+        and stored.get("passed") is True
+        and stored.get("version") != _REPORT_VERSION
+    )
 
 
 def _podman_task_command(
