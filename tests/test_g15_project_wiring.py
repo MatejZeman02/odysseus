@@ -850,7 +850,8 @@ def test_companion_sidebar_renders_safe_qwen_readiness_status():
     assert "/api/g1/status" in source
     assert "Qwen ready · project read-only" in source
     assert "inspection unavailable" in source
-    assert "Qwen setup needed" in source
+    # Qwen is optional, so a missing worker reads as a note, not a warning.
+    assert "Qwen optional · not set up" in source
     assert "components?.qwen_binary" in source
     assert "components?.bubblewrap" in source
 
@@ -893,7 +894,8 @@ def test_companion_scope_is_disclosed_above_the_composer():
     assert "Project · ${projectName}" in sessions
     assert "effectiveCapability === 'project_inspect'" in sessions
     assert "'sandboxed inspection' : 'read-only'" in sessions
-    assert "Native · continuity context · workspace tools off" in sessions
+    # A native project states what its grants allow, not a fixed label.
+    assert "_accessSummary(meta.chat_capabilities)" in sessions
     assert "Native · personal scope" in sessions
     assert "Native · Qwen coming next" in sessions
 

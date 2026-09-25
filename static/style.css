@@ -9076,6 +9076,17 @@ button.hamburger {
 .companion-artifact-create, .companion-brief-editor { display: grid; gap: 8px; margin-top: 10px; }
 .companion-artifact-create input, .companion-grant-purpose, .companion-grant-project { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px; font: inherit; }
 .companion-memory-panel label { display: grid; gap: 4px; margin: 10px 0; }
+/* Rows of the capability drawer, the project change list and task roots:
+   name and explanation on the left, the action on the right. */
+.companion-grant-group { margin: 16px 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, var(--fg)); }
+.companion-grant-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: row dense; column-gap: 14px; row-gap: 3px; align-items: center; margin: 0 0 8px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--panel, var(--bg)) 82%, var(--bg)); }
+.companion-grant-card > strong, .companion-grant-card > span { grid-column: 1; min-width: 0; }
+.companion-grant-card > span { color: var(--muted, var(--fg)); font-size: 13px; overflow-wrap: anywhere; }
+.companion-grant-card > button { grid-column: 2; min-width: 5.5em; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+.companion-grant-card > button:only-of-type { grid-row: 1 / span 2; }
+.companion-grant-card > button[aria-pressed="true"] { color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--bg)); border-color: color-mix(in srgb, var(--green) 60%, var(--border)); }
+.companion-grant-card > button[aria-pressed="false"] { color: var(--color-muted); }
+.companion-grant-card > button:disabled { opacity: .55; cursor: default; }
 @media (max-width: 560px) {
   .companion-scope-banner { font-size: 12px; }
   .companion-artifact-workspace { grid-template-columns: 1fr; }

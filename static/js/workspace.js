@@ -46,7 +46,7 @@ export function syncWorkspaceIndicator(path) {
     pill.style.display = (path && !chat) ? '' : 'none';
     pill.classList.toggle('active', !!path);
     if (path) pill.title = _projectReadOnly
-      ? `Project workspace: ${path}\nQwen receives this checkout as a read-only mount.\nClick to clear.`
+      ? `Project workspace: ${path}\nThe server owns this checkout. Chat capabilities decide what the assistant can read, run and change.\nClick to clear.`
       : `Workspace: ${path}\nFile tools are confined here; shell commands start here but are not sandboxed and can reach outside it.\nClick to clear.`;
   }
   if (name) name.textContent = path ? _basename(path) : '';

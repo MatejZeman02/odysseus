@@ -63,10 +63,12 @@ function _syncCompanionScopeBanner(meta) {
     const effectiveCapability = meta.effective_capability || meta.capability_profile || 'project_read';
     detail.textContent = meta.harness_kind === 'qwen'
       ? `Qwen · ${effectiveCapability === 'project_inspect' ? 'sandboxed inspection' : 'read-only'}${workspaceName ? ` · ${workspaceName}` : ''}`
-      : 'Native · continuity context · workspace tools off';
+      : `${_accessSummary(meta.chat_capabilities)}${workspaceName ? ` · ${workspaceName}` : ''}`;
   } else if (scope === 'personal') {
     title.textContent = 'Personal Advisor';
-    detail.textContent = 'Native · personal scope';
+    detail.textContent = meta.chat_capabilities?.memory_write?.effective
+      ? 'Native · personal scope · updates memory'
+      : 'Native · personal scope';
   } else {
     title.textContent = 'Computer Help';
     detail.textContent = 'Native · Qwen coming next';
@@ -82,13 +84,32 @@ function _syncCompanionScopeBanner(meta) {
   }
 }
 
-const _CAPABILITY_ORDER = ['web_search', 'workspace_read', 'system_observe', 'sandbox_read'];
+// What the assistant can see, then what it can do. The server says which
+// grants a chat offers, this only orders and explains them.
+const _CAPABILITY_GROUPS = [
+  ['Can see', ['workspace_read', 'web_search', 'system_observe', 'sandbox_read']],
+  ['Can do', ['project_shell', 'project_write', 'memory_write']],
+];
 const _CAPABILITY_HELP = {
   web_search: 'Search current public information. The assistant may request this when it is off.',
-  workspace_read: 'Read the attached project or working directory without granting writes.',
+  workspace_read: 'Read the project files. Nothing is changed.',
   system_observe: 'Read a sanitized snapshot of this computer. It never changes settings.',
   sandbox_read: 'Run admitted read-only commands inside the qualified Podman sandbox.',
+  project_shell: 'Run commands, tests and git in an offline copy of the project. Nothing they write is kept.',
+  project_write: 'Change project files. Each edit is applied, verified and listed in Project changes, where you can undo it.',
+  memory_write: 'Save facts, decisions and preferences to this home\'s memory. Each change is a revision you can review in Context.',
 };
+
+function _accessSummary(caps) {
+  const on = (name) => !!caps?.[name]?.effective;
+  if (!caps || !Object.keys(caps).length) return 'Native';
+  const parts = [];
+  if (on('project_write')) parts.push('edits files');
+  else if (on('workspace_read') || on('project_shell')) parts.push('read-only');
+  if (on('project_shell')) parts.push('runs commands');
+  if (on('memory_write')) parts.push('updates memory');
+  return parts.length ? `Native · ${parts.join(' · ')}` : 'Native · no project access';
+}
 
 function _syncCapabilityControls(meta, capabilities = null) {
   const caps = capabilities || meta?.chat_capabilities || {};
@@ -103,6 +124,7 @@ function _syncCapabilityControls(meta, capabilities = null) {
     webButton?.classList.toggle('active', webEnabled);
     webButton?.setAttribute('aria-pressed', String(webEnabled));
   }
+  if (meta?.id && meta.id === currentSessionId) _syncCompanionScopeBanner(meta);
   const observe = document.getElementById('computer-observe-btn');
   if (observe) {
     const enabled = !!caps.system_observe?.effective;
@@ -161,33 +183,50 @@ async function openChatCapabilities(meta) {
   close.onclick = () => modal.remove(); header.append(title, close); content.append(header);
   const intro = document.createElement('p');
   intro.className = 'companion-memory-help';
-  intro.textContent = 'Capabilities belong to this chat. Read-only access does not require per-command approval; unavailable capabilities remain disabled.';
+  intro.textContent = 'What the assistant can see and do in this chat. Anything switched on works without asking each time. Edits and memory changes are recorded, so you can review and undo them.';
   content.append(intro);
-  for (const name of _CAPABILITY_ORDER) {
-    const item = capabilities[name]; if (!item) continue;
-    const row = document.createElement('div'); row.className = 'companion-grant-card';
-    const label = document.createElement('strong'); label.textContent = item.label;
-    const detail = document.createElement('span');
-    detail.textContent = item.reason || _CAPABILITY_HELP[name] || '';
-    const button = document.createElement('button'); button.type = 'button';
-    const enabled = !!item.requested;
-    button.textContent = enabled ? 'On' : (item.available ? 'Off' : 'Unavailable');
-    button.setAttribute('aria-pressed', String(enabled));
-    // A stale unavailable grant can always be switched off; only enabling is
-    // blocked by readiness or a missing source.
-    button.disabled = !item.available && !enabled;
-    button.onclick = async () => {
-      button.disabled = true; button.textContent = 'Updating…';
-      try {
-        await _persistChatCapability(meta, name, !enabled);
-        modal.remove();
-        await openChatCapabilities(meta);
-      } catch (error) {
-        uiModule.showError?.(error.message || 'Could not update capability');
-        button.disabled = false; button.textContent = enabled ? 'On' : 'Off';
-      }
-    };
-    row.append(label, detail, button); content.append(row);
+  for (const [groupLabel, names] of _CAPABILITY_GROUPS) {
+    // Older servers do not send `offered`, so only an explicit false hides a row.
+    const offered = names.filter((name) => capabilities[name] && capabilities[name].offered !== false);
+    if (!offered.length) continue;
+    const heading = document.createElement('h5');
+    heading.className = 'companion-grant-group';
+    heading.textContent = groupLabel;
+    content.append(heading);
+    for (const name of offered) {
+      const item = capabilities[name];
+      const row = document.createElement('div'); row.className = 'companion-grant-card';
+      const label = document.createElement('strong'); label.textContent = item.label;
+      const detail = document.createElement('span');
+      detail.textContent = item.reason || _CAPABILITY_HELP[name] || '';
+      const button = document.createElement('button'); button.type = 'button';
+      const enabled = !!item.requested;
+      button.textContent = enabled ? 'On' : (item.available ? 'Off' : 'Unavailable');
+      button.setAttribute('aria-pressed', String(enabled));
+      // A stale unavailable grant can always be switched off; only enabling is
+      // blocked by readiness or a missing source.
+      button.disabled = !item.available && !enabled;
+      button.onclick = async () => {
+        button.disabled = true; button.textContent = 'Updating…';
+        try {
+          await _persistChatCapability(meta, name, !enabled);
+          modal.remove();
+          await openChatCapabilities(meta);
+        } catch (error) {
+          uiModule.showError?.(error.message || 'Could not update capability');
+          button.disabled = false; button.textContent = enabled ? 'On' : 'Off';
+        }
+      };
+      row.append(label, detail, button); content.append(row);
+    }
+  }
+  if (meta.scope_kind === 'project' && meta.project_id) {
+    const changes = document.createElement('button');
+    changes.type = 'button'; changes.className = 'companion-task-roots-button';
+    changes.textContent = 'Review project changes';
+    changes.title = 'See every recorded edit to this project and undo one';
+    changes.onclick = () => { modal.remove(); openProjectChanges(meta); };
+    content.append(changes);
   }
   if (meta.scope_kind === 'computer') {
     const taskRoots = document.createElement('button');
@@ -198,6 +237,82 @@ async function openChatCapabilities(meta) {
     content.append(taskRoots);
   }
   modal.append(content); document.body.appendChild(modal);
+}
+
+const _CHANGE_STATUS = {
+  applied: 'Applied', rolled_back: 'Undone', proposed: 'Waiting for review', rejected: 'Rejected',
+  stale: 'Stale', apply_failed: 'Failed, restored', rollback_conflict: 'Undo blocked by later edits',
+};
+
+// Every change to a project checkout is a recorded change set, whether the
+// agent made it with an edit tool or the owner approved a Qwen proposal.
+// This list is where the owner reviews them and undoes one.
+async function openProjectChanges(meta) {
+  if (!meta?.project_id) return;
+  let rows;
+  try {
+    const response = await fetch(`/api/companion/projects/${encodeURIComponent(meta.project_id)}/patches`, {
+      credentials: 'same-origin', cache: 'no-store',
+    });
+    rows = await response.json().catch(() => null);
+    if (!response.ok || !Array.isArray(rows)) throw new Error(rows?.detail || 'Could not load project changes');
+  } catch (error) {
+    uiModule.showError?.(error.message || 'Could not load project changes'); return;
+  }
+  document.getElementById('project-changes-modal')?.remove();
+  const modal = document.createElement('div'); modal.id = 'project-changes-modal'; modal.className = 'modal';
+  const content = document.createElement('div'); content.className = 'modal-content companion-memory-modal';
+  content.setAttribute('role', 'dialog'); content.setAttribute('aria-modal', 'true');
+  const header = document.createElement('div'); header.className = 'modal-header';
+  const title = document.createElement('h4'); title.textContent = 'Project changes';
+  const close = document.createElement('button'); close.type = 'button'; close.className = 'close-btn'; close.setAttribute('aria-label', 'Close'); close.textContent = '✖';
+  close.onclick = () => modal.remove(); header.append(title, close); content.append(header);
+  const intro = document.createElement('p'); intro.className = 'companion-memory-help';
+  intro.textContent = 'Newest first. Undo restores the files exactly as they were before that change, and refuses when a later edit touched the same lines. Undo newer changes first.';
+  content.append(intro);
+  const list = document.createElement('div'); list.className = 'companion-task-root-list';
+  if (!rows.length) {
+    const empty = document.createElement('p'); empty.className = 'companion-memory-help';
+    empty.textContent = 'No change has been made to this project from Odysseus yet.';
+    list.append(empty);
+  }
+  rows.slice(0, 50).forEach((change) => {
+    const row = document.createElement('div'); row.className = 'companion-grant-card';
+    const label = document.createElement('strong'); label.textContent = change.summary || 'Project change';
+    const files = Array.isArray(change.files) ? change.files : [];
+    const when = change.applied_at || change.created_at;
+    const whenText = when ? new Date(`${when}Z`).toLocaleString() : '';
+    const detail = document.createElement('span');
+    detail.textContent = [
+      _CHANGE_STATUS[change.status] || change.status,
+      whenText,
+      files.map((file) => `${file.path} +${file.added || 0}/-${file.removed || 0}`).join(', '),
+    ].filter(Boolean).join(' · ');
+    row.append(label, detail);
+    if (change.status === 'applied') {
+      const undo = document.createElement('button'); undo.type = 'button'; undo.textContent = 'Undo';
+      undo.onclick = async () => {
+        undo.disabled = true; undo.textContent = 'Undoing…';
+        try {
+          const response = await fetch(`/api/companion/patches/${encodeURIComponent(change.id)}/rollback`, {
+            method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({expected_revision: Number(change.revision)}),
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.detail || 'Could not undo this change');
+          uiModule.showToast?.('Change undone', 1800);
+        } catch (error) {
+          uiModule.showError?.(error.message || 'Could not undo this change');
+        }
+        modal.remove(); openProjectChanges(meta);
+      };
+      row.append(undo);
+    }
+    list.append(row);
+  });
+  content.append(list);
+  modal.append(content); document.body.appendChild(modal);
+  modal.addEventListener('click', (event) => { if (event.target === modal) modal.remove(); });
 }
 
 async function openComputerTaskRoots(meta) {
@@ -2174,9 +2289,10 @@ function _renderSessionListImpl() {
       if (!_g15Readiness.enabled) missing.push('harness');
       if (!_g15Readiness.components?.qwen_binary) missing.push('Qwen binary');
       if (!_g15Readiness.components?.bubblewrap) missing.push('Bubblewrap');
-      readiness.classList.add('unavailable');
-      readiness.textContent = `Qwen setup needed · ${missing.join(' + ') || 'not ready'}`;
-      readiness.title = 'Project homes remain available; Qwen turns require the listed local components';
+      // Project chats run on the built-in agent. Qwen is an optional worker,
+      // so its missing parts are a note, not a warning.
+      readiness.textContent = 'Qwen optional · not set up';
+      readiness.title = `Project chats use the built-in agent. The optional Qwen worker needs: ${missing.join(', ') || 'local setup'}`;
     }
     _frag.appendChild(readiness);
     const newProject = document.createElement('button'); newProject.type = 'button'; newProject.className = 'list-item companion-home'; newProject.textContent = '+ New project';
