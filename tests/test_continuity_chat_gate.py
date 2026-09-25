@@ -124,6 +124,73 @@ async def test_companion_context_does_not_inject_legacy_memory_rag_or_skills(mon
     assert captured["use_rag"] is False
 
 
+@pytest.mark.asyncio
+async def test_a_follow_up_in_a_project_home_keeps_the_earlier_turns(monkeypatch):
+    """The second message of a thread still sees the first question and answer."""
+    import routes.chat_helpers as helpers
+    import src.continuity.compiler as compiler_module
+    import src.continuity.store as store_module
+
+    async def fake_preprocess(_handler, message, _attachments, _session, **_kwargs):
+        return helpers.PreprocessedMessage(
+            enhanced_message=message, user_content=message, text_for_context=message,
+            youtube_transcripts=[], attachment_meta=[],
+        )
+
+    def fake_add_user_message(session, _handler, preprocessed, **_kwargs):
+        session.history.append({"role": "user", "content": preprocessed.user_content})
+
+    class _Compactor:
+        def __init__(self, _store):
+            pass
+
+        def checkpoint(self, **_kwargs):
+            return None
+
+    class _Compiler:
+        def __init__(self, _store):
+            pass
+
+        def compile(self, *, owner, session_id, request, transcript):
+            return ContextBundle(
+                "", ResolvedScope(owner, session_id, "project", project_id="invoices"), request,
+                transcript_tail=tuple(dict(item) for item in transcript),
+            )
+
+    monkeypatch.setattr(helpers, "preprocess", fake_preprocess)
+    monkeypatch.setattr(helpers, "extract_preset", lambda *_args, **_kwargs: helpers.PresetInfo(0.7, 1024, None, None))
+    monkeypatch.setattr(helpers, "add_user_message", fake_add_user_message)
+    monkeypatch.setattr(helpers, "effective_user", lambda _request: "alice")
+    monkeypatch.setattr(helpers, "load_prefs_for_user", lambda _owner: {})
+    monkeypatch.setattr(helpers, "_normalize_model_id_from_cache", lambda _session: None)
+    monkeypatch.setattr(helpers, "normalize_model_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(helpers, "get_context_length", lambda _url, _model: 128000)
+    monkeypatch.setattr(compiler_module, "CheckpointCompactor", _Compactor)
+    monkeypatch.setattr(compiler_module, "ContextCompiler", _Compiler)
+    monkeypatch.setattr(store_module, "ContinuityStore", lambda: None)
+
+    session = SimpleNamespace(
+        scope_kind="project", endpoint_url="http://unused", model="unused", headers={}, owner="alice",
+        history=[
+            {"role": "user", "content": "Add a bulk discount for ten or more items."},
+            {"role": "assistant", "content": "Here is the diff. Edits are off, so please enable them."},
+        ],
+    )
+    session.get_context_messages = lambda: list(session.history)
+    ctx = await helpers.build_chat_context(
+        session, SimpleNamespace(), SimpleNamespace(),
+        SimpleNamespace(build_context_preface=lambda **_kwargs: ([], [], [])),
+        "I enabled project_write. Continue the previous task now.", "thread", agent_mode=True,
+    )
+
+    # The Companion path ran, not the legacy fallback.
+    assert any((message.get("metadata") or {}).get("continuity_artifact") for message in ctx.messages)
+    text = "\n".join(str(message.get("content")) for message in ctx.messages)
+    assert "bulk discount for ten or more items" in text
+    assert "Here is the diff" in text
+    assert "Continue the previous task now" in text
+
+
 def test_continuity_prompt_marks_derived_context_without_raw_transcript():
     checkpoint = ThreadCheckpointV1(session_id="s", source_hash="hash", source_message_ids=["m1"], source_through_message_id="m1")
     bundle = ContextBundle("", ResolvedScope("alice", "s", "general"), "continue", checkpoint, transcript_tail=({"role": "user", "content": "raw secret"},))

@@ -1049,7 +1049,10 @@ async def build_chat_context(
                 messages,
                 dynamic_preface + [_continuity_prompt_message(bundle)] + ([] if agent_mode else turn_context[len(dynamic_preface):]),
             )
-            context_length = estimate_tokens(messages)
+            # The model's window, not the size of this request. Trimming
+            # against the request's own size always dropped the oldest turns,
+            # so a short thread lost everything before the latest message.
+            context_length = get_context_length(sess.endpoint_url, sess.model)
             was_compacted = bool(bundle.thread_checkpoint)
             continuity_compiled = True
         except Exception:
