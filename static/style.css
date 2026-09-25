@@ -9043,6 +9043,15 @@ button.hamburger {
   white-space: nowrap;
 }
 .companion-memory-modal { max-width: 720px; }
+@media (max-width: 768px) {
+  /* The mobile sheet clips its content, and these modals put their rows
+     straight into it with no scrolling body, so a long list lost its last
+     rows. The sheet's swipe handler already reads this scroll position. */
+  .modal-content.companion-memory-modal { overflow-y: auto; overscroll-behavior: contain; }
+  /* Stick the title over the sheet's top padding too, or rows scrolling
+     past show through the gap above it. */
+  .modal-content.companion-memory-modal > .modal-header { top: -6px; margin-top: -6px; padding-top: 6px; }
+}
 .companion-memory-tabs { display: flex; gap: 8px; padding: 0 20px 10px; }
 .companion-memory-tabs button, .companion-memory-panel button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
 .companion-memory-panel { padding: 0 20px 22px; max-height: 58vh; overflow: auto; }
