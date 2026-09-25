@@ -246,12 +246,12 @@
        real request is discarded and the font fetched a second time. -->
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-Regular.woff2">
   <link rel="preload" as="font" type="font/woff2" crossorigin href="/static/fonts/FiraCode-SemiBold.woff2">
-  <meta name="odysseus-build" content="20260925qwencontrols1">
+  <meta name="odysseus-build" content="20260925qwencontrols2">
   <link rel="stylesheet" href="/static/style.css?v=20260925grants5">
-  <link rel="modulepreload" href="/static/app.js?v=20260925qwencontrols1">
-  <link rel="modulepreload" href="/static/js/chat.js?v=20260925qwencontrols1">
-  <link rel="modulepreload" href="/static/js/chatRenderer.js?v=20260925qwencontrols1">
-  <link rel="modulepreload" href="/static/js/chatStream.js?v=20260925qwencontrols1">
+  <link rel="modulepreload" href="/static/app.js?v=20260925qwencontrols2">
+  <link rel="modulepreload" href="/static/js/chat.js?v=20260925qwencontrols2">
+  <link rel="modulepreload" href="/static/js/chatRenderer.js?v=20260925qwencontrols2">
+  <link rel="modulepreload" href="/static/js/chatStream.js?v=20260925qwencontrols2">
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
@@ -2615,11 +2615,11 @@
 <script type="module" src="/static/js/censor.js"></script>
 <script type="module" src="/static/js/settings.js?v=20260815approvalsave1"></script>
 <script type="module" src="/static/js/assistant.js"></script>
-<script type="module" src="/static/app.js?v=20260925qwencontrols1"></script>  <!-- app.js must be LAST -->
+<script type="module" src="/static/app.js?v=20260925qwencontrols2"></script>  <!-- app.js must be LAST -->
   <script type="module" src="/static/js/init.js?v=20260715freshroot3"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">
-window.__ODYSSEUS_BUILD_ID='20260925qwencontrols1';
+window.__ODYSSEUS_BUILD_ID='20260925qwencontrols2';
 document.documentElement.dataset.odysseusBuild=window.__ODYSSEUS_BUILD_ID;
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',event=>{
@@ -2637,7 +2637,7 @@ if('serviceWorker' in navigator){
     button.addEventListener('click',()=>location.reload());
     banner.append(text,button);document.body.appendChild(banner);
   });
-  navigator.serviceWorker.register('/static/sw.js?v=20260925qwencontrols1',{updateViaCache:'none'})
+  navigator.serviceWorker.register('/static/sw.js?v=20260925qwencontrols2',{updateViaCache:'none'})
     .then(reg=>reg.update()).catch(()=>{});
 }
 </script>

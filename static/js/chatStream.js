@@ -84,8 +84,9 @@ export function handleUIControl(uiData) {
       var ts2 = Storage.getJSON(Storage.KEYS.TOGGLES, {});
       ts2.mode = modeVal;
       Storage.setJSON(Storage.KEYS.TOGGLES, ts2);
+      // `hidden` alone does not hide these, their class sets display: flex.
       document.querySelectorAll('[data-mode-tool]').forEach(function(b) {
-        b.style.display = modeVal === 'agent' ? '' : 'none';
+        b.style.display = modeVal === 'agent' && !b.hidden ? '' : 'none';
       });
 
     } else if (uiEvent === 'switch_model' || uiData.ui_event === 'switch_model') {
