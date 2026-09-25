@@ -5,6 +5,10 @@ to mutate ``sys.modules`` or parent-package attributes temporarily. On exit
 (normal or exception), every named module is restored to exactly the state it
 had before the block — present, absent, or carrying a parent-package attribute.
 
+Use ``temporary_import_stubs`` around module-level stubs that exist only so
+the code under test can be imported. It removes the stubs, and any project
+module imported against them, when the block ends.
+
 Use ``clear_module`` to drop a single module from both ``sys.modules`` and its
 parent-package attribute (e.g. before forcing a fresh import inside the block).
 
@@ -30,8 +34,10 @@ parent-attr restoration always resolves the parent through the already-restored
 safe for callers that pass both a parent package and a child module.
 """
 
+import os
 import sys
 from contextlib import contextmanager
+from unittest.mock import MagicMock
 
 _ABSENT = object()
 
@@ -140,6 +146,49 @@ def clear_fake_endpoint_resolver_modules(*extra_modules):
     clear_module("routes.model_routes")
     for name in extra_modules:
         clear_module(name)
+
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _is_project_module(mod):
+    path = getattr(mod, "__file__", None)
+    if not isinstance(path, str):
+        return False
+    path = os.path.abspath(path)
+    if not path.startswith(_PROJECT_ROOT + os.sep):
+        return False
+    relative = path[len(_PROJECT_ROOT) + 1:]
+    return not relative.startswith(("venv" + os.sep, ".venv" + os.sep, "tests" + os.sep))
+
+
+@contextmanager
+def temporary_import_stubs(*module_names, factory=MagicMock):
+    """Stub missing modules for a block, then undo every trace of them.
+
+    Each name in ``module_names`` that is not imported yet gets
+    ``factory()`` as its ``sys.modules`` entry for the block. On exit those
+    stubs are removed, and so is every project module first imported inside
+    the block, because it may hold a reference to a stub. Modules imported
+    before the block are left alone, and so are third-party packages, which
+    can break when imported twice.
+
+    Objects the caller imported inside the block stay usable. Later imports
+    anywhere in the run load the real modules.
+    """
+    before = set(sys.modules)
+    for name in module_names:
+        if name not in sys.modules:
+            sys.modules[name] = factory()
+    try:
+        yield
+    finally:
+        stubbed = set(module_names) - before
+        for name in list(sys.modules):
+            if name in before:
+                continue
+            if name in stubbed or _is_project_module(sys.modules[name]):
+                clear_module(name)
 
 
 @contextmanager

@@ -1,6 +1,8 @@
 """Focused tests for tests/helpers/import_state.py."""
+import os
 import sys
 import types
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,9 +11,13 @@ from tests.helpers.import_state import (
     clear_fake_endpoint_resolver_modules,
     clear_module,
     preserve_import_state,
+    temporary_import_stubs,
 )
 
 _SENTINEL = "tests._import_state_test_sentinel"
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_STUB_NAME = "src._import_state_test_stub"
+_CODE_NAME = "src._import_state_test_code"
 
 # Names touched by clear_fake_database_modules — snapshot/restore these so the
 # tests never leak into the real core/src packages.
@@ -424,3 +430,64 @@ def test_clear_fake_resolver_uses_parent_attr_when_not_in_sys_modules():
 
         assert not hasattr(fake_src, "endpoint_resolver")
         assert "routes.model_routes" not in sys.modules
+
+
+def _module_at(name, path):
+    module = types.ModuleType(name)
+    module.__file__ = path
+    return module
+
+
+def test_temporary_stub_is_present_inside_the_block_and_gone_after():
+    assert _STUB_NAME not in sys.modules
+    with temporary_import_stubs(_STUB_NAME):
+        assert isinstance(sys.modules[_STUB_NAME], MagicMock)
+    assert _STUB_NAME not in sys.modules
+
+
+def test_temporary_stubs_leave_an_imported_module_in_place():
+    original = _module_at(_STUB_NAME, os.path.join(_PROJECT_ROOT, "src", "real.py"))
+    with preserve_import_state(_STUB_NAME):
+        sys.modules[_STUB_NAME] = original
+        with temporary_import_stubs(_STUB_NAME):
+            assert sys.modules[_STUB_NAME] is original
+        assert sys.modules[_STUB_NAME] is original
+
+
+def test_project_code_imported_against_a_stub_is_evicted_with_its_parent_attr():
+    import src
+
+    code = _module_at(_CODE_NAME, os.path.join(_PROJECT_ROOT, "src", "code.py"))
+    with preserve_import_state(_CODE_NAME, _STUB_NAME):
+        with temporary_import_stubs(_STUB_NAME):
+            sys.modules[_CODE_NAME] = code
+            src._import_state_test_code = code
+        assert _CODE_NAME not in sys.modules
+        assert not hasattr(src, "_import_state_test_code")
+
+
+def test_project_code_imported_before_the_block_is_kept():
+    code = _module_at(_CODE_NAME, os.path.join(_PROJECT_ROOT, "src", "code.py"))
+    with preserve_import_state(_CODE_NAME, _STUB_NAME):
+        sys.modules[_CODE_NAME] = code
+        with temporary_import_stubs(_STUB_NAME):
+            pass
+        assert sys.modules[_CODE_NAME] is code
+
+
+def test_third_party_code_first_imported_inside_the_block_is_kept():
+    # A package imported twice can break, for example a C extension, so only
+    # project modules are evicted.
+    name = "_import_state_test_third_party"
+    outside = _module_at(name, os.path.join(os.path.dirname(_PROJECT_ROOT), "site", "lib.py"))
+    with preserve_import_state(name, _STUB_NAME):
+        with temporary_import_stubs(_STUB_NAME):
+            sys.modules[name] = outside
+        assert sys.modules[name] is outside
+
+
+def test_temporary_stubs_are_removed_when_the_block_raises():
+    with pytest.raises(RuntimeError):
+        with temporary_import_stubs(_STUB_NAME):
+            raise RuntimeError("boom")
+    assert _STUB_NAME not in sys.modules
