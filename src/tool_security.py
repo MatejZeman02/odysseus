@@ -75,6 +75,11 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "stop_served_model",
     "cancel_download",
     "adopt_served_model",
+    # Companion tools. Each reads the owner's checkout or host state, or
+    # writes owner memory, so a non-admin or a bearer token gets none of them
+    # even when a chat grant is switched on.
+    "sandbox_read",
+    "system_observe",
 }
 
 

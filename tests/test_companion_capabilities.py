@@ -83,3 +83,13 @@ def test_companion_web_search_defaults_on_but_server_enforces_an_owner_disable()
     source = open("routes/chat_routes.py", encoding="utf-8").read()
     assert "_companion_web_enabled = bool(_chat_capabilities.get(WEB_SEARCH, False))" in source
     assert "_search_enabled = bool(_search_enabled and _companion_web_enabled)" in source
+
+
+def test_companion_tools_are_capped_for_tokens_and_non_admins(monkeypatch):
+    import src.tool_security as tool_security
+
+    companion_tools = {"sandbox_read", "system_observe"}
+    assert companion_tools <= tool_security.delegated_credential_blocked_tools()
+
+    monkeypatch.setattr(tool_security, "owner_is_admin_or_single_user", lambda _owner: False)
+    assert companion_tools <= tool_security.blocked_tools_for_owner("guest")

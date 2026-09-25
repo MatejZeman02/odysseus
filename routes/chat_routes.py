@@ -420,11 +420,13 @@ def _resolve_stored_project_workspace(request, session_id: str, owner: str | Non
 
     # Match the existing native-workspace privilege boundary.  Qwen has its
     # own rootless read-only containment path; this helper only binds native
-    # Odysseus tools.
+    # Odysseus tools.  A bearer token resolves to the admin who minted it, so
+    # ask about the credential itself as well as about its owner.
     from src.tool_security import owner_is_admin_or_single_user
-    if not owner_is_admin_or_single_user(owner):
+    if is_delegated_credential(request) or not owner_is_admin_or_single_user(owner):
         return "", ""
 
+    from src.path_identity import PathIdentityError, pin_directory
     from src.tool_execution import vet_workspace
     stored = str(row.workspace_root).strip()
     # A project binding is a persisted scope grant.  Unlike an ordinary
@@ -432,12 +434,10 @@ def _resolve_stored_project_workspace(request, session_id: str, owner: str | Non
     # replaced by a symlink: doing so could silently retarget native Agent
     # tools at a different checkout after project creation.
     try:
-        stored_info = Path(stored).expanduser().lstat()
-    except OSError:
+        pinned = pin_directory(Path(stored).expanduser())
+    except PathIdentityError:
         return "", stored
-    if stat.S_ISLNK(stored_info.st_mode) or not stat.S_ISDIR(stored_info.st_mode):
-        return "", stored
-    workspace = vet_workspace(stored) or ""
+    workspace = vet_workspace(str(pinned.path)) or ""
     return workspace, (stored if not workspace else "")
 
 

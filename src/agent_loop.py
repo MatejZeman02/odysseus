@@ -3657,7 +3657,11 @@ async def stream_agent_loop(
     # pages, continuity artifacts, or earlier tool output.  This lets an exact
     # URL the owner typed use the read-only fetcher without an approval detour
     # while the external-context gate still blocks model-invented destinations.
-    run_security.authorize_latest_user_request(_last_user)
+    # A bearer token's "user" turn is written by the integration holding it
+    # and may relay text the owner never saw, so it earns no typed-URL
+    # authority.
+    if not delegated_credential:
+        run_security.authorize_latest_user_request(_last_user)
     _ody_qwen_finetune_model = _is_odysseus_qwen_model(model)
     # The caller's temperature survives for non-qwen routes; the qwen cap is
     # applied per candidate (here for the primary, in the candidate request
@@ -6615,7 +6619,9 @@ async def stream_agent_loop(
     # gets a turn (with its own tool calls forwarded to the user) and
     # a skill is saved ONLY if the teacher actually succeeds. Skipped
     # when we ARE the teacher to avoid recursion.
-    if not _is_teacher_run and not guide_only and not _awaiting_user:
+    # A Companion home has its own memory and prompt contract. The teacher
+    # uses the global prompt and can save a global skill, so it stays out.
+    if not _is_teacher_run and not guide_only and not _awaiting_user and not companion_scope:
         try:
             from src.teacher_escalation import run_teacher_inline
             async for evt in run_teacher_inline(

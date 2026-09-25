@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.database import ChatMessage as DbMessage, ContinuityArtifact, ModelEndpoint, Project, Session as DbSession, SessionLocal, utcnow_naive
 from src.path_identity import PathIdentityError, pin_directory
-from src.auth_helpers import effective_user, owner_filter, require_user
+from src.auth_helpers import effective_user, is_delegated_credential, owner_filter, require_user
 from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.companion_runs import CompanionRunRegistry
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
@@ -78,6 +78,13 @@ def _enabled() -> bool:
 
 
 def _owner(request: Request) -> str:
+    # Every Companion route is an owner decision: registering a checkout,
+    # applying or rolling back a patch, granting context, promoting memory,
+    # turning a capability on. A bearer token resolves to the admin who
+    # minted it, which is right for attribution and wrong for authority, so
+    # refuse it here before effective_user() can answer with that admin.
+    if is_delegated_credential(request):
+        raise HTTPException(403, "Companion homes accept the owner's browser session, not an API token")
     owner = effective_user(request)
     if owner:
         return owner

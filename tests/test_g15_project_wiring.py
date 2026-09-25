@@ -5,6 +5,14 @@ import pytest
 from fastapi import HTTPException
 
 
+
+def _browser_request():
+    return SimpleNamespace(state=SimpleNamespace(api_token=False))
+
+
+def _token_request():
+    return SimpleNamespace(state=SimpleNamespace(api_token=True))
+
 def test_project_workspace_comes_from_server_owned_binding(monkeypatch, tmp_path):
     import routes.chat_routes as chat_routes
     import src.tool_security as tool_security
@@ -34,11 +42,17 @@ def test_project_workspace_comes_from_server_owned_binding(monkeypatch, tmp_path
     monkeypatch.setattr(tool_security, "owner_is_admin_or_single_user", lambda _owner: True)
 
     resolved, rejected = chat_routes._resolve_stored_project_workspace(
-        object(), "project-session", "alice",
+        _browser_request(), "project-session", "alice",
     )
 
     assert resolved == str(workspace.resolve())
     assert rejected == ""
+
+    # A bearer token resolves to the admin who minted it. It must not inherit
+    # that admin's checkout binding, and must not learn the stored path.
+    assert chat_routes._resolve_stored_project_workspace(
+        _token_request(), "project-session", "alice",
+    ) == ("", "")
 
 
 def test_native_project_workspace_rejects_a_swapped_symlink(monkeypatch, tmp_path):
@@ -72,7 +86,7 @@ def test_native_project_workspace_rejects_a_swapped_symlink(monkeypatch, tmp_pat
     monkeypatch.setattr(tool_security, "owner_is_admin_or_single_user", lambda _owner: True)
 
     assert chat_routes._resolve_stored_project_workspace(
-        object(), "project-session", "alice",
+        _browser_request(), "project-session", "alice",
     ) == ("", str(swapped))
 
 
@@ -125,7 +139,7 @@ def test_missing_stored_project_workspace_does_not_override_ordinary_chat(monkey
     monkeypatch.setattr(chat_routes, "SessionLocal", lambda: Db())
 
     assert chat_routes._resolve_stored_project_workspace(
-        object(), "general-session", "alice",
+        _browser_request(), "general-session", "alice",
     ) == ("", "")
 
 
