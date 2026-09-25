@@ -131,8 +131,9 @@ turning on host shell access.
 | 1. Semantic continuity | never | Not run. Needs an owner: a configured model, browser interaction, and a real provider call. |
 | 2. Reviewed project patch | never | Not run. Needs an owner: a throwaway Git checkout and a Qwen turn. |
 | 3. Computer Help containment | probe run 2026-08-27 against the cached Qwen image | Does not count. That image is rejected for Computer Help, and the report predates the `command_inventory` gate. Readiness for it now reads `sandbox_report_outdated`. No approved image has been chosen. |
-| 4. Native agent with owner-chosen tools | scripted run 2026-09-25 | Does not count as the owner canary, because a scripted stand-in model made the calls. It did run the real server, sandbox and database: the command saw the project and its history, `.env` was unreadable, the network was unreachable, the sandbox's scratch file never reached the checkout, the edit applied with no approval card and was listed, **Undo** restored the file, and memory saved a new revision. |
+| 4. Native agent with owner-chosen tools | scripted run 2026-09-25 | Does not count as the owner canary, because a scripted stand-in model made the calls. It did run the real server, sandbox and database: the command saw the project and its history, `.env` was unreadable, the network was unreachable, the sandbox's scratch file never reached the checkout, the edit applied with no approval card and was listed, **Undo** restored the file, and memory saved a new revision. A review the same day found that the sandbox shell still held the handle the checkout was mounted from, which reached `.env` and the real checkout through `/proc`. That is fixed and covered by a live test, so the `.env` result above held only for the path the run tried. A second run the same day, with DeepSeek flash driven by Claude in a scratch instance, found and fixed three bugs (the model could not ask for a switched-off grant, follow-ups lost the earlier turns, and a commit made in the sandbox was reported as real). It still does not count: the owner has not run it on their own install. |
 
-Gates 1, 2 and 4 have not run with a real model on this branch. Automated coverage is
-not a substitute: 6315 passing tests say the parts behave, not that the product
-flow works end to end.
+Gates 1, 2 and 4 have not been run by the owner on this branch. Gate 4 has run with
+a real model in a scratch instance that Claude drove, which found real bugs but does
+not replace the owner's run. Automated coverage is not a substitute either: passing
+tests say the parts behave, not that the product flow works end to end.

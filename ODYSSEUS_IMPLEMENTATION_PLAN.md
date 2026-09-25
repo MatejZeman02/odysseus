@@ -99,11 +99,38 @@ What this settles, and what it does not:
   can undo from **Review project changes**. `update_memory` writes accepted
   brief revisions marked `agent_edit_v1`. Host `bash`, `python` and background
   jobs stay refused in every Companion home.
-- **Known limits.** Edits need a Git checkout. A change whose undo met a
-  conflict stays in that state, so an older change behind it cannot be undone
-  from the list. Tool descriptions for MCP servers and integrations are left
-  out of a home's prompt unless those tools are offered in that turn, because
-  that outside text would otherwise cancel every grant.
+- **Tool list.** A fully enabled project chat offers the model 18 tools,
+  including `request_capability`, which every home now offers so the model can
+  ask for a switched-off grant. The schemas come to about 22,000 characters and
+  the system prompt to about 7,400, so the first request of a turn costs about
+  5,000 prompt tokens (measured 2026-09-25). App administration tools (API
+  tokens, endpoints, webhooks, MCP servers, settings, other chats) are never
+  pulled into a home by
+  keywords. The Qwen switch and **Patch** appear only where Qwen is set up.
+- **Hardening found by review, 2026-09-25.** The checkout handle Bubblewrap
+  mounts from stayed open in the sandbox shell, so a command could read `.env`
+  and write a Git hook into the real checkout through `/proc`. It is now closed
+  before the command runs, and a live test walks every `/proc/*/fd` entry. An
+  unreadable chat scope now refuses scoped tools instead of acting as
+  ordinary chat.
+- **Real-model run, 2026-09-25.** Claude drove a scratch instance in the
+  browser with DeepSeek flash on a throwaway Git project, once with every grant
+  on and once with edits and memory off. With every grant on the model read,
+  tested and edited without friction. With edits off it choked, and the run
+  found three bugs, all fixed with tests: `request_capability` was named in the
+  prompt but missing from the tool list, every follow-up in a Companion home
+  dropped the earlier turns (trimmed against the request's own size since
+  2026-08-03), and the model reported a commit made inside the sandbox shell,
+  which the overlay had discarded. After the fixes the model proposed a diff,
+  said plainly that nothing was applied, asked for the grant, and after
+  **Enable** applied the change as a recorded, undoable change and ran the tests.
+  This is not the owner canary (see the canary guide).
+- **Known limits.** Projects must be Git checkouts, although a new one with no
+  commit yet accepts edits. A change whose undo met a conflict stays in that
+  state, so an older change behind it cannot be undone from the list. Tool
+  descriptions for MCP servers and integrations are left out of a home's
+  prompt unless those tools are offered in that turn, because that outside
+  text would otherwise cancel every grant.
 
 ## Immediate validation queue
 
