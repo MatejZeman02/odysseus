@@ -3716,7 +3716,10 @@ async def stream_agent_loop(
         messages = _insert_before_latest_user(messages, _upload_msg)
 
     _t0 = time.time()
-    _needs_admin = _detect_admin_intent(messages)
+    # The admin keywords are bare substrings ("rename", "doc", "task"), so an
+    # ordinary project request would pull every app administration schema
+    # into a Companion home. Those homes keep only what retrieval selects.
+    _needs_admin = _detect_admin_intent(messages) and not companion_scope
     _last_user = _extract_last_user_message(messages)
     # Authority comes only from the current owner turn, never from retrieved
     # pages, continuity artifacts, or earlier tool output.  This lets an exact

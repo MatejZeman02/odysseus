@@ -352,9 +352,8 @@ def _run_agent(monkeypatch, calls, **kwargs):
             [{"role": "user", "content": "Rename the README title."}],
             max_rounds=len(calls) + 1,
             fallbacks=[],
-            companion_scope=True,
             _is_teacher_run=True,
-            **kwargs,
+            **{"companion_scope": True, **kwargs},
         )]
 
     chunks = asyncio.run(collect())
@@ -406,6 +405,25 @@ def test_forced_companion_tools_are_offered_when_retrieval_misses_them(monkeypat
     )
     assert {"update_memory", "project_shell"} <= offered[0]
     assert "write_file" not in offered[0]
+
+
+def test_a_rename_request_does_not_bring_app_administration_into_a_companion_home(monkeypatch, tmp_path):
+    import src.tool_index as tool_index
+
+    class _Retrieval:
+        def get_tools_for_query(self, _query, _limit):
+            return {"read_file", "edit_file"}
+
+    monkeypatch.setattr(tool_index, "get_tool_index", lambda: _Retrieval())
+    admin = {"manage_tokens", "manage_endpoints", "manage_webhooks", "manage_settings", "send_to_session"}
+
+    _executed, companion, _chunks = _run_agent(monkeypatch, [], workspace=str(tmp_path))
+    _executed, ordinary, _chunks = _run_agent(monkeypatch, [], workspace=str(tmp_path), companion_scope=False)
+
+    assert "read_file" in companion[0]
+    assert not companion[0] & admin
+    # Ordinary upstream chat keeps its keyword behaviour.
+    assert admin <= ordinary[0]
 
 
 def test_bearer_token_runs_never_get_companion_tools():
