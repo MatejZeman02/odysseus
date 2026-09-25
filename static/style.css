@@ -9052,7 +9052,7 @@ button.hamburger {
 .companion-artifact-workspace { display: grid; grid-template-columns: minmax(180px, .72fr) minmax(0, 1.28fr); gap: 12px; align-items: start; }
 .companion-artifact-list { display: grid; gap: 8px; margin: 10px 0; }
 .companion-artifact-row { text-align: left; display: grid; gap: 3px; width: 100%; }
-.companion-artifact-row:focus-visible, .companion-artifact-row:hover { border-color: var(--accent); }
+.companion-artifact-row:focus-visible, .companion-artifact-row:hover { border-color: var(--accent, var(--red)); }
 .companion-artifact-row span { color: var(--muted, var(--fg)); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .companion-artifact-editor-pane { display: grid; gap: 8px; min-width: 0; margin: 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--panel, var(--bg)) 76%, var(--bg)); }
 .companion-artifact-editor-pane > p { margin: 0; color: var(--muted, var(--fg)); }
@@ -9062,16 +9062,16 @@ button.hamburger {
 .companion-artifact-editor-pane input { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: inherit; }
 .companion-artifact-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .companion-artifact-editor-actions button, .companion-artifact-save { pointer-events: auto; position: relative; z-index: 1; }
-.companion-artifact-save { background: color-mix(in srgb, var(--accent) 22%, var(--bg)) !important; border-color: var(--accent) !important; }
+.companion-artifact-save { background: color-mix(in srgb, var(--accent, var(--red)) 22%, var(--bg)) !important; border-color: var(--accent, var(--red)) !important; }
 .companion-artifact-status { min-height: 1.25em; margin: 0; color: var(--muted, var(--fg)); font-size: 13px; }
 .companion-artifact-status.error { color: var(--red, #e55); }
-.personal-artifact-proposal { display: grid; gap: 8px; max-width: 800px; margin: 8px auto 16px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 62%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--panel, var(--bg)) 82%, var(--bg)); }
+.personal-artifact-proposal { display: grid; gap: 8px; max-width: 800px; margin: 8px auto 16px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 62%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--panel, var(--bg)) 82%, var(--bg)); }
 .personal-artifact-proposal > span { color: var(--muted, var(--fg)); font-size: 13px; }
 .personal-artifact-proposal details { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .personal-artifact-proposal summary { cursor: pointer; padding: 7px 9px; }
 .personal-artifact-proposal pre { max-height: 280px; overflow: auto; margin: 0; padding: 10px; border-top: 1px solid var(--border); white-space: pre-wrap; background: var(--bg); }
 .personal-artifact-proposal-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.personal-artifact-proposal-apply { font: inherit; color: var(--fg); background: color-mix(in srgb, var(--accent) 22%, var(--bg)); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+.personal-artifact-proposal-apply { font: inherit; color: var(--fg); background: color-mix(in srgb, var(--accent, var(--red)) 22%, var(--bg)); border: 1px solid var(--accent, var(--red)); border-radius: 6px; padding: 6px 9px; cursor: pointer; }
 .personal-artifact-proposal-status { color: var(--muted, var(--fg)); font-size: 13px; }
 .companion-artifact-create, .companion-brief-editor { display: grid; gap: 8px; margin-top: 10px; }
 .companion-artifact-create input, .companion-grant-purpose, .companion-grant-project { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 7px; font: inherit; }

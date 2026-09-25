@@ -8,8 +8,8 @@
 import Storage from './storage.js';
 import uiModule from './ui.js';
 import sessionModule from './sessions.js';
-import chatRenderer from './chatRenderer.js?v=20260827sandboxboundary1';
-import chatStream from './chatStream.js?v=20260827sandboxboundary1';
+import chatRenderer from './chatRenderer.js?v=20260925qwencontrols1';
+import chatStream from './chatStream.js?v=20260925qwencontrols1';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import spinnerModule from './spinner.js';

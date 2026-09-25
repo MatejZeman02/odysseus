@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const BUILD_ID = '20260827sandboxboundary1';
+const BUILD_ID = '20260925qwencontrols1';
 const CACHE_NAME = `odysseus-v388-${BUILD_ID}`;
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them

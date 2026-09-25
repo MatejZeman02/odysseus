@@ -2132,6 +2132,38 @@ function _loadG15Readiness() {
   return _g15ReadinessPromise;
 }
 
+// Qwen is an optional project worker. Its switch, and the Patch mode that
+// needs it, appear only in project chats where Qwen is set up or already on.
+function _syncQwenControls(meta, id) {
+  const projectScope = !!meta && meta.scope_kind === 'project';
+  const qwenActive = projectScope && meta.harness_kind === 'qwen';
+  const qwenOffered = qwenActive || (projectScope && !!_g15Readiness?.qwen_ready);
+  const chatMode = !!document.getElementById('mode-chat-btn')?.classList.contains('active');
+  const qwenBtn = document.getElementById('qwen-toggle-btn');
+  if (qwenBtn) {
+    qwenBtn.hidden = !qwenOffered;
+    qwenBtn.style.display = qwenOffered && !chatMode ? '' : 'none';
+    qwenBtn.classList.toggle('active', qwenActive);
+    qwenBtn.setAttribute('aria-pressed', String(qwenActive));
+    qwenBtn.title = qwenActive ? 'Qwen Companion · read-only project access' : 'Qwen Companion (project read-only)';
+  }
+  const patchBtn = document.getElementById('project-patch-btn');
+  if (!patchBtn) return;
+  patchBtn.hidden = !qwenOffered;
+  patchBtn.style.display = qwenOffered ? '' : 'none';
+  patchBtn.disabled = projectScope && !qwenActive;
+  patchBtn.title = qwenActive
+    ? 'Enable automatic reviewed project changes'
+    : 'Enable Qwen Companion to propose project changes';
+  if (window.__odysseusPatchProposalSessionId && window.__odysseusPatchProposalSessionId !== id) {
+    window.__odysseusPatchProposalSessionId = null;
+  }
+  const patchActive = qwenActive && window.__odysseusPatchProposalSessionId === id;
+  patchBtn.classList.toggle('active', patchActive);
+  patchBtn.setAttribute('aria-pressed', String(patchActive));
+  if (!qwenActive && window.__odysseusPatchProposalSessionId === id) window.__odysseusPatchProposalSessionId = null;
+}
+
 export function refreshG15Readiness() {
   _g15Readiness = null;
   return _loadG15Readiness();
@@ -3100,34 +3132,10 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     // Apply it before the first await so a fast send cannot use the previous
     // chat's mode. Harness selection itself is durable server state and is
     // never changed merely by reopening a project.
-    const qwenBtn = document.getElementById('qwen-toggle-btn');
     const qwenActive = !!meta && meta.scope_kind === 'project' && meta.harness_kind === 'qwen';
-    if (qwenBtn) {
-      qwenBtn.classList.toggle('active', qwenActive);
-      qwenBtn.setAttribute('aria-pressed', String(qwenActive));
-      qwenBtn.title = qwenActive ? 'Qwen Companion · read-only project access' :
-        (meta?.scope_kind === 'computer' ? 'Computer Help · Qwen coming next' : 'Qwen Companion (project read-only)');
-    }
-    const patchBtn = document.getElementById('project-patch-btn');
-    if (patchBtn) {
-      const projectScope = !!meta && meta.scope_kind === 'project';
-      patchBtn.hidden = !projectScope;
-      patchBtn.style.display = projectScope ? '' : 'none';
-      patchBtn.disabled = projectScope && !qwenActive;
-      patchBtn.title = qwenActive
-        ? 'Enable automatic reviewed project changes'
-        : 'Enable Qwen Companion to propose project changes';
-      if (window.__odysseusPatchProposalSessionId && window.__odysseusPatchProposalSessionId !== id) {
-        window.__odysseusPatchProposalSessionId = null;
-      }
-      const patchActive = qwenActive && window.__odysseusPatchProposalSessionId === id;
-      patchBtn.classList.toggle('active', patchActive);
-      patchBtn.setAttribute('aria-pressed', String(patchActive));
-      if (!qwenActive) {
-        patchBtn.classList.remove('active');
-        patchBtn.setAttribute('aria-pressed', 'false');
-        if (window.__odysseusPatchProposalSessionId === id) window.__odysseusPatchProposalSessionId = null;
-      }
+    _syncQwenControls(meta, id);
+    if (!_g15Readiness && meta?.scope_kind === 'project' && !qwenActive) {
+      _loadG15Readiness().then(() => { if (currentSessionId === id) _syncQwenControls(meta, id); });
     }
     const setModeReliably = (mode) => {
       const toggleState = Storage.loadToggleState(); toggleState.mode = mode; Storage.saveToggleState(toggleState);

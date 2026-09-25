@@ -46,8 +46,9 @@ export function syncWorkspaceIndicator(path) {
     pill.style.display = (path && !chat) ? '' : 'none';
     pill.classList.toggle('active', !!path);
     if (path) pill.title = _projectReadOnly
-      ? `Project workspace: ${path}\nThe server owns this checkout. Chat capabilities decide what the assistant can read, run and change.\nClick to clear.`
+      ? `Project workspace: ${path}\nThe server owns this checkout. Chat capabilities decide what the assistant can read, run and change.`
       : `Workspace: ${path}\nFile tools are confined here; shell commands start here but are not sandboxed and can reach outside it.\nClick to clear.`;
+    pill.setAttribute('aria-label', _projectReadOnly ? 'Project workspace' : 'Clear workspace');
   }
   if (name) name.textContent = path ? _basename(path) : '';
   if (overflow) {
@@ -94,6 +95,18 @@ export async function vetAndSetWorkspace(path) {
 export function clearWorkspace() {
   setWorkspace('');
   if (uiModule && uiModule.showToast) uiModule.showToast('Workspace cleared');
+}
+
+// A project chat always works in its project's checkout, whatever the browser
+// stores, so clearing the pill there would only hide it.
+function _onPillClick() {
+  if (_projectReadOnly) {
+    if (uiModule && uiModule.showToast) {
+      uiModule.showToast('This chat works in its project folder. Chat capabilities decide what the assistant can see and do.');
+    }
+    return;
+  }
+  clearWorkspace();
 }
 
 async function _load(path) {
@@ -232,7 +245,7 @@ export function initWorkspace() {
   const overflow = document.getElementById('overflow-workspace-btn');
   if (overflow) overflow.addEventListener('click', openWorkspaceBrowser);
   const pill = document.getElementById('workspace-indicator-btn');
-  if (pill) pill.addEventListener('click', clearWorkspace);
+  if (pill) pill.addEventListener('click', _onPillClick);
 }
 
 export default { initWorkspace, openWorkspaceBrowser, closeWorkspaceBrowser, getWorkspace, setWorkspace, vetAndSetWorkspace, clearWorkspace, syncWorkspaceIndicator, applyMode };

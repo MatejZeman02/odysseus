@@ -11,7 +11,7 @@ def test_project_patch_action_is_project_qwen_only_and_uses_version_neutral_api(
     chat = (ROOT / "static/js/chat.js").read_text()
 
     assert 'id="project-patch-btn"' in index
-    assert "patchBtn.hidden = !projectScope" in sessions
+    assert "patchBtn.hidden = !qwenOffered" in sessions
     assert "patchBtn.disabled = projectScope && !qwenActive" in sessions
     assert "Enable Qwen Companion to propose project changes" in sessions
     assert "window.__odysseusPatchProposalSessionId === streamSessionId" in chat

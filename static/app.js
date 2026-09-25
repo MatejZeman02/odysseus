@@ -12,8 +12,8 @@ import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
 // Stateful chat modules must use one canonical URL. A query variant is a
 // distinct ES module, which previously split renderer/session state.
-import chatModule from './js/chat.js?v=20260827sandboxboundary1';
-import compareModule from './js/compare/index.js?v=20260827sandboxboundary1';
+import chatModule from './js/chat.js?v=20260925qwencontrols1';
+import compareModule from './js/compare/index.js?v=20260925qwencontrols1';
 import documentModule from './js/document.js?v=20260818artifactedit2';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
@@ -24,7 +24,7 @@ import {
   settleSessionHydration
 } from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js?v=20260827sandboxboundary1';
+import chatRenderer from './js/chatRenderer.js?v=20260925qwencontrols1';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -1810,7 +1810,7 @@ function initializeEventListeners() {
       const toggle = agentBtn.closest('.mode-toggle');
       if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
       const companionBtn = el('qwen-toggle-btn');
-      if (companionBtn) companionBtn.style.display = mode === 'agent' ? '' : 'none';
+      if (companionBtn) companionBtn.style.display = mode === 'agent' && !companionBtn.hidden ? '' : 'none';
       const patchBtn = el('project-patch-btn');
       if (patchBtn) patchBtn.style.display = patchBtn.hidden ? 'none' : '';
       // Workspace pill + overflow entry are agent-only - hide immediately (no flash).
@@ -2007,7 +2007,7 @@ function initializeEventListeners() {
           window.__odysseusPatchProposalSessionId = null;
         }
       }
-      uiModule.showToast?.(result.harness_kind === 'qwen' ? 'Qwen Companion: read-only' : 'Native Chat: shell disabled', 1800);
+      uiModule.showToast?.(result.harness_kind === 'qwen' ? 'Qwen Companion: read-only' : 'Built-in agent · Chat capabilities apply', 1800);
       if (result.harness_kind === 'qwen' && typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode('agent');
       await window.sessionModule?.loadSessions?.();
     } catch (error) { uiModule.showToast?.(error.message || 'Qwen Companion unavailable', 2500); }
