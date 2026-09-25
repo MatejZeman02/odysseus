@@ -1,7 +1,7 @@
 import json
 import logging
 
-from src.companion_capabilities import ALL_CAPABILITIES
+from src.companion_capabilities import ALL_CAPABILITIES, capability_label
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +71,7 @@ class RequestCapabilityTool:
         reason = str(parsed.get("reason") or "").strip() if isinstance(parsed, dict) else ""
         if name not in ALL_CAPABILITIES:
             return "request_capability: invalid", {"error": "Unknown chat capability", "exit_code": 1}
-        labels = {
-            "web_search": "Web search",
-            "workspace_read": "Working directory",
-            "system_observe": "System inspection",
-            "sandbox_read": "Sandboxed read-only commands",
-        }
-        label = labels[name]
+        label = capability_label(name)
         question = f"Enable {label} for this chat?"
         if reason:
             question += f" {reason[:500]}"

@@ -1174,6 +1174,25 @@ async def _execute_tool_block_impl(
         logger.info("Chat capability blocked tool=%s session_id=%s", tool, session_id)
         return desc, result
 
+    # Companion homes take file, command and memory tools from the owner's
+    # grants. The route hides what is off, this repeats the decision for
+    # every caller of the shared executor, and keeps host-authority tools out.
+    from src.companion_capabilities import companion_tool_denial
+
+    _companion_denial = companion_tool_denial(
+        tool, companion_scope, lambda grant: _session_capability_enabled(session_id, grant),
+    )
+    if _companion_denial:
+        desc = f"{tool}: BLOCKED"
+        result = {
+            "error": _companion_denial,
+            "exit_code": 1,
+            "blocked": True,
+            "policy": "chat_capability",
+        }
+        logger.info("Companion capability blocked tool=%s session_id=%s", tool, session_id)
+        return desc, result
+
     if tool_policy and any(tool_policy.blocks(name) for name in policy_names):
         desc = f"{tool}: BLOCKED"
         result = {
@@ -1232,7 +1251,21 @@ async def _execute_tool_block_impl(
     # Route MCP-extracted tools through the MCP manager. Forward
     # the progress callback so long-running subprocess tools
     # (bash, python) can stream `tool_progress` events to the UI.
-    if tool in _MCP_TOOL_MAP:
+    from src.companion_capabilities import PROJECT_EDIT_TOOLS
+
+    if companion_scope == "project" and tool in PROJECT_EDIT_TOOLS:
+        # A project checkout changes only through the recorded transaction
+        # in src/project_patches.py, never through the direct file writers.
+        from src.agent_tools.companion_tools import run_project_edit
+
+        result = await run_project_edit(tool, content, session_id=session_id, owner=owner)
+        desc = (result.get("output") or result.get("error") or tool).split(chr(10))[0][:120]
+    elif tool in ("project_shell", "update_memory"):
+        first_line = content.split(chr(10))[0][:80]
+        desc = f"{tool}: {first_line}"
+        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) \
+            or {"error": f"{tool}: execution failed", "exit_code": 1}
+    elif tool in _MCP_TOOL_MAP:
         first_line = content.split(chr(10))[0][:80]
         desc = f"{tool}: {first_line}"
         result = await _call_mcp_tool(tool, content, progress_cb=progress_cb)

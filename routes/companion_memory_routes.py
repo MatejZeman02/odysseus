@@ -22,6 +22,7 @@ from routes.g1_continuity_routes import _owner
 from src.companion_memory import ArtifactConflict, CompanionMemoryStore, MemoryScopeError
 from src.companion_capabilities import defaults_for_scope
 from src.memory import MemoryStoreUnreadable
+from src.home_brief import OWNER_EDIT, index_accepted_home_brief, write_home_brief
 from src.continuity.contracts import ContractError, PersonalBriefV1, ProjectBriefV1, ThreadCheckpointV1
 from src.continuity.semantic_deriver import (
     SemanticDerivationError, derive_semantic_proposal, semantic_proposal_readiness,
@@ -266,37 +267,9 @@ def _scope(owner: str, session_id: str) -> tuple[str, str | None]:
         db.close()
 
 
-def _index_accepted_home_brief(
-    *, owner: str, session_id: str, scope_kind: str, project_id: str | None,
-    source_id: str, brief: PersonalBriefV1 | object,
-) -> None:
-    """Index only an owner-approved brief, never a heuristic checkpoint.
-
-    Failure is deliberately non-fatal. The accepted brief remains exact context
-    in the continuity store; episodic retrieval is merely an accelerator.
-    """
-    if scope_kind not in {"personal", "project"} or not source_id:
-        return
-    try:
-        payload = brief.to_payload() if hasattr(brief, "to_payload") else {}
-        values = [
-            str(payload.get("summary") or ""),
-            *[str(item) for item in payload.get("confirmed_facts", [])],
-            *[str(item) for item in payload.get("ongoing_goals", [])],
-            *[str(item) for item in payload.get("open_questions", [])],
-            *[str(item) for item in payload.get("current_plans", [])],
-        ]
-        content = "\n".join(value for value in values if value.strip())
-        if not content:
-            return
-        from src.scoped_memory import ScopedMemoryIndex
-        ScopedMemoryIndex().replace_scope_source(
-            owner=owner, scope_kind=scope_kind, project_id=project_id,
-            session_id=session_id, source_kind="accepted_home_brief",
-            source_id=source_id, content=content,
-        )
-    except Exception:
-        logger.warning("Accepted home brief could not be added to episodic index", exc_info=True)
+def _index_accepted_home_brief(**kwargs) -> None:
+    """Kept for callers of the old name, the logic lives in ``src.home_brief``."""
+    index_accepted_home_brief(**kwargs)
 
 
 def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, memory_vector=None) -> APIRouter:
@@ -1961,39 +1934,14 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
             raise HTTPException(409, "Personal brief requires a Personal Advisor session")
         values = payload.model_dump(exclude_none=True)
         session_id = values.pop("session_id")
-        store = ContinuityStore()
-        current = store.latest_personal_brief(owner=owner, session_id=session_id)
-        current_values = current.to_payload() if current else {}
-        current_values.update(values)
-        brief = PersonalBriefV1(
-            owner_id=owner,
-            derivation_status="accepted",
-            derivation_version=1,
-            derivation_method="owner_edit_v1",
-            summary=str(current_values.get("summary") or ""),
-            confirmed_facts=list(current_values.get("confirmed_facts") or []),
-            preferences=list(current_values.get("preferences") or []),
-            ongoing_goals=list(current_values.get("ongoing_goals") or []),
-            commitments=list(current_values.get("commitments") or []),
-            proposals=list(current_values.get("proposals") or []),
-            recurring_themes=list(current_values.get("recurring_themes") or []),
-            failed_approaches=list(current_values.get("failed_approaches") or []),
-            open_questions=list(current_values.get("open_questions") or []),
-            artifact_refs=list(current_values.get("artifact_refs") or []),
-            source_refs=list(current_values.get("source_refs") or []),
-            source_message_ids=list(current_values.get("source_message_ids") or []),
-            source_through_message_id=current_values.get("source_through_message_id") or None,
-        )
-        source_hash = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
         try:
-            result = store.write_personal_brief(owner=owner, session_id=session_id, brief=brief, source_hash=source_hash)
+            result = write_home_brief(
+                owner=owner, scope_kind="personal", session_id=session_id, project_id=None,
+                updates=values, method=OWNER_EDIT,
+            )
         except Exception as exc:
             raise _error(exc) from exc
-        _index_accepted_home_brief(
-            owner=owner, session_id=session_id, scope_kind="personal", project_id=None,
-            source_id=result.id, brief=brief,
-        )
-        return {"revision": result.revision, "brief": brief.to_payload()}
+        return {"revision": result.revision, "brief": result.brief}
 
     @router.post("/project-brief")
     def write_project_brief(payload: ProjectBriefWrite, request: Request):
@@ -2001,40 +1949,15 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
         scope_kind, project_id = _scope(owner, payload.session_id)
         if scope_kind != "project" or not project_id:
             raise HTTPException(409, "Project brief requires a project Companion session")
-        store = ContinuityStore()
-        current = store.latest_project_brief(owner=owner, project_id=project_id)
-        current_values = current.to_payload() if current else {}
         values = payload.model_dump(exclude_none=True)
         values.pop("session_id")
-        current_values.update(values)
-        brief = ProjectBriefV1(
-            project_id=project_id,
-            summary=str(current_values.get("summary") or ""),
-            derived_working_state=dict(current_values.get("derived_working_state") or {}),
-            confirmed_facts=list(current_values.get("confirmed_facts") or []),
-            accepted_decisions=list(current_values.get("accepted_decisions") or []),
-            proposals=list(current_values.get("proposals") or []),
-            failed_approaches=list(current_values.get("failed_approaches") or []),
-            open_questions=list(current_values.get("open_questions") or []),
-            current_plans=list(current_values.get("current_plans") or []),
-            source_refs=list(current_values.get("source_refs") or []),
-            source_session_ids=list(current_values.get("source_session_ids") or []),
-            source_message_ids=list(current_values.get("source_message_ids") or []),
-            source_through_message_id=current_values.get("source_through_message_id") or None,
-            source_revision=current_values.get("source_revision") or None,
-            derivation_status="accepted",
-            derivation_version=1,
-            derivation_method="owner_edit_v1",
-        )
-        source_hash = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
         try:
-            result = store.write_project_brief(owner=owner, brief=brief, source_hash=source_hash)
+            result = write_home_brief(
+                owner=owner, scope_kind="project", session_id=payload.session_id, project_id=project_id,
+                updates=values, method=OWNER_EDIT,
+            )
         except Exception as exc:
             raise _error(exc) from exc
-        _index_accepted_home_brief(
-            owner=owner, session_id=payload.session_id, scope_kind="project", project_id=project_id,
-            source_id=result.id, brief=brief,
-        )
-        return {"revision": result.revision, "brief": brief.to_payload()}
+        return {"revision": result.revision, "brief": result.brief}
 
     return router

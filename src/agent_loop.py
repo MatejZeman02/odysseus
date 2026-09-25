@@ -538,7 +538,7 @@ _DOMAIN_TOOL_MAP = {
     "notes_calendar_tasks": {"manage_notes", "manage_calendar", "manage_tasks"},
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
-    "files": {"bash", "python", "read_file", "write_file", "edit_file", "apply_patch", "todowrite", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs", "sandbox_read"},
+    "files": {"bash", "python", "project_shell", "read_file", "write_file", "edit_file", "apply_patch", "todowrite", "grep", "glob", "ls", "get_workspace", "manage_bg_jobs", "sandbox_read"},
     "system": {"system_observe"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
@@ -761,7 +761,9 @@ If the user asks for a reminder/alarm before the event, pass `reminder_minutes` 
     "pipeline": "- ```pipeline``` — Run a multi-step AI pipeline. Args (JSON) with ordered steps, each specifying a model and prompt. Use for complex workflows.",
     "ui_control": "- ```ui_control``` — Control the UI: toggle tools on/off, OPEN PANELS, open email reply drafts, switch models, change themes. Commands: `toggle <name> on/off` (names: bash/shell, web/search, research, incognito, document_editor/documents), `open_panel <name>` (panels: documents, gallery, email, sessions, notes, memories/brain, skills, settings, cookbook), `open_email_reply <uid> <folder> <reply|reply-all|ai-reply> <body text>` (opens an email compose document pre-filled with body, DOES NOT send; use this for normal “write/draft a reply saying X” requests), `set_mode agent/chat`, `switch_model <name>`, `set_theme <preset>`, `create_theme <name> <bg> <fg> <panel> <border> <accent>` (optional key=val for advanced colors AND background effects: bgPattern=<none|dots|synapse|rain|constellations|perlin-flow|petals|sparkles|embers>, bgEffectColor=#RRGGBB, bgEffectIntensity=<num>, bgEffectSize=<num>, frosted=true|false). \"open documents\" / \"open library\" / \"show gallery\" / \"open inbox\" / \"open notes\" / \"open cookbook\" all map to `open_panel <name>`. Built-in theme presets: dark, light, midnight, paper, cyberpunk, retrowave, forest, ocean, ume, copper, terminal, organs, lavender, gpt, claude, cute. For any other vibe/name, use create_theme.",
     "ask_user": "- ```ask_user``` — Ask the user a multiple-choice question when the task is genuinely ambiguous and the answer changes what you do next (pick an approach, confirm an assumption, choose a target). Args (JSON): {\"question\": \"...\", \"options\": [{\"label\": \"...\", \"description\": \"...\"?}, ...], \"multi\": false?}. 2-6 options. The user gets clickable buttons; calling this ENDS your turn and their choice comes back as your next message. Prefer sensible defaults — only ask when you truly can't proceed well without their input.",
-    "request_capability": "- ```request_capability``` — Ask to enable one disabled chat capability when it is necessary: `web_search`, `workspace_read`, `system_observe`, or `sandbox_read`. Args (JSON): {\"name\":\"web_search\", \"reason\":\"I need current sources.\"}. This shows Enable/Not now buttons, persists only the owner’s choice for this chat, and ends the turn. Request only the one needed.",
+    "request_capability": "- ```request_capability``` — Ask to enable one disabled chat capability when it is necessary: `web_search`, `workspace_read`, `system_observe`, `sandbox_read`, `project_shell`, `project_write`, or `memory_write`. Args (JSON): {\"name\":\"web_search\", \"reason\":\"I need current sources.\"}. This shows Enable/Not now buttons, persists only the owner’s choice for this chat, and ends the turn. Request only the one needed.",
+    "project_shell": "- ```project_shell``` — Run one bash command offline in /workspace, the project with its .git. Args (JSON): {\"command\": \"git log --oneline -5\", \"timeout\": 120}. No network. Writes are discarded when the command ends, so change files with the edit tools.",
+    "update_memory": "- ```update_memory``` — Change one item of this home's memory brief. Args (JSON): {\"action\": \"add\", \"section\": \"confirmed_facts\", \"text\": \"...\"}. For remove or replace, quote the old item exactly in `old_text`.",
     "sandbox_read": "- ```sandbox_read``` — Run a short, read-only command pipeline inside the qualified Podman sandbox against a disposable snapshot of the attached working directory. Args are JSON only: `{\"commands\":[[\"find\",\".\",\"-name\",\"*.md\"],[\"wc\",\"-l\"]]}`. Never use shell text, redirects, loops, absolute paths, or write commands. Prefer structured read/list/search tools for simple requests. If this is unavailable, request the `sandbox_read` capability rather than using host bash.",
     "system_observe": "- ```system_observe``` — Collect fixed, sanitized, read-only system facts. Args are JSON only: `{\"categories\":[\"system\",\"hardware\",\"storage\",\"graphics\",\"network\"]}`; omit categories for the standard snapshot. This is not shell access: it cannot change settings, install packages, read arbitrary files, or access the network. If unavailable, request the `system_observe` capability.",
     "update_plan": "- ```update_plan``` — While executing an approved plan, write the plan back: tick steps done or revise them. Args (JSON): {\"plan\": \"- [x] done step\\n- [ ] next step\"}. Always pass the COMPLETE checklist, not a diff. Call it after finishing each step (mark it `- [x]`) and whenever the user asks to change the plan. The user's docked plan window updates live. Does nothing if there's no active plan.",
@@ -2372,14 +2374,7 @@ def _build_system_prompt(
             _cached_base_prompt_key = cache_key
 
     if companion_scope:
-        agent_prompt += (
-            "\n\nCOMPANION SCOPE: this is a scoped Personal, project, or Computer Help home. "
-            "Global native memory, globally learned skills, and raw cross-chat search are unavailable. "
-            "Use the supplied continuity context, approved context grants, and working artifacts instead; "
-            "never claim that a global memory or another chat was read. When the owner asks to "
-            "remember a lasting fact or decision, do not call a legacy memory tool: explain that "
-            "it can be reviewed as a scoped semantic proposal in Context before becoming home memory."
-        )
+        agent_prompt += _companion_prompt(set(disabled_tools or []))
 
     # Dynamic parts that change per request
     mcp_schemas = []
@@ -2858,7 +2853,11 @@ def _build_system_prompt(
             logger.debug(f"skill injection failed (non-fatal): {_sk_err}")
 
     # Integration descriptions — user-editable fields, must not be in system role.
-    if not suppress_local_context:
+    # A home leaves the catalogue out unless api_call is offered, for the same
+    # reason as the MCP catalogue below.
+    if not suppress_local_context and not (
+        companion_scope and relevant_tools is not None and "api_call" not in relevant_tools
+    ):
         try:
             from src.integrations import get_integrations_prompt
             _integ_prompt = get_integrations_prompt()
@@ -2873,7 +2872,16 @@ def _build_system_prompt(
     # MCP tool descriptions — sourced from external servers, must not be in system role.
     if mcp_mgr:
         try:
-            _mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(mcp_disabled_map or {})
+            _desc_disabled = mcp_disabled_map or {}
+            if companion_scope and relevant_tools is not None:
+                # A home describes only the MCP tools it offers this turn. A
+                # catalogue of tools the model cannot call is outside text
+                # that would cancel the owner's grants for nothing.
+                _desc_disabled = {key: set(value) for key, value in _desc_disabled.items()}
+                for _mcp_tool in mcp_mgr.get_all_tools():
+                    if _mcp_tool["qualified_name"] not in relevant_tools:
+                        _desc_disabled.setdefault(_mcp_tool["server_id"], set()).add(_mcp_tool["name"])
+            _mcp_desc = mcp_mgr.get_tool_descriptions_for_prompt(_desc_disabled)
             if _mcp_desc:
                 _mcp_desc_message = untrusted_context_message(
                     "MCP tools",
@@ -3129,6 +3137,7 @@ def _append_tool_results(
     round_num: int,
     round_reasoning: str = "",
     tool_result_records: Optional[list] = None,
+    run_id: str = "",
 ):
     """Append tool execution results back into the message history for the next LLM round.
 
@@ -3208,6 +3217,10 @@ def _append_tool_results(
                     "source": f"tool result: {tool_name}",
                     "tool_gate_untrusted": should_arm_gate,
                 }
+                if run_id:
+                    # observe_tool_result already classified this result, so
+                    # the per-round rescan must not reclassify it.
+                    result_message["metadata"]["tool_gate_run"] = run_id
             messages.append(result_message)
     else:
         tool_output_text = "\n\n".join(tool_results)
@@ -3236,13 +3249,14 @@ def _append_tool_results(
             )
             for record in tool_result_records
         )
-        messages.append(
-            untrusted_context_message(
-                "tool execution results",
-                tool_output_text,
-                arm_tool_gate=arm_tool_gate,
-            )
+        wrapped = untrusted_context_message(
+            "tool execution results",
+            tool_output_text,
+            arm_tool_gate=arm_tool_gate,
         )
+        if run_id:
+            wrapped["metadata"]["tool_gate_run"] = run_id
+        messages.append(wrapped)
 
 
 def _compute_final_metrics(
@@ -3544,6 +3558,48 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
+def _companion_prompt(disabled: Set[str]) -> str:
+    """Scope rules for a Companion home, written for the tools this turn has.
+
+    The owner's grants decide which of these tools exist, so the prompt names
+    only what the model can call. Naming a missing tool makes models try it.
+    """
+    parts = [
+        "\n\nCOMPANION SCOPE: this is a scoped Personal, project, or Computer Help home. "
+        "Global native memory, globally learned skills, and raw cross-chat search are unavailable. "
+        "Use the supplied continuity context, approved context grants, and working artifacts instead, "
+        "and never claim that a global memory or another chat was read."
+    ]
+    if "update_memory" in disabled:
+        parts.append(
+            "When the owner asks to remember a lasting fact or decision, do not call a legacy memory tool. "
+            "Explain that the owner can switch on Update memory for this chat, or review it as a scoped "
+            "semantic proposal in Context before it becomes home memory."
+        )
+    else:
+        parts.append(
+            "MEMORY: when the owner asks you to remember something, or confirms a fact, decision, "
+            "preference or plan that will matter in later chats, save it with update_memory, one short "
+            "item at a time, and say what you saved. Do not store guesses or passing remarks."
+        )
+    if "project_shell" not in disabled:
+        parts.append(
+            "SHELL: `project_shell` runs bash offline in /workspace, which holds the project and its .git. "
+            "Use it freely for git, search, tests and builds. Files it writes vanish when the command ends."
+        )
+    if "write_file" not in disabled:
+        parts.append(
+            "EDITS: change project files only with write_file, edit_file or apply_patch. Each edit is "
+            "applied at once and recorded as a project change the owner can review and undo."
+        )
+    if not {"read_file", "project_shell"} <= disabled:
+        parts.append(
+            "EVIDENCE: when an answer rests on project files, cite them as path:line. Mark a claim you did "
+            "not read directly as Inferred, and say Unresolved when the files disagree or are incomplete."
+        )
+    return " ".join(parts)
+
+
 def _suppress_global_skills(*, low_signal_turn: bool, companion_scope: bool) -> bool:
     """Decide whether global learned skills may enter the agent prompt."""
     return bool(low_signal_turn or companion_scope)
@@ -3584,6 +3640,7 @@ async def stream_agent_loop(
     history_session=None,
     defer_context_shaping: bool = False,
     companion_scope: bool = False,
+    owner_granted_tools: Optional[Set[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming agent loop generator.
 
@@ -3596,19 +3653,27 @@ async def stream_agent_loop(
       - data: [DONE]                                        (end)
     """
 
+    _inherited_untrusted_context = (
+        bool(external_untrusted_context_seen)
+        or bool(
+            exact_approval
+            and exact_approval.pending.external_untrusted_context_seen
+        )
+        or messages_contain_external_untrusted_context(messages)
+    )
     run_security = ToolRunSecurityContext(
-        external_untrusted_context_seen=(
-            bool(external_untrusted_context_seen)
-            or bool(
-                exact_approval
-                and exact_approval.pending.external_untrusted_context_seen
-            )
-            or messages_contain_external_untrusted_context(messages)
-        ),
+        external_untrusted_context_seen=_inherited_untrusted_context,
         approval_gate_bypassed=bool(
             exact_approval and exact_approval.allow_remaining_actions
         ),
         delegated_credential=bool(delegated_credential),
+        # A token has no owner at the keyboard, so no grant stands in for one.
+        owner_granted_tools=(
+            frozenset() if delegated_credential else frozenset(owner_granted_tools or ())
+        ),
+        # Taint carried in from before this run has no known source, so it
+        # counts as external.
+        non_workspace_context_seen=_inherited_untrusted_context,
     )
     mcp_mgr = get_mcp_manager()
     prep_timings: Dict[str, float] = {}
@@ -6481,7 +6546,8 @@ async def stream_agent_loop(
         _append_tool_results(messages, round_response, converted_calls,
                              tool_results, tool_result_texts, used_native, round_num,
                              round_reasoning=round_reasoning,
-                             tool_result_records=tool_result_records)
+                             tool_result_records=tool_result_records,
+                             run_id=run_security.run_id)
 
         # Emit agent_step event
         yield (

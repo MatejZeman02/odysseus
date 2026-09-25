@@ -48,7 +48,7 @@ def test_malformed_grants_are_discarded_and_changes_are_server_validated():
 def test_sandbox_reason_is_safe_and_explains_qualification_state():
     allowed, reason = can_change(
         SANDBOX_READ,
-        scope_kind="project",
+        scope_kind="computer",
         workspace_attached=True,
         sandbox_ready=False,
         sandbox_reason="containment_probe_incomplete",

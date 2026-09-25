@@ -17,6 +17,7 @@ import stat
 import subprocess
 import tempfile
 import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -241,6 +242,19 @@ def prepare_proposal(workspace: Path, raw_answer: str) -> PreparedProposal:
     root = _project_root(workspace)
     if not (root / ".git").exists():
         raise PatchError("proposal_invalid", "Project is not a Git checkout", 409)
+    normalized = _normalize_changes(root, changes)
+    answer = (raw_answer[:matches[0].start()] + raw_answer[matches[0].end():]).strip()
+    return PreparedProposal(
+        answer=answer or summary,
+        summary=summary,
+        rationale=rationale,
+        base_git_revision=_git_head(root),
+        payload={"version": PATCH_VERSION, "changes": normalized},
+    )
+
+
+def _normalize_changes(root: Path, changes: list[Any]) -> list[dict[str, Any]]:
+    """Validate complete-content changes and record each file's preimage hash."""
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
     total = 0
@@ -281,14 +295,7 @@ def prepare_proposal(workspace: Path, raw_answer: str) -> PreparedProposal:
             "added": added,
             "removed": removed,
         })
-    answer = (raw_answer[:matches[0].start()] + raw_answer[matches[0].end():]).strip()
-    return PreparedProposal(
-        answer=answer or summary,
-        summary=summary,
-        rationale=rationale,
-        base_git_revision=_git_head(root),
-        payload={"version": PATCH_VERSION, "changes": normalized},
-    )
+    return normalized
 
 
 def serialize_change_set(row: ProjectChangeSet, *, include_diff: bool = False) -> dict[str, Any]:
@@ -435,7 +442,14 @@ def _verify_only_targets_changed(before: WorkspaceSnapshot, after: WorkspaceSnap
     return before_other == after_other
 
 
-def apply_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_revision: int) -> dict[str, Any]:
+def apply_change_set(
+    db,
+    row: ProjectChangeSet,
+    workspace: Path,
+    *,
+    expected_revision: int,
+    refuse_dirty: bool = True,
+) -> dict[str, Any]:
     if row.revision != expected_revision or row.status != "proposed":
         raise PatchError("apply_conflict", "Patch is no longer awaiting this approval", 409)
     root = _project_root(workspace)
@@ -452,7 +466,7 @@ def apply_change_set(db, row: ProjectChangeSet, workspace: Path, *, expected_rev
                     "content": base.decode("utf-8") if base is not None else "",
                     "mode": stat.S_IMODE((root / change["path"]).stat().st_mode) if base is not None else 0o600,
                 })
-            if _dirty_tracked_targets(root, changes):
+            if refuse_dirty and _dirty_tracked_targets(root, changes):
                 raise PatchError("apply_conflict", "An affected file has uncommitted changes", 409)
         except PatchError as exc:
             row.status = "stale"
@@ -635,3 +649,72 @@ def recover_applying_change_sets(db) -> int:
             row.revision += 1
     db.commit()
     return recovered
+
+
+AGENT_EDIT_ENDPOINT = "native-agent"
+
+
+def apply_agent_edit(
+    db,
+    *,
+    owner: str,
+    project_id: str,
+    session_id: str | None,
+    model: str,
+    endpoint_id: str,
+    workspace: Path,
+    summary: str,
+    changes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Record and apply one native agent edit through the same transaction.
+
+    The owner switched on "Edit project files" for the chat, which is the
+    approval. Everything else is the Qwen patch path unchanged: validated
+    paths, preimage hashes, a durable rollback journal, atomic writes,
+    verification that nothing outside the targets moved, and Undo through
+    ``rollback_change_set``. One difference: uncommitted changes in a target
+    do not block the edit, because the agent read those very bytes and the
+    preimage hash proves it is replacing exactly them.
+    """
+    root = _project_root(workspace)
+    if not (root / ".git").exists():
+        raise PatchError("proposal_invalid", "Project is not a Git checkout", 409)
+    if not isinstance(changes, list) or not changes or len(changes) > MAX_PATCH_FILES:
+        raise PatchError("proposal_too_large", "An edit must touch between 1 and 20 files", 413)
+    normalized = _normalize_changes(root, changes)
+    row = ProjectChangeSet(
+        id=str(uuid.uuid4()),
+        owner=owner,
+        project_id=project_id,
+        session_id=session_id,
+        source_message_id=None,
+        model=str(model or "")[:200] or "unknown",
+        endpoint_id=str(endpoint_id or "")[:200] or AGENT_EDIT_ENDPOINT,
+        revision=1,
+        status="proposed",
+        summary=str(summary or "")[:500] or "Agent edit",
+        rationale="",
+        base_git_revision=_git_head(root),
+        proposal_json=json.dumps(
+            {"version": PATCH_VERSION, "origin": "agent_edit", "changes": normalized},
+            ensure_ascii=False, separators=(",", ":"),
+        ),
+        result_json="{}",
+    )
+    db.add(row)
+    db.commit()
+    return apply_change_set(db, row, root, expected_revision=row.revision, refuse_dirty=False)
+
+
+def read_project_text(workspace: Path, raw_path: str) -> str | None:
+    """Return a project file's text for an edit, or ``None`` when it is absent.
+
+    Uses the same path rules as the transaction, so an edit cannot be
+    computed from a file the transaction would then refuse to write.
+    """
+    root = _project_root(workspace)
+    _, target = _safe_target(root, raw_path, must_exist=None, allow_missing_parents=True)
+    if not target.exists():
+        return None
+    _, text = _read_text_file(target)
+    return text

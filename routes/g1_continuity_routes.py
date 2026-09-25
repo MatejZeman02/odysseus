@@ -23,7 +23,7 @@ from src.companion_runs import CompanionRunRegistry
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
 from src.qwen_inspection import effective_capability, inspection_readiness
 from src.computer_sandbox import readiness as computer_sandbox_readiness
-from src.companion_capabilities import capability_payload, can_change, defaults_for_scope, normalize
+from src.companion_capabilities import ALL_CAPABILITIES, capability_payload, can_change, defaults_for_scope, normalize
 from src.scoped_turn_service import ReadOnlyScopedTurnService, classify_turn_failure, safe_turn_failure_detail
 
 logger = logging.getLogger(__name__)
@@ -143,11 +143,24 @@ def _endpoint(owner: str, endpoint_id: str, model: str) -> tuple[str, dict]:
         db.close()
 
 
+def _capability_readiness() -> dict:
+    """Readiness facts the capability payload needs, with safe reason codes."""
+    from src.project_shell import readiness as shell_readiness
+
+    sandbox = computer_sandbox_readiness()
+    shell = shell_readiness()
+    return {
+        "sandbox_ready": sandbox.qualified,
+        "sandbox_reason": sandbox.reason,
+        "shell_ready": shell.ready,
+        "shell_reason": shell.reason,
+    }
+
+
 def _session_payload(row: DbSession, project_name: str | None = None, workspace_root: str | None = None) -> dict:
     requested = getattr(row, "capability_profile", None) or "project_read"
     scope_kind = row.scope_kind or "general"
     resolved_workspace = workspace_root or ""
-    sandbox = computer_sandbox_readiness()
     return {
         "id": row.id, "name": row.name, "model": row.model, "endpoint_id": row.endpoint_id,
         "scope_kind": scope_kind, "project_id": row.project_id,
@@ -160,8 +173,7 @@ def _session_payload(row: DbSession, project_name: str | None = None, workspace_
             getattr(row, "capability_grants", None),
             scope_kind=scope_kind,
             workspace_attached=bool(resolved_workspace),
-            sandbox_ready=sandbox.qualified,
-            sandbox_reason=sandbox.reason,
+            **_capability_readiness(),
         ),
         "is_scope_primary": bool(row.is_scope_primary),
     }
@@ -375,7 +387,7 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
         finally:
             db.close()
         home = _get_or_create_home(session_manager, owner=owner, scope_kind="project", project=project,
-                                   endpoint_id=payload.endpoint_id, model=payload.model, harness="qwen")
+                                   endpoint_id=payload.endpoint_id, model=payload.model, harness="native")
         return {"project": {"id": project.id, "name": project.name}, "session": home}
 
     @router.post("/homes/{scope_kind}/open")
@@ -397,7 +409,7 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
         finally:
             db.close()
         return _get_or_create_home(session_manager, owner=owner, scope_kind="project", project=project,
-                                   endpoint_id=endpoint_id, model=model, harness="qwen")
+                                   endpoint_id=endpoint_id, model=model, harness="native")
 
     @router.post("/projects/{project_id}/fork")
     def fork_project(project_id: str, request: Request, endpoint_id: str, model: str):
@@ -414,12 +426,12 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
         sid = str(uuid.uuid4())
         session = session_manager.create_session(sid, f"{project.name} — new thread", endpoint_url, model, owner=owner)
         session.headers, session.scope_kind, session.project_id = headers, "project", project.id
-        session.endpoint_id, session.harness_kind = endpoint_id, "qwen"
+        session.endpoint_id, session.harness_kind = endpoint_id, "native"
         db = SessionLocal()
         try:
             row = db.query(DbSession).filter(DbSession.id == sid).one()
             row.headers, row.scope_kind, row.project_id = headers, "project", project.id
-            row.endpoint_id, row.harness_kind, row.is_scope_primary = endpoint_id, "qwen", False
+            row.endpoint_id, row.harness_kind, row.is_scope_primary = endpoint_id, "native", False
             db.commit()
             return _session_payload(row, project.name, project.workspace_root)
         finally:
@@ -515,7 +527,6 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                 raise HTTPException(404, "Session not found")
             project = db.query(Project).filter(Project.id == row.project_id).first() if row.project_id else None
             workspace_attached = bool(project and project.workspace_root)
-            sandbox = computer_sandbox_readiness()
             return {
                 "session_id": row.id,
                 "scope_kind": row.scope_kind or "general",
@@ -523,8 +534,7 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                     getattr(row, "capability_grants", None),
                     scope_kind=row.scope_kind or "general",
                     workspace_attached=workspace_attached,
-                    sandbox_ready=sandbox.qualified,
-                    sandbox_reason=sandbox.reason,
+                    **_capability_readiness(),
                 ),
             }
         finally:
@@ -541,15 +551,15 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                 raise HTTPException(404, "Session not found")
             project = db.query(Project).filter(Project.id == row.project_id).first() if row.project_id else None
             workspace_attached = bool(project and project.workspace_root)
-            sandbox = computer_sandbox_readiness()
+            readiness = _capability_readiness()
             allowed, reason = can_change(
                 payload.name,
                 scope_kind=row.scope_kind or "general",
                 workspace_attached=workspace_attached,
-                sandbox_ready=sandbox.qualified,
-                sandbox_reason=sandbox.reason,
+                **readiness,
             )
-            if not allowed:
+            # Switching a grant off never needs the thing it grants to exist.
+            if not allowed and (payload.enabled or payload.name not in ALL_CAPABILITIES):
                 raise HTTPException(409, reason)
             grants = normalize(getattr(row, "capability_grants", None), scope_kind=row.scope_kind or "general")
             grants[payload.name] = payload.enabled
@@ -563,8 +573,7 @@ def setup_g1_continuity_routes(session_manager, run_registry: CompanionRunRegist
                 "session_id": row.id,
                 "capabilities": capability_payload(
                     grants, scope_kind=row.scope_kind or "general", workspace_attached=workspace_attached,
-                    sandbox_ready=sandbox.qualified,
-                    sandbox_reason=sandbox.reason,
+                    **readiness,
                 ),
             }
         finally:

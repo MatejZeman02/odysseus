@@ -24,6 +24,7 @@ from .web_tools import WebSearchTool, WebFetchTool
 from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, ApplyPatchTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
 from .sandbox_tools import SandboxedReadTool
 from .system_observe_tools import SystemObserveTool
+from .companion_tools import ShellTool, UpdateMemoryTool
 from .coding_tools import TodoWriteTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
 from .interaction_tools import AskUserTool, RequestCapabilityTool, UpdatePlanTool
@@ -57,6 +58,8 @@ TOOL_HANDLERS = {
     "get_workspace": GetWorkspaceTool().execute,
     "sandbox_read": SandboxedReadTool().execute,
     "system_observe": SystemObserveTool().execute,
+    "project_shell": ShellTool().execute,
+    "update_memory": UpdateMemoryTool().execute,
     "ask_user": AskUserTool().execute,
     "request_capability": RequestCapabilityTool().execute,
     "update_plan": UpdatePlanTool().execute,
@@ -86,6 +89,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "grep", "glob", "ls", "get_workspace", "manage_bg_jobs",
              "sandbox_read",
              "system_observe",
+             "project_shell", "update_memory",
              "create_document", "update_document", "edit_document",
              "search_chats",
              "chat_with_model", "create_session", "list_sessions",

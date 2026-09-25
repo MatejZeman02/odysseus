@@ -541,7 +541,7 @@ def test_companion_agent_prompt_explains_scoped_legacy_tool_boundary():
     messages, _schemas = _build_system_prompt(
         [{"role": "user", "content": "remember this forever"}],
         model="test-model", active_document=None, mcp_mgr=None,
-        disabled_tools={"manage_memory", "manage_skills", "search_chats"},
+        disabled_tools={"manage_memory", "manage_skills", "search_chats", "update_memory"},
         suppress_skills=True, companion_scope=True,
     )
     prompt = "\n".join(str(message.get("content") or "") for message in messages)
@@ -550,6 +550,7 @@ def test_companion_agent_prompt_explains_scoped_legacy_tool_boundary():
     assert "Global native memory" in prompt
     assert "working artifacts" in prompt
     assert "scoped semantic proposal" in prompt
+    assert "save it with update_memory" not in prompt
 
 
 @pytest.mark.asyncio

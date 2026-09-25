@@ -80,6 +80,8 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     # even when a chat grant is switched on.
     "sandbox_read",
     "system_observe",
+    "project_shell",
+    "update_memory",
 }
 
 
@@ -128,6 +130,9 @@ PLAN_MODE_READONLY_TOOLS = {
     "resolve_contact",
     "chat_with_model",
     "ask_teacher",
+    # The Companion project shell runs offline and discards every write, so
+    # it can investigate in plan mode without changing anything.
+    "project_shell",
 }
 
 
@@ -168,6 +173,8 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "bash", "python",
     # Controls shell processes (kill); plan mode can't run bash anyway.
     "manage_bg_jobs",
+    # Writes the Companion home brief.
+    "update_memory",
 }
 
 

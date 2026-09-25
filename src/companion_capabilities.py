@@ -13,8 +13,52 @@ WEB_SEARCH = "web_search"
 WORKSPACE_READ = "workspace_read"
 SYSTEM_OBSERVE = "system_observe"
 SANDBOX_READ = "sandbox_read"
+PROJECT_SHELL = "project_shell"
+PROJECT_WRITE = "project_write"
+MEMORY_WRITE = "memory_write"
 
-ALL_CAPABILITIES = frozenset({WEB_SEARCH, WORKSPACE_READ, SYSTEM_OBSERVE, SANDBOX_READ})
+ALL_CAPABILITIES = frozenset({
+    WEB_SEARCH, WORKSPACE_READ, SYSTEM_OBSERVE, SANDBOX_READ,
+    PROJECT_SHELL, PROJECT_WRITE, MEMORY_WRITE,
+})
+
+# The drawer groups grants by what they let the agent do. "See" grants only
+# read. "Do" grants run or change something, and each one names exactly what.
+SEE_CAPABILITIES = (WORKSPACE_READ, WEB_SEARCH, SYSTEM_OBSERVE, SANDBOX_READ)
+DO_CAPABILITIES = (PROJECT_SHELL, PROJECT_WRITE, MEMORY_WRITE)
+
+_COMPANION_SCOPES = frozenset({"personal", "project", "computer"})
+
+# Which homes offer which grant. A grant outside its homes is neither shown
+# nor honoured, so a stale stored value cannot switch a tool on elsewhere.
+_SCOPES = {
+    WEB_SEARCH: frozenset({"general", "personal", "project", "computer"}),
+    WORKSPACE_READ: frozenset({"project"}),
+    SYSTEM_OBSERVE: frozenset({"general", "personal", "project", "computer"}),
+    # Project chats get the offline ``project_shell`` instead, which needs no image.
+    SANDBOX_READ: frozenset({"general", "personal", "computer"}),
+    PROJECT_SHELL: frozenset({"project"}),
+    PROJECT_WRITE: frozenset({"project"}),
+    MEMORY_WRITE: frozenset({"personal", "project"}),
+}
+
+# The native tools each grant switches on inside a Companion home.
+GRANT_TOOLS = {
+    WORKSPACE_READ: frozenset({"read_file", "grep", "glob", "ls", "get_workspace"}),
+    SYSTEM_OBSERVE: frozenset({"system_observe"}),
+    SANDBOX_READ: frozenset({"sandbox_read"}),
+    PROJECT_SHELL: frozenset({"project_shell"}),
+    PROJECT_WRITE: frozenset({"write_file", "edit_file", "apply_patch"}),
+    MEMORY_WRITE: frozenset({"update_memory"}),
+}
+_TOOL_GRANT = {tool: grant for grant, tools in GRANT_TOOLS.items() for tool in tools}
+PROJECT_EDIT_TOOLS = GRANT_TOOLS[PROJECT_WRITE]
+
+# Host-authority tools no Companion home gets, whatever its grants say. The
+# contained ``project_shell`` replaces them: it runs offline and cannot keep writes.
+_COMPANION_HOST_TOOLS = frozenset({"bash", "python", "manage_bg_jobs"})
+# Companion-only tools have no meaning, and no containment, in ordinary chats.
+_COMPANION_ONLY_TOOLS = frozenset({"project_shell", "update_memory"})
 
 # These legacy tools have no home/project/grant-aware contract.  Companion
 # homes must use the continuity, artifact, and explicit-transfer APIs instead
@@ -53,9 +97,12 @@ _COMPANION_LEGACY_MEMORY_MCP_VERBS = frozenset({"remember", "recall", "forget"})
 
 _LABELS = {
     WEB_SEARCH: "Web search",
-    WORKSPACE_READ: "Working directory",
+    WORKSPACE_READ: "Read project files",
     SYSTEM_OBSERVE: "System inspection",
     SANDBOX_READ: "Sandboxed read-only commands",
+    PROJECT_SHELL: "Run commands",
+    PROJECT_WRITE: "Edit project files",
+    MEMORY_WRITE: "Update memory",
 }
 
 # Readiness reasons are deliberately stable and contain no host paths,
@@ -70,6 +117,10 @@ _SANDBOX_UNAVAILABLE_REASONS = {
     "containment_probe_incomplete": "The sandbox containment check has not passed yet.",
     "sandbox_report_outdated": "The containment check must run again under the current, stricter gates.",
 }
+
+
+def capability_label(name: str) -> str:
+    return _LABELS[name]
 
 
 def sandbox_unavailable_reason(reason: str | None) -> str:
@@ -93,7 +144,78 @@ def defaults_for_scope(scope_kind: str) -> dict[str, bool]:
         # homes must opt in before their chat can receive host observations.
         SYSTEM_OBSERVE: scope == "computer",
         SANDBOX_READ: False,
+        # Commands run offline and every write they make is discarded, so a
+        # project can offer them from the start like reading files.
+        PROJECT_SHELL: scope == "project",
+        # Changing the checkout or durable memory is the owner's call.
+        PROJECT_WRITE: False,
+        MEMORY_WRITE: False,
     }
+
+
+def offered_in_scope(name: str, scope_kind: str) -> bool:
+    """Return whether this kind of chat offers the grant at all."""
+    return str(scope_kind or "general") in _SCOPES.get(name, frozenset())
+
+
+def grant_for_tool(tool: str) -> str | None:
+    """Return the owner grant that controls a native tool in Companion homes."""
+    return _TOOL_GRANT.get(str(tool or ""))
+
+
+def companion_tool_denial(tool: str, scope_kind: str, granted) -> str:
+    """Return why the executor must refuse ``tool``, or ``""`` to allow it.
+
+    ``granted`` is a callable that reads one durable grant, so the executor
+    only queries what a given tool needs. Readiness (sandbox, workspace) is
+    checked by the tool itself at the point of use.
+    """
+    scope = str(scope_kind or "general")
+    name = str(tool or "")
+    if scope not in _COMPANION_SCOPES:
+        if name in _COMPANION_ONLY_TOOLS:
+            return f"Tool '{name}' is only available in Companion homes."
+        return ""
+    if name in _COMPANION_HOST_TOOLS:
+        return (
+            f"Tool '{name}' has host authority and is unavailable in Companion homes. "
+            "Use the contained `project_shell` tool in a project chat."
+        )
+    grant = grant_for_tool(name)
+    if grant is None:
+        return ""
+    if not offered_in_scope(grant, scope):
+        return f"Tool '{name}' is not available in this kind of chat."
+    if not granted(grant):
+        return f"Enable {_LABELS[grant]} in Chat capabilities first."
+    return ""
+
+
+def companion_disabled_tools(
+    grants: dict[str, bool],
+    scope_kind: str,
+    *,
+    workspace_attached: bool,
+    shell_ready: bool,
+) -> set[str]:
+    """Tool schemas to hide for one Companion turn.
+
+    The model never sees a tool it cannot use, and the executor repeats the
+    same decision through ``companion_tool_denial``.
+    """
+    scope = str(scope_kind or "general")
+    if scope not in _COMPANION_SCOPES:
+        return set(_COMPANION_ONLY_TOOLS)
+    disabled = set(_COMPANION_HOST_TOOLS)
+    for grant, tools in GRANT_TOOLS.items():
+        usable = bool(grants.get(grant)) and offered_in_scope(grant, scope)
+        if grant in (WORKSPACE_READ, PROJECT_SHELL, PROJECT_WRITE) and not workspace_attached:
+            usable = False
+        if grant == PROJECT_SHELL and not shell_ready:
+            usable = False
+        if not usable:
+            disabled |= tools
+    return disabled
 
 
 def legacy_tools_denied_for_scope(scope_kind: str) -> frozenset[str]:
@@ -150,26 +272,56 @@ def capability_payload(
     workspace_attached: bool,
     sandbox_ready: bool,
     sandbox_reason: str | None = None,
+    shell_ready: bool = False,
+    shell_reason: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Safe UI/API representation of requested versus effective grants."""
     grants = normalize(raw, scope_kind=scope_kind)
     details: dict[str, dict[str, Any]] = {}
     for name in sorted(ALL_CAPABILITIES):
-        available = True
-        reason = ""
-        if name == WORKSPACE_READ and not workspace_attached:
-            available, reason = False, "Attach a registered project or working directory first"
-        elif name == SANDBOX_READ and not sandbox_ready:
-            available, reason = False, sandbox_unavailable_reason(sandbox_reason)
+        available, reason = _availability(
+            name,
+            scope_kind=scope_kind,
+            workspace_attached=workspace_attached,
+            sandbox_ready=sandbox_ready,
+            sandbox_reason=sandbox_reason,
+            shell_ready=shell_ready,
+            shell_reason=shell_reason,
+        )
         details[name] = {
             "name": name,
             "label": _LABELS[name],
+            "group": "do" if name in DO_CAPABILITIES else "see",
+            "offered": offered_in_scope(name, scope_kind),
             "requested": grants[name],
             "effective": bool(grants[name] and available),
             "available": available,
             "reason": reason,
         }
     return details
+
+
+def _availability(
+    name: str,
+    *,
+    scope_kind: str,
+    workspace_attached: bool,
+    sandbox_ready: bool,
+    sandbox_reason: str | None,
+    shell_ready: bool,
+    shell_reason: str | None,
+) -> tuple[bool, str]:
+    if not offered_in_scope(name, scope_kind):
+        return False, "Not offered in this kind of chat"
+    if name in (WORKSPACE_READ, PROJECT_SHELL, PROJECT_WRITE) and not workspace_attached:
+        return False, "Attach a registered project or working directory first"
+    if name == SANDBOX_READ and not sandbox_ready:
+        return False, sandbox_unavailable_reason(sandbox_reason)
+    if name == PROJECT_SHELL and not shell_ready:
+        from src.project_shell import unavailable_reason
+
+        return False, unavailable_reason(shell_reason)
+    return True, ""
 
 
 def can_change(
@@ -179,12 +331,18 @@ def can_change(
     workspace_attached: bool,
     sandbox_ready: bool,
     sandbox_reason: str | None = None,
+    shell_ready: bool = False,
+    shell_reason: str | None = None,
 ) -> tuple[bool, str]:
     """Validate an owner-requested capability change without trusting the UI."""
     if name not in ALL_CAPABILITIES:
         return False, "Unknown chat capability"
-    if name == WORKSPACE_READ and not workspace_attached:
-        return False, "Attach a registered project or working directory first"
-    if name == SANDBOX_READ and not sandbox_ready:
-        return False, sandbox_unavailable_reason(sandbox_reason)
-    return True, ""
+    return _availability(
+        name,
+        scope_kind=scope_kind,
+        workspace_attached=workspace_attached,
+        sandbox_ready=sandbox_ready,
+        sandbox_reason=sandbox_reason,
+        shell_ready=shell_ready,
+        shell_reason=shell_reason,
+    )

@@ -105,6 +105,20 @@ _register(
     ToolEffect.READ_WORKSPACE,
     result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
 )
+# The Companion project shell runs offline in a throwaway overlay. It can
+# execute project code, but nothing it does leaves the sandbox except its
+# output, so its effect on the owner is a read of their own checkout.
+_register(
+    {"project_shell"},
+    ToolEffect.READ_WORKSPACE,
+    result_integrity=ResultIntegrity.WORKSPACE_UNTRUSTED,
+)
+# Writes the Companion home brief. The result is a fixed status line and
+# never echoes stored memory back to the model.
+_register(
+    {"update_memory"},
+    ToolEffect.WRITE_PRIVATE,
+)
 _register(
     {"system_observe"},
     ToolEffect.READ_PRIVATE,
@@ -689,6 +703,12 @@ class ToolRunSecurityContext:
     # Driven by a bearer API token, not a person at a browser. Privileged
     # tools are refused outright and no approval can lift that.
     delegated_credential: bool = False
+    # Companion tools the owner switched on for this chat (project edits,
+    # memory updates). The grant stands in for a per-action approval while
+    # the run has only read the owner's own checkout. Text from the web, a
+    # stored external message or an earlier approval still needs the owner.
+    owner_granted_tools: frozenset[str] = frozenset()
+    non_workspace_context_seen: bool = False
 
     def authorize_latest_user_request(self, text: Any) -> None:
         """Record narrow authority stated directly in the latest user turn.
@@ -722,6 +742,7 @@ class ToolRunSecurityContext:
             self.approval_gate_bypassed = False
             if messages_contain_external_untrusted_context(message_list):
                 self.external_untrusted_context_seen = True
+                self.non_workspace_context_seen = True
             return
         if any(
             isinstance(message, dict)
@@ -734,6 +755,20 @@ class ToolRunSecurityContext:
             self.approval_gate_bypassed = True
         if messages_contain_external_untrusted_context(message_list):
             self.external_untrusted_context_seen = True
+            # Results this run produced were classified on arrival by
+            # observe_tool_result. Only older or injected context counts as
+            # coming from outside the owner's checkout here.
+            earlier = [
+                message
+                for message in message_list
+                if not (
+                    isinstance(message, dict)
+                    and isinstance(message.get("metadata"), dict)
+                    and message["metadata"].get("tool_gate_run") == self.run_id
+                )
+            ]
+            if messages_contain_external_untrusted_context(earlier):
+                self.non_workspace_context_seen = True
 
     def decision_for(self, tool_name: Any, content: Any = None) -> ToolGateDecision:
         # Checked before the bypasses below, because neither may lift it, and
@@ -756,6 +791,8 @@ class ToolRunSecurityContext:
             if requested_url and requested_url in self.user_authorized_read_urls:
                 return ToolGateDecision(True)
         if tool_name == "create_document" and self.user_authorized_new_document:
+            return ToolGateDecision(True)
+        if tool_name in self.owner_granted_tools and not self.non_workspace_context_seen:
             return ToolGateDecision(True)
         capabilities = capabilities_for_action(tool_name, content)
         blocked_effects = capabilities.effects & POST_EXTERNAL_BLOCKED_EFFECTS
@@ -782,6 +819,13 @@ class ToolRunSecurityContext:
         if not tool_result_should_arm_gate(tool_name, result, content):
             return
         self.external_untrusted_context_seen = True
+        workspace_only = (
+            capabilities_for_action(tool_name, content).result_integrity
+            is ResultIntegrity.WORKSPACE_UNTRUSTED
+            and not (isinstance(result, dict) and result.get("untrusted_content") is True)
+        )
+        if not workspace_only:
+            self.non_workspace_context_seen = True
         if isinstance(tool_name, str) and tool_name not in self.external_sources:
             self.external_sources.append(tool_name)
 

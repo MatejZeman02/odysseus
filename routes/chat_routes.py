@@ -1414,7 +1414,13 @@ def setup_chat_routes(
                     auto_escalated = True
                     _workspace_agent_intent = False
                     logger.info("chat→agent auto-escalation: contextual browser/form follow-up")
-            if not workspace and isinstance(message, str):
+            # A project chat's checkout is its stored binding or nothing. A
+            # path typed in the message must not stand in for a rejected one.
+            if (
+                not workspace
+                and isinstance(message, str)
+                and getattr(sess, "scope_kind", "general") != "project"
+            ):
                 _auto_workspace, _ = _resolve_workspace_from_message_path(request, message)
                 if _auto_workspace:
                     workspace = _auto_workspace
@@ -1619,13 +1625,18 @@ def setup_chat_routes(
         # absent until this chat has explicitly enabled it *and* readiness has
         # admitted the qualified Podman profile.
         from src.companion_capabilities import (
+            GRANT_TOOLS,
+            PROJECT_EDIT_TOOLS,
             SANDBOX_READ,
             SYSTEM_OBSERVE,
             WEB_SEARCH,
+            companion_disabled_tools,
             legacy_tools_denied_for_scope,
             normalize as normalize_chat_capabilities,
         )
+        from src.project_shell import readiness as project_shell_readiness
         _chat_scope_kind = getattr(sess, "scope_kind", "general") or "general"
+        _companion_scope = _chat_scope_kind in {"personal", "project", "computer"}
         _companion_web_enabled = True
         # This denial is independent of any optional sandbox metadata. A
         # malformed/legacy capability record must not re-enable global memory
@@ -1645,18 +1656,33 @@ def setup_chat_routes(
                 disabled_tools.add("sandbox_read")
             if not _chat_capabilities.get(SYSTEM_OBSERVE, False):
                 disabled_tools.add("system_observe")
+            # Companion homes take their file, command and memory tools from
+            # the owner's grants. Only a project binding counts as a
+            # workspace: the server owns it, the browser cannot supply one.
+            disabled_tools.update(companion_disabled_tools(
+                _chat_capabilities,
+                _chat_scope_kind,
+                workspace_attached=bool(_chat_scope_kind == "project" and workspace),
+                shell_ready=project_shell_readiness().ready if _chat_scope_kind == "project" else False,
+            ))
         except Exception:
             # Never turn a capability metadata failure into an unguarded
             # command runner. This tool did not exist for legacy sessions.
             disabled_tools.add("sandbox_read")
             disabled_tools.add("system_observe")
-            _companion_web_enabled = _chat_scope_kind not in {"personal", "project", "computer"}
+            disabled_tools.update({"project_shell", "update_memory"})
+            if _companion_scope:
+                disabled_tools.update(set().union(*GRANT_TOOLS.values()))
+                disabled_tools.update({"bash", "python", "manage_bg_jobs"})
+            _companion_web_enabled = not _companion_scope
         # Only disable bash when the caller *explicitly* set it to a falsy
         # value. When unset (None), defer to per-user privilege checks below.
+        # Companion homes skip this: the browser switch is not their
+        # authority, their grants above already decided every file tool.
         # Web search is per-turn opt-in: either the chat pre-search setting
         # (`use_web=true`) or agent web toggle (`allow_web_search=true`) must
         # explicitly enable it.
-        if allow_bash is not None and str(allow_bash).lower() != "true":
+        if not _companion_scope and allow_bash is not None and str(allow_bash).lower() != "true":
             disabled_tools.update({"bash", "python", "read_file", "write_file", "edit_file"})
         _explicit_web_intent = _explicit_web_intent or bool(_tool_intent and _tool_intent.category == "web")
         _search_enabled = bool(_search_enabled and _companion_web_enabled)
@@ -1670,9 +1696,9 @@ def setup_chat_routes(
             # tools or shell fallbacks. It can only use web_search/web_fetch
             # when the request's explicit web setting enabled them.
             _web_only_disabled = {
-                "bash", "python",
+                "bash", "python", "project_shell", "update_memory",
                 "search_chats", "manage_skills", "manage_memory",
-                "read_file", "write_file", "edit_file",
+                "read_file", "write_file", "edit_file", "apply_patch",
                 "create_document", "edit_document", "update_document",
                 "send_email", "reply_to_email",
                 "manage_notes", "manage_calendar", "manage_tasks",
@@ -1739,7 +1765,7 @@ def setup_chat_routes(
             _privs = request.app.state.auth_manager.get_privileges(_user)
         if _privs:
             if not _privs.get("can_use_bash", True):
-                disabled_tools.update({"bash", "python", "read_file", "write_file"})
+                disabled_tools.update({"bash", "python", "project_shell", "read_file", "write_file"})
             if not _privs.get("can_use_browser", True):
                 disabled_tools.update(_BROWSER_MCP_TOOLS)
             if not _privs.get("can_use_documents", True):
@@ -2528,6 +2554,15 @@ def setup_chat_routes(
                             _forced_tools |= set(_BROWSER_MCP_TOOLS)
                     elif _explicit_browser_intent:
                         _forced_tools = set(_BROWSER_MCP_TOOLS)
+                    if _companion_scope:
+                        # What the owner switched on is always on the table.
+                        # Tool retrieval ranks by the wording of one message
+                        # and would otherwise hide a granted tool the prompt
+                        # tells the model to use. Disabled ones drop out in
+                        # the loop.
+                        _forced_tools = (_forced_tools or set()).union(
+                            *GRANT_TOOLS.values()
+                        )
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -2570,6 +2605,13 @@ def setup_chat_routes(
                         companion_scope=(getattr(sess, "scope_kind", "general") in {
                             "personal", "project", "computer",
                         }),
+                        # Edits and memory updates the owner switched on for
+                        # this chat need no per-action approval after reads
+                        # of the project itself. Anything disabled stays out.
+                        owner_granted_tools=(
+                            set(PROJECT_EDIT_TOOLS | {"update_memory"}) - set(disabled_tools)
+                            if _companion_scope else None
+                        ),
                     ):
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:

@@ -26,6 +26,7 @@ _REQUIRED_NATIVE_TOOL_ARGS = {
     "write_file": ("path",),
     "edit_file": ("path",),
     "apply_patch": ("patch_text", "patchText", "patch"),
+    "project_shell": ("command",),
 }
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,43 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "project_shell",
+            "description": "Run one bash command in an offline sandbox whose working directory is the project at /workspace. Use it for anything a terminal does: git log, git diff, grep, find, running tests, builds, scripts. The project and .git are visible, there is no network, and any file the command writes is thrown away when it ends. To change project files use write_file, edit_file or apply_patch.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "The bash command, run with bash -c in /workspace."},
+                    "timeout": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Seconds before the command is stopped. Default 120."},
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_memory",
+            "description": "Change one item of this home's durable memory brief, the memory the owner sees in Context. Save only what stays true beyond this conversation: a confirmed fact, a decision, a preference, an open question, a plan, or an approach that failed. Quote an existing item exactly to remove or replace it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["add", "remove", "replace"]},
+                    "section": {
+                        "type": "string",
+                        "enum": ["summary", "confirmed_facts", "accepted_decisions", "open_questions",
+                                 "current_plans", "failed_approaches", "preferences", "ongoing_goals", "commitments"],
+                        "description": "Project homes use summary, confirmed_facts, accepted_decisions, open_questions, current_plans, failed_approaches. Personal homes use summary, confirmed_facts, preferences, ongoing_goals, commitments, open_questions, failed_approaches.",
+                    },
+                    "text": {"type": "string", "description": "The new item, or the new summary. One short sentence per item."},
+                    "old_text": {"type": "string", "description": "For remove and replace: the existing item, quoted exactly."},
+                },
+                "required": ["action", "section"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "bash",
             "description": "Run a shell command (full access). Prefer a dedicated tool whenever one fits the job (reading, writing, editing, searching, or listing files); use bash only for what no dedicated tool covers (installs, git, builds, running programs, system info). Do NOT create or edit files via bash redirects/heredocs/sed -- use the dedicated file tools.",
             "parameters": {
@@ -96,7 +134,7 @@ FUNCTION_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "enum": ["web_search", "workspace_read", "system_observe", "sandbox_read"]},
+                    "name": {"type": "string", "enum": ["web_search", "workspace_read", "system_observe", "sandbox_read", "project_shell", "project_write", "memory_write"]},
                     "reason": {"type": "string", "description": "One short, user-facing reason it is needed."},
                 },
                 "required": ["name", "reason"],
