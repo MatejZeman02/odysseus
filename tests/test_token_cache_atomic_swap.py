@@ -14,12 +14,17 @@ import pytest
 
 
 @pytest.fixture
-def app_module(monkeypatch):
+def app_module(monkeypatch, tmp_path):
     """Import app.py with AUTH_ENABLED=true and minimal mocked deps.
 
     Sets up a real AuthManager user ('admin') so normalize_known_username
     resolves the token owner.  Replaces SessionLocal with a MagicMock so
     _refresh_token_cache() can run without a real DB.
+
+    The AuthManager is a fresh one backed by a temporary file. The module
+    level one reads the checkout's real data directory, where setup() is a
+    no-op once an owner exists (so 'admin' never resolves) and, on a fresh
+    checkout, would write a known test password into the real auth file.
     """
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
@@ -29,9 +34,12 @@ def app_module(monkeypatch):
 
     import app as app_mod  # noqa: E402
 
+    from core.auth import AuthManager
+
+    monkeypatch.setattr(app_mod, "auth_manager", AuthManager(str(tmp_path / "auth.json")))
     app_mod.SessionLocal = MagicMock()
     app_mod.logger = MagicMock()
-    app_mod.auth_manager.setup("admin", "TestPass123!")
+    assert app_mod.auth_manager.setup("admin", "TestPass123!")
 
     return app_mod
 

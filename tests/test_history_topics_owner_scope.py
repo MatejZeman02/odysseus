@@ -192,8 +192,8 @@ def test_route_rejects_a_bypassing_middleware_through_the_real_stack(monkeypatch
     The direct-handler test above cannot see this: it hands the route a request
     object built by the test, so it proves the handler's own check and nothing
     about the stack that reaches it. The leak this file exists to pin was a
-    *composition* bug — middleware trusting the peer, route trusting the
-    middleware — so the composition needs its own test.
+    *composition* bug (middleware trusting the peer, route trusting the
+    middleware), so the composition needs its own test.
 
     Driven over ``httpx.ASGITransport`` rather than ``TestClient`` for the
     reason documented in tests/test_notes_fail_closed_auth.py: TestClient's
