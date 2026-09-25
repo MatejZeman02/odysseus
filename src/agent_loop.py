@@ -3598,6 +3598,7 @@ def _companion_prompt(disabled: Set[str], workspace: Optional[str] = None) -> st
     if "project_shell" not in disabled:
         parts.append(
             "SHELL: `project_shell` runs bash offline in /workspace, which holds the project and its .git. "
+            "The project's host path does not exist there, so use paths relative to /workspace. "
             "Use it freely for git, search, tests and builds. Files it writes vanish when the command ends. "
             "Secrets such as .env and private keys are masked, so they read as empty."
         )
@@ -4277,6 +4278,17 @@ async def stream_agent_loop(
             from src.tool_index import ALWAYS_AVAILABLE
             _relevant_tools = set(ALWAYS_AVAILABLE)
         _relevant_tools.update(forced_set)
+
+    # A home's prompt names request_capability as the way to ask for a
+    # switched-off grant. Without its schema the model guesses the arguments.
+    if (
+        companion_scope
+        and not guide_only
+        and _relevant_tools is not None
+        and not _caller_selected_tools
+        and "request_capability" not in disabled_tools
+    ):
+        _relevant_tools.add("request_capability")
 
     if not guide_only and _relevant_tools is not None:
         _relevant_tools = _expand_browser_mcp_tools(_relevant_tools, mcp_mgr)

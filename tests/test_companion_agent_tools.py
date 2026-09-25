@@ -463,6 +463,27 @@ def test_forced_companion_tools_are_offered_when_retrieval_misses_them(monkeypat
     assert "write_file" not in offered[0]
 
 
+def test_a_companion_home_can_always_call_request_capability(monkeypatch, tmp_path):
+    import src.tool_index as tool_index
+
+    class _Retrieval:
+        def get_tools_for_query(self, _query, _limit):
+            return {"read_file"}
+
+    monkeypatch.setattr(tool_index, "get_tool_index", lambda: _Retrieval())
+    edits = {"write_file", "edit_file", "apply_patch"}
+
+    _executed, home, _chunks = _run_agent(
+        monkeypatch, [], workspace=str(tmp_path), forced_tools=edits, disabled_tools=set(edits),
+    )
+    _executed, ordinary, _chunks = _run_agent(
+        monkeypatch, [], workspace=str(tmp_path), companion_scope=False,
+    )
+
+    assert "request_capability" in home[0]
+    assert "request_capability" not in ordinary[0]
+
+
 def test_a_rename_request_does_not_bring_app_administration_into_a_companion_home(monkeypatch, tmp_path):
     import src.tool_index as tool_index
 
@@ -534,6 +555,8 @@ def test_a_project_home_says_which_grants_are_off_and_how_to_ask(tmp_path):
     everything = _prompt(base, workspace=str(tmp_path))
     assert "EDITS: change project files only with" in everything
     assert "request_capability with name project_write" not in everything
+    # The shell cannot see the host path the coding rules name.
+    assert "paths relative to /workspace" in everything
 
     read_only = _prompt(base | edits | {"project_shell"}, workspace=str(tmp_path))
     assert "request_capability with name project_write" in read_only
