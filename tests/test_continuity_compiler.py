@@ -408,3 +408,17 @@ def test_checkpoint_mount_is_labeled_context_not_destination_transcript(monkeypa
     prompt = _continuity_prompt_message(bundle)
     assert "mounted_checkpoints_read_only" in prompt["content"]
     assert "Keep each mount attributable" in prompt["content"]
+
+
+def test_semantic_source_span_always_ends_at_the_newest_message():
+    from src.continuity import semantic_proposals
+
+    messages = [
+        {"id": "old", "role": "user", "content": "x" * 40_000},
+        {"id": "mid", "role": "assistant", "content": "y" * 7_000},
+        {"id": "new", "role": "user", "content": "z" * 2_000},
+    ]
+
+    selected = semantic_proposals.bounded_source(messages)
+
+    assert [message["id"] for message in selected] == ["mid", "new"]

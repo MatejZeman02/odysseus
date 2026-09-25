@@ -1052,7 +1052,16 @@ class ContinuityStore:
 
     @staticmethod
     def _merge(existing: list[str], incoming: list[str]) -> list[str]:
-        return list(dict.fromkeys([*existing, *incoming]))[:30]
+        """Union two lists, newest last, capped at the 30 most recent.
+
+        Each value keeps its latest position, so re-promoting an entry moves
+        it forward instead of leaving it where it first appeared. Capping
+        from the front matters for source ids: a brief's
+        source_through_message_id is the newest id and must stay in the
+        list, and dropping it made every promotion past 30 messages fail.
+        """
+        merged = list(reversed(dict.fromkeys(reversed([*existing, *incoming]))))
+        return merged[-30:]
 
     def _active_brief(self, db, *, owner: str, kind: str, session_id: Optional[str] = None, project_id: Optional[str] = None):
         return self._preferred_brief_artifact(
@@ -1185,6 +1194,10 @@ class ContinuityStore:
             ContinuityArtifact.kind == kind,
             ContinuityArtifact.source_through_message_id == source_through_message_id,
             ContinuityArtifact.source_hash == source_hash,
+            # A superseded row was replaced by something newer. Writing its
+            # content again is a new revision (an owner going back to an
+            # earlier wording), not a retry of that old write.
+            ContinuityArtifact.status != "superseded",
         )
         query = query.filter(ContinuityArtifact.session_id == session_id) if session_id else query.filter(ContinuityArtifact.project_id == project_id)
         existing = query.order_by(ContinuityArtifact.revision.desc()).first()

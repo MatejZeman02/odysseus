@@ -18,23 +18,28 @@ _PROPOSAL_FIELDS = frozenset({
 
 
 def bounded_source(messages: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Keep a recent source span without splitting individual messages."""
+    """Keep a recent source span without splitting individual messages.
+
+    Walk from the newest message back and stop at the first one that does
+    not fit, so the span is contiguous and always ends at the latest turn.
+    """
+    window = list(messages)[-MAX_SOURCE_MESSAGES:]
+    for message in window:
+        if not str(message.get("id") or "") or not str(message.get("role") or ""):
+            raise ContractError("semantic proposal source requires durable message IDs and roles")
     selected: list[dict[str, Any]] = []
     remaining = MAX_SOURCE_CHARS
-    for message in list(messages)[-MAX_SOURCE_MESSAGES:]:
-        message_id = str(message.get("id") or "")
-        role = str(message.get("role") or "")
+    for message in reversed(window):
         content = str(message.get("content") or "")
-        if not message_id or not role:
-            raise ContractError("semantic proposal source requires durable message IDs and roles")
         if len(content) > remaining:
             break
-        selected.append({"id": message_id, "role": role, "content": content})
+        selected.append({"id": str(message["id"]), "role": str(message["role"]), "content": content})
         remaining -= len(content)
         if remaining <= 0:
             break
     if not selected:
         raise ContractError("semantic proposal source is empty or exceeds the context limit")
+    selected.reverse()
     return selected
 
 

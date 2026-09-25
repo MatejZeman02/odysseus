@@ -385,3 +385,57 @@ def test_promotion_rejects_stale_source_without_changing_home_state(store):
         )
     assert continuity.latest_personal_brief(owner="alice", session_id="alice-session") is None
     assert continuity.semantic_proposal(owner="alice", proposal_id=written.id).status == "active"
+
+
+def test_promotion_keeps_working_after_thirty_source_messages(store):
+    """The newest source id must survive the 30-entry cap, or the brief is invalid."""
+    continuity, local_session = store
+    project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")
+    continuity.bind_session(owner="alice", session_id="alice-session", scope_kind="project", project_id=project_id)
+
+    def promote(batch, fact):
+        source_ids, source_hash = _source_hash(local_session, "alice-session", batch)
+        proposal = SemanticCheckpointProposalV1(
+            session_id="alice-session", scope_kind="project", project_id=project_id,
+            facts=[fact], source_message_ids=source_ids,
+            source_through_message_id=source_ids[-1], source_hash=source_hash,
+            derivation_model="selected-model",
+        )
+        written = continuity.write_semantic_proposal(owner="alice", proposal=proposal)
+        return continuity.promote_semantic_proposal(
+            owner="alice", proposal_id=written.id, expected_revision=written.revision,
+            selections={"facts": [0]},
+        )[2]
+
+    first = promote([(f"a{i:02d}", "user", f"note {i}") for i in range(31)], "First fact")
+    assert first.source_message_ids[-1] == "a30"
+    assert len(first.source_message_ids) == 30
+
+    # A brief already holding 30 ids must still accept the next promotion.
+    second = promote([("b00", "user", "later note")], "Second fact")
+    assert second.source_through_message_id == "b00"
+    assert second.confirmed_facts == ["First fact", "Second fact"]
+
+
+def test_returning_to_an_earlier_owner_wording_is_a_new_revision(store):
+    """Edit A, then B, then A again: the active brief must be A, not B."""
+    import hashlib
+
+    continuity, _ = store
+    project_id = continuity.create_project(owner="alice", name="Odysseus", workspace_root="/work/odysseus")
+
+    def edit(summary):
+        brief = ProjectBriefV1(
+            project_id=project_id, summary=summary, derivation_status="accepted",
+            derivation_version=1, derivation_method="owner_edit_v1",
+        )
+        digest = hashlib.sha256(json.dumps(brief.to_payload(), sort_keys=True).encode()).hexdigest()
+        return continuity.write_project_brief(owner="alice", brief=brief, source_hash=digest)
+
+    first, second, third = edit("A"), edit("B"), edit("A")
+
+    assert (first.revision, second.revision, third.revision) == (1, 2, 3)
+    assert third.created is True
+    assert continuity.latest_project_brief(owner="alice", project_id=project_id).summary == "A"
+    # A retry of the write that is currently active is still idempotent.
+    assert edit("A").created is False

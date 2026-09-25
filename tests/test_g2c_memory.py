@@ -1087,3 +1087,17 @@ def test_personal_artifact_edit_does_not_arm_the_external_write_approval_gate():
     ordinary_security = ToolRunSecurityContext()
     ordinary_security.observe_messages(ordinary_prompt)
     assert not ordinary_security.decision_for("edit_document").allowed
+
+
+def test_repeated_undo_walks_back_instead_of_flipping(store):
+    _continuity, memory = store
+    first = memory.write_personal_artifact(owner="alice", session_id="personal", path="drafts/plan.md", content="one")
+    memory.write_personal_artifact(owner="alice", session_id="personal", path="drafts/plan.md", content="two", expected_revision=1)
+    memory.write_personal_artifact(owner="alice", session_id="personal", path="drafts/plan.md", content="three", expected_revision=2)
+
+    back_one = memory.undo_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=3)
+    back_two = memory.undo_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=back_one["revision"])
+
+    assert (back_one["content"], back_two["content"]) == ("two", "one")
+    with pytest.raises(MemoryScopeError, match="no prior revision"):
+        memory.undo_personal_artifact(owner="alice", artifact_id=first["id"], expected_revision=back_two["revision"])

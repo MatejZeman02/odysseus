@@ -57,6 +57,29 @@ def normalise_artifact_path(path: str) -> str:
     return candidate.as_posix()
 
 
+
+def _undo_target(revisions_newest_first) -> "WorkingArtifactRevision | None":
+    """Return the revision one more Undo should restore.
+
+    Each Undo records the content it replaced as an ``undo`` row. Taking the
+    newest row blindly therefore restored the text the last Undo had just
+    removed, and a second Undo flipped back instead of walking further. An
+    ``undo`` row cancels the change below it, and a ``delete`` row records a
+    status change rather than an edit, so both are skipped.
+    """
+    cancelled = 0
+    for revision in revisions_newest_first:
+        if revision.action == "delete":
+            continue
+        if revision.action == "undo":
+            cancelled += 1
+            continue
+        if cancelled:
+            cancelled -= 1
+            continue
+        return revision
+    return None
+
 def _summary(content: str) -> str:
     compact = " ".join(content.strip().split())
     return compact[:280] + ("…" if len(compact) > 280 else "")
@@ -655,7 +678,12 @@ class CompanionMemoryStore:
                 raise MemoryScopeError("Artifact was not found")
             if row.revision != expected_revision:
                 raise ArtifactConflict("Artifact changed elsewhere; reload it before Undo")
-            prior = db.query(WorkingArtifactRevision).filter(WorkingArtifactRevision.artifact_id == row.id).order_by(WorkingArtifactRevision.revision.desc()).first()
+            prior = _undo_target(
+                db.query(WorkingArtifactRevision)
+                .filter(WorkingArtifactRevision.artifact_id == row.id)
+                .order_by(WorkingArtifactRevision.revision.desc())
+                .all()
+            )
             if not prior:
                 raise MemoryScopeError("This artifact has no prior revision")
             db.add(WorkingArtifactRevision(id=uuid.uuid4().hex, artifact_id=row.id, revision=row.revision,
