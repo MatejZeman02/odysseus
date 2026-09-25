@@ -41,6 +41,10 @@ class BriefEditError(ValueError):
     """A memory edit the caller can correct. The message is safe to show."""
 
 
+class BriefAlreadyHolds(BriefEditError):
+    """The item is already saved, so the edit changes nothing."""
+
+
 @dataclass(frozen=True)
 class BriefWrite:
     revision: int
@@ -185,7 +189,7 @@ def agent_edit(
     if action == "add":
         item = _clean_item(text)
         if item in items:
-            raise BriefEditError("That item is already in memory.")
+            raise BriefAlreadyHolds("That item is already in memory.")
         if len(items) >= MAX_ITEMS:
             raise BriefEditError(f"`{section}` already holds {MAX_ITEMS} items. Remove or merge one first.")
         items.append(item)

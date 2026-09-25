@@ -299,6 +299,21 @@ def test_update_memory_writes_accepted_revisions_marked_as_agent_edits(project, 
     assert "Prefers" not in second["output"]
 
 
+def test_saving_a_fact_that_is_already_in_memory_is_not_a_failure(project, monkeypatch):
+    writes = []
+    monkeypatch.setattr(home_brief_module, "index_accepted_home_brief", lambda **kwargs: writes.append(kwargs))
+    fact = {"action": "add", "section": "preferences", "text": "Prefers short answers"}
+    assert _memory("personal", fact)["exit_code"] == 0
+
+    again = _memory("personal", fact)
+    assert again["exit_code"] == 0
+    assert "Already in memory" in again["output"]
+    # No second revision was written.
+    assert len(writes) == 1
+    current = store_module.ContinuityStore().latest_personal_brief(owner="alice", session_id="personal")
+    assert current.preferences == ["Prefers short answers"]
+
+
 def test_update_memory_rejects_unknown_sections_and_other_owners(project, monkeypatch):
     monkeypatch.setattr(home_brief_module, "index_accepted_home_brief", lambda **_kwargs: None)
     wrong = _memory("chat", {"action": "add", "section": "preferences", "text": "x"})

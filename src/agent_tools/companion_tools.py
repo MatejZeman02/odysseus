@@ -137,7 +137,7 @@ class ShellTool:
 
 class UpdateMemoryTool:
     async def execute(self, content: str, ctx: dict) -> dict:
-        from src.home_brief import BriefEditError, agent_edit
+        from src.home_brief import BriefAlreadyHolds, BriefEditError, agent_edit
 
         args = _args(content)
         if not args:
@@ -157,6 +157,10 @@ class UpdateMemoryTool:
                 text=args.get("text", ""),
                 old_text=args.get("old_text", ""),
             )
+        except BriefAlreadyHolds:
+            # Not a failure: the owner's fact is saved, and a red result
+            # would only invite the model to try again.
+            return {"output": "Already in memory, nothing changed.", "exit_code": 0}
         except BriefEditError as error:
             return {"error": f"update_memory: {error}", "exit_code": 1}
         except Exception:
