@@ -557,6 +557,7 @@ def test_a_project_home_says_which_grants_are_off_and_how_to_ask(tmp_path):
     assert "request_capability with name project_write" not in everything
     # The shell cannot see the host path the coding rules name.
     assert "paths relative to /workspace" in everything
+    assert "commits it makes vanish" in everything
 
     read_only = _prompt(base | edits | {"project_shell"}, workspace=str(tmp_path))
     assert "request_capability with name project_write" in read_only

@@ -3599,7 +3599,7 @@ def _companion_prompt(disabled: Set[str], workspace: Optional[str] = None) -> st
         parts.append(
             "SHELL: `project_shell` runs bash offline in /workspace, which holds the project and its .git. "
             "The project's host path does not exist there, so use paths relative to /workspace. "
-            "Use it freely for git, search, tests and builds. Files it writes vanish when the command ends. "
+            "Use it freely for git, search, tests and builds. Files it writes and commits it makes vanish when the command ends, so never report one as done. "
             "Secrets such as .env and private keys are masked, so they read as empty."
         )
     elif workspace:
