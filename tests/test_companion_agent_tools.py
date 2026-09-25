@@ -361,7 +361,7 @@ def test_web_content_puts_granted_edits_back_behind_approval():
     assert context.decision_for("write_file", '{"path": "a"}').allowed is False
 
 
-def _run_agent(monkeypatch, calls, **kwargs):
+def _run_agent(monkeypatch, calls, prompt="Rename the README title.", **kwargs):
     """Drive one agent run whose model makes ``calls`` in order, then answers."""
     import src.agent_loop as agent_loop
 
@@ -405,7 +405,7 @@ def _run_agent(monkeypatch, calls, **kwargs):
             # A provider known for native tool calls, so schemas are sent.
             "https://api.openai.com/v1",
             "gpt-test",
-            [{"role": "user", "content": "Rename the README title."}],
+            [{"role": "user", "content": prompt}],
             max_rounds=len(calls) + 1,
             fallbacks=[],
             _is_teacher_run=True,
@@ -501,6 +501,33 @@ def test_a_rename_request_does_not_bring_app_administration_into_a_companion_hom
     assert not companion[0] & admin
     # Ordinary upstream chat keeps its keyword behaviour.
     assert admin <= ordinary[0]
+
+
+def test_a_project_home_keeps_its_project_tools_on_a_follow_up_that_is_not_about_code(monkeypatch, tmp_path):
+    import src.tool_index as tool_index
+
+    # What retrieval picked in a real run for the message the Enable button sends.
+    personal = {"manage_tasks", "manage_calendar", "manage_notes", "ui_control"}
+
+    class _Retrieval:
+        def get_tools_for_query(self, _query, _limit):
+            return set(personal)
+
+    monkeypatch.setattr(tool_index, "get_tool_index", lambda: _Retrieval())
+    follow_up = "I enabled Edit project files. Continue the previous task now."
+    edits = {"write_file", "edit_file", "apply_patch"}
+
+    _executed, home, _chunks = _run_agent(
+        monkeypatch, [], prompt=follow_up, workspace=str(tmp_path), forced_tools=edits,
+    )
+    _executed, ordinary, _chunks = _run_agent(
+        monkeypatch, [], prompt=follow_up, workspace=str(tmp_path), companion_scope=False,
+    )
+
+    assert {"read_file", "grep", "get_workspace"} | edits <= home[0]
+    assert not home[0] & personal
+    # Ordinary upstream chat keeps what retrieval picked.
+    assert personal & ordinary[0]
 
 
 def test_bearer_token_runs_never_get_companion_tools():

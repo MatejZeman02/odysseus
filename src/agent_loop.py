@@ -4226,11 +4226,18 @@ async def stream_agent_loop(
                 )
         if "ui" in (_intent.get("domains") or set()):
             _relevant_tools.add("ui_control")
+        # A project home is always about its checkout, and its prompt already
+        # tells the model to leave calendar, notes and UI panels alone. A
+        # follow-up such as "continue the previous task" used to pull those
+        # tools in through retrieval instead of the project's own.
         if (
             (
                 (
                     workspace
-                    and _looks_like_workspace_coding_request(_retrieval_query or _last_user)
+                    and (
+                        companion_scope
+                        or _looks_like_workspace_coding_request(_retrieval_query or _last_user)
+                    )
                 )
                 or _looks_like_local_computer_request(_retrieval_query or _last_user)
             )
