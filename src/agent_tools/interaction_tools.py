@@ -1,7 +1,7 @@
 import json
 import logging
 
-from src.companion_capabilities import ALL_CAPABILITIES, capability_label
+from src.companion_capabilities import ALL_CAPABILITIES, capability_label, grant_for_tool
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +69,13 @@ class RequestCapabilityTool:
             parsed = {}
         name = str(parsed.get("name") or "").strip() if isinstance(parsed, dict) else ""
         reason = str(parsed.get("reason") or "").strip() if isinstance(parsed, dict) else ""
+        # Models often name the tool they want rather than the grant behind it.
+        name = grant_for_tool(name) or name
         if name not in ALL_CAPABILITIES:
-            return "request_capability: invalid", {"error": "Unknown chat capability", "exit_code": 1}
+            return "request_capability: invalid", {
+                "error": "Unknown chat capability. Use one of: " + ", ".join(sorted(ALL_CAPABILITIES)),
+                "exit_code": 1,
+            }
         label = capability_label(name)
         question = f"Enable {label} for this chat?"
         if reason:

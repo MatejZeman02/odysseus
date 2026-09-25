@@ -527,6 +527,36 @@ def test_a_project_home_is_not_told_to_avoid_the_memory_it_was_granted(tmp_path)
     assert forbids_memory(ordinary)
 
 
+def test_a_project_home_says_which_grants_are_off_and_how_to_ask(tmp_path):
+    edits = {"write_file", "edit_file", "apply_patch"}
+    base = {"manage_memory", "bash", "python"}
+
+    everything = _prompt(base, workspace=str(tmp_path))
+    assert "EDITS: change project files only with" in everything
+    assert "request_capability with name project_write" not in everything
+
+    read_only = _prompt(base | edits | {"project_shell"}, workspace=str(tmp_path))
+    assert "request_capability with name project_write" in read_only
+    assert "request_capability with name project_shell" in read_only
+    # No rule tells the model to edit with tools it was not given.
+    assert not [line for line in read_only.splitlines() if "apply_patch" in line and "Change" in line]
+
+    # Ordinary workspace chat keeps its upstream editing rule.
+    ordinary = _prompt(set(), workspace=str(tmp_path), companion_scope=False)
+    assert "Change repo files with `apply_patch`" in ordinary
+
+
+def test_a_call_to_a_switched_off_grant_says_how_to_ask_for_it(monkeypatch, tmp_path):
+    executed, _offered, chunks = _run_agent(
+        monkeypatch,
+        [("write_file", {"path": "notes.md", "content": "x"})],
+        workspace=str(tmp_path),
+        disabled_tools={"write_file", "edit_file", "apply_patch"},
+    )
+    assert "write_file" not in executed
+    assert "request_capability with name project_write" in "".join(chunks)
+
+
 def test_native_shell_call_reaches_the_tool_as_json():
     from src.tool_schemas import FUNCTION_TOOL_SCHEMAS, function_call_to_tool_block
 

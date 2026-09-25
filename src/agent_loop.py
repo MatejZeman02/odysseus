@@ -1249,6 +1249,11 @@ def _workspace_coding_rules(workspace: Optional[str], companion_scope: bool = Fa
     avoid = "email, calendar, notes, documents, gallery, or UI panels" if companion_scope else (
         "email, calendar, notes, memory, documents, gallery, or UI panels"
     )
+    # A home's edit tools depend on the owner's grant, and its own rules say
+    # how to edit or how to ask. Naming tools the model lacks sent it hunting.
+    edit_rule = "" if companion_scope else (
+        "- Change repo files with `apply_patch` for related source edits, `edit_file` for one exact replacement, or `write_file` for new/full files. Do not use `create_document`, shell redirects, heredocs, or `sed -i` to modify repo files.\n"
+    )
     return (
         "\n\n## Workspace coding mode\n"
         f"- Active workspace: `{workspace}`. Treat relative paths as relative to this folder.\n"
@@ -1256,7 +1261,7 @@ def _workspace_coding_rules(workspace: Optional[str], companion_scope: bool = Fa
         "- Work from the real filesystem and command output. Inspect before editing.\n"
         "- Start by orienting with `get_workspace` plus `grep`/`glob`/`ls`/`read_file`; prefer targeted reads over dumping whole files.\n"
         "- For multi-step coding work, call `todowrite` and keep the task list current.\n"
-        "- Change repo files with `apply_patch` for related source edits, `edit_file` for one exact replacement, or `write_file` for new/full files. Do not use `create_document`, shell redirects, heredocs, or `sed -i` to modify repo files.\n"
+        + edit_rule +
         "- For code repair tasks, find the canonical helper, parser, validator, service, or boundary function responsible for the behavior and patch it there when possible. Hidden tests often call helpers directly.\n"
         "- If output is huge, use `rg`, `grep`, `head`, `tail`, focused `sed -n`, or scripts that summarize only relevant parts. Do not flood the context with full logs or full files.\n"
         "- If a command fails, use the failure output to choose the next diagnostic or patch. Do not silently stop or claim success.\n"
@@ -2380,7 +2385,7 @@ def _build_system_prompt(
             _cached_base_prompt_key = cache_key
 
     if companion_scope:
-        agent_prompt += _companion_prompt(set(disabled_tools or []))
+        agent_prompt += _companion_prompt(set(disabled_tools or []), workspace)
 
     # Dynamic parts that change per request
     mcp_schemas = []
@@ -3564,11 +3569,13 @@ def _detect_runaway_call(call_freq, threshold=15):
     return sig.split(":", 1)[0] if sig else None
 
 
-def _companion_prompt(disabled: Set[str]) -> str:
+def _companion_prompt(disabled: Set[str], workspace: Optional[str] = None) -> str:
     """Scope rules for a Companion home, written for the tools this turn has.
 
     The owner's grants decide which of these tools exist, so the prompt names
     only what the model can call. Naming a missing tool makes models try it.
+    A project grant that is off is named once with the way to ask for it,
+    because a model left to guess spends its whole turn looking for one.
     """
     parts = [
         "\n\nCOMPANION SCOPE: this is a scoped Personal, project, or Computer Help home. "
@@ -3591,12 +3598,24 @@ def _companion_prompt(disabled: Set[str]) -> str:
     if "project_shell" not in disabled:
         parts.append(
             "SHELL: `project_shell` runs bash offline in /workspace, which holds the project and its .git. "
-            "Use it freely for git, search, tests and builds. Files it writes vanish when the command ends."
+            "Use it freely for git, search, tests and builds. Files it writes vanish when the command ends. "
+            "Secrets such as .env and private keys are masked, so they read as empty."
+        )
+    elif workspace:
+        parts.append(
+            "COMMANDS are switched off in this chat. If a test or build run is needed, call "
+            "request_capability with name project_shell once."
         )
     if "write_file" not in disabled:
         parts.append(
             "EDITS: change project files only with write_file, edit_file or apply_patch. Each edit is "
             "applied at once and recorded as a project change the owner can review and undo."
+        )
+    elif workspace:
+        parts.append(
+            "EDITS are switched off in this chat, and nothing the shell writes lasts, so do not look for "
+            "another way to change files. Give the change as a diff in your answer, and call "
+            "request_capability with name project_write once if the owner should apply it."
         )
     if not {"read_file", "project_shell"} <= disabled:
         parts.append(
@@ -5940,6 +5959,14 @@ async def stream_agent_loop(
                         f"Tool '{block.tool_type}' is disabled by the current "
                         "request policy."
                     )
+                    from src.companion_capabilities import capability_label, grant_for_tool
+                    grant = grant_for_tool(block.tool_type) if companion_scope else None
+                    if grant:
+                        reason = (
+                            f"{capability_label(grant)} is switched off in this chat. If the task "
+                            f"needs it, call request_capability with name {grant} once. Otherwise "
+                            "finish without it."
+                        )
                 desc = f"{block.tool_type}: BLOCKED"
                 result = {
                     "error": reason,
