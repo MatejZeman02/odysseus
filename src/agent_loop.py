@@ -1240,13 +1240,19 @@ def _local_computer_rules() -> str:
     )
 
 
-def _workspace_coding_rules(workspace: Optional[str]) -> str:
+def _workspace_coding_rules(workspace: Optional[str], companion_scope: bool = False) -> str:
     if not workspace:
         return ""
+    # A Companion home's memory is its own scoped brief, which the owner
+    # grants per chat and the COMPANION SCOPE rules govern. Listing it here
+    # as off limits made models refuse to save a settled project fact.
+    avoid = "email, calendar, notes, documents, gallery, or UI panels" if companion_scope else (
+        "email, calendar, notes, memory, documents, gallery, or UI panels"
+    )
     return (
         "\n\n## Workspace coding mode\n"
         f"- Active workspace: `{workspace}`. Treat relative paths as relative to this folder.\n"
-        "- This mode is for coding, debugging, shell, file, build, benchmark, and repo tasks. Do not use personal-assistant tools like email, calendar, notes, memory, documents, gallery, or UI panels for workspace work.\n"
+        f"- This mode is for coding, debugging, shell, file, build, benchmark, and repo tasks. Do not use personal-assistant tools like {avoid} for workspace work.\n"
         "- Work from the real filesystem and command output. Inspect before editing.\n"
         "- Start by orienting with `get_workspace` plus `grep`/`glob`/`ls`/`read_file`; prefer targeted reads over dumping whole files.\n"
         "- For multi-step coding work, call `todowrite` and keep the task list current.\n"
@@ -2717,7 +2723,7 @@ def _build_system_prompt(
             pass
 
     if workspace and not suppress_local_context:
-        agent_prompt += _workspace_coding_rules(workspace)
+        agent_prompt += _workspace_coding_rules(workspace, companion_scope)
     elif (
         relevant_tools
         and not suppress_local_context

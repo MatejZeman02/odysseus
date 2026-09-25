@@ -493,12 +493,12 @@ def test_bearer_token_runs_never_get_companion_tools():
 
 # -- what the model is told -------------------------------------------------
 
-def _prompt(disabled):
+def _prompt(disabled, **kwargs):
     from src.agent_loop import _build_system_prompt
 
     messages, _schemas = _build_system_prompt(
         [{"role": "user", "content": "hello"}], model="test-model", active_document=None,
-        mcp_mgr=None, disabled_tools=disabled, suppress_skills=True, companion_scope=True,
+        mcp_mgr=None, disabled_tools=disabled, suppress_skills=True, **{"companion_scope": True, **kwargs},
     )
     return "\n".join(str(message.get("content") or "") for message in messages)
 
@@ -512,6 +512,19 @@ def test_prompt_names_only_the_tools_the_owner_switched_on():
                          "write_file", "edit_file", "apply_patch"})
     assert "save it with update_memory" not in read_only
     assert "SHELL:" not in read_only and "EDITS:" not in read_only
+
+
+def test_a_project_home_is_not_told_to_avoid_the_memory_it_was_granted(tmp_path):
+    def forbids_memory(prompt):
+        return [line for line in prompt.splitlines() if "Do not use" in line and "memory" in line]
+
+    home = _prompt({"manage_memory", "bash", "python"}, workspace=str(tmp_path))
+    assert "Workspace coding mode" in home and "save it with update_memory" in home
+    assert forbids_memory(home) == []
+
+    # Ordinary workspace chat keeps its rule: it has no scoped memory tool.
+    ordinary = _prompt(set(), workspace=str(tmp_path), companion_scope=False)
+    assert forbids_memory(ordinary)
 
 
 def test_native_shell_call_reaches_the_tool_as_json():
