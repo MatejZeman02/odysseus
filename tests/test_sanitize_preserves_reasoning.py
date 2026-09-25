@@ -6,19 +6,16 @@ tool calling when thinking mode is enabled.
 
 See: https://github.com/odysseus-dev/odysseus/issues/3118
 """
-import sys
-from unittest.mock import MagicMock
+
+from tests.helpers.import_state import temporary_import_stubs
 
 # Mock heavy dependencies before importing.
-for mod in [
+with temporary_import_stubs(
     'sqlalchemy', 'sqlalchemy.orm', 'sqlalchemy.ext', 'sqlalchemy.ext.declarative',
     'sqlalchemy.ext.hybrid', 'sqlalchemy.sql', 'sqlalchemy.sql.expression',
     'src.database', 'src.agent_tools', 'core.models', 'core.database',
-]:
-    if mod not in sys.modules:
-        sys.modules[mod] = MagicMock()
-
-from src.llm_core import _sanitize_llm_messages  # noqa: E402
+):
+    from src.llm_core import _sanitize_llm_messages  # noqa: E402
 
 
 def test_sanitize_preserves_reasoning_content_on_assistant_tool_call():

@@ -9,22 +9,19 @@ fits) while id/type/function.name are preserved, and that small args / plain tex
 are untouched.
 """
 import json
-import sys
-from unittest.mock import MagicMock
+
+from tests.helpers.import_state import temporary_import_stubs
 
 import pytest
 
-for mod in [
+with temporary_import_stubs(
     'sqlalchemy', 'sqlalchemy.orm', 'sqlalchemy.ext', 'sqlalchemy.ext.declarative',
     'sqlalchemy.ext.hybrid', 'sqlalchemy.sql', 'sqlalchemy.sql.expression',
     'src.database',
     'core.models', 'core.database',
-]:
-    if mod not in sys.modules:
-        sys.modules[mod] = MagicMock()
-
-from src.context_compactor import _truncate_message_to_token_budget  # noqa: E402
-from src.model_context import estimate_tokens  # noqa: E402
+):
+    from src.context_compactor import _truncate_message_to_token_budget  # noqa: E402
+    from src.model_context import estimate_tokens  # noqa: E402
 
 
 def _tool_msg(arg_len):

@@ -6,9 +6,9 @@ an absurd number of times is a real runaway. Previously the backstop counted
 per-tool-type totals, so any batch of >=15 distinct calls to one tool was
 aborted and the calls were silently discarded.
 """
-import sys
 import collections
-from unittest.mock import MagicMock
+
+from tests.helpers.import_state import temporary_import_stubs
 
 # Mock heavy deps so importing src.agent_loop doesn't load the full app stack.
 _MOCKED = [
@@ -16,10 +16,8 @@ _MOCKED = [
     'sqlalchemy.ext.hybrid', 'sqlalchemy.sql', 'sqlalchemy.sql.expression',
     'src.database', 'src.agent_tools', 'core.models', 'core.database',
 ]
-for _m in _MOCKED:
-    sys.modules.setdefault(_m, MagicMock())
-
-from src.agent_loop import _detect_runaway_call
+with temporary_import_stubs(*_MOCKED):
+    from src.agent_loop import _detect_runaway_call
 
 
 def _freq(sigs):

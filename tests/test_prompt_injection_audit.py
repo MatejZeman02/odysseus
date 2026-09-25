@@ -18,16 +18,19 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.import_state import temporary_import_stubs
+
 # ── stub heavy imports before loading agent_loop ────────────────────────────
-for _mod in [
-    "sqlalchemy", "sqlalchemy.orm", "sqlalchemy.ext", "sqlalchemy.ext.declarative",
-    "sqlalchemy.ext.hybrid", "sqlalchemy.sql", "sqlalchemy.sql.expression",
-    "src.database",
-    "src.agent_tools",
-    "core.models", "core.database",
-]:
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
+@pytest.fixture(autouse=True, scope="module")
+def _stub_heavy_imports():
+    with temporary_import_stubs(
+        "sqlalchemy", "sqlalchemy.orm", "sqlalchemy.ext", "sqlalchemy.ext.declarative",
+        "sqlalchemy.ext.hybrid", "sqlalchemy.sql", "sqlalchemy.sql.expression",
+        "src.database",
+        "src.agent_tools",
+        "core.models", "core.database",
+    ):
+        yield
 
 # ── shared helpers ───────────────────────────────────────────────────────────
 

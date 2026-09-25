@@ -3,23 +3,20 @@ maybe_compact must return the original messages unchanged, not the older half
 dropped. Uses mock imports to avoid loading the full app stack."""
 
 import asyncio
-import sys
-from unittest.mock import MagicMock
+
+from tests.helpers.import_state import temporary_import_stubs
 
 import pytest
 
 # Mock heavy dependencies before importing
-for mod in [
+with temporary_import_stubs(
     'sqlalchemy', 'sqlalchemy.orm', 'sqlalchemy.ext', 'sqlalchemy.ext.declarative',
     'sqlalchemy.ext.hybrid', 'sqlalchemy.sql', 'sqlalchemy.sql.expression',
     'src.database',
     'core.models', 'core.database',
-]:
-    if mod not in sys.modules:
-        sys.modules[mod] = MagicMock()
-
-import src.context_compactor as cc
-from src.context_compactor import maybe_compact
+):
+    import src.context_compactor as cc
+    from src.context_compactor import maybe_compact
 
 
 class TestCompactionSummaryFailure:
