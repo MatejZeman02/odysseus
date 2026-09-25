@@ -24,7 +24,7 @@ from typing import Any
 
 from core.database import ProjectChangeSet, utcnow_naive
 from src.path_identity import PathIdentityError, pin_directory
-from src.protected_workspace import WorkspaceSnapshot, snapshot_workspace
+from src.protected_workspace import WorkspaceSnapshot, snapshot_workspace, unborn_head
 
 
 PATCH_VERSION = 1
@@ -75,17 +75,6 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _git_head(root: Path) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            check=True, capture_output=True, text=True, timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise PatchError("proposal_invalid", "Project revision could not be read", 409) from exc
-    return result.stdout.strip()
-
-
 def _git_head_or_unborn(root: Path) -> str:
     """Return HEAD, or ``""`` in a new repository that has no commit yet."""
     try:
@@ -93,11 +82,12 @@ def _git_head_or_unborn(root: Path) -> str:
             ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD"],
             capture_output=True, text=True, timeout=10,
         )
+        unborn = result.returncode == 1 and unborn_head(root)
     except (OSError, subprocess.SubprocessError) as exc:
         raise PatchError("proposal_invalid", "Project revision could not be read", 409) from exc
     if result.returncode == 0:
         return result.stdout.strip()
-    if result.returncode == 1 and not result.stdout.strip():
+    if unborn:
         return ""
     raise PatchError("proposal_invalid", "Project revision could not be read", 409)
 
@@ -264,7 +254,7 @@ def prepare_proposal(workspace: Path, raw_answer: str) -> PreparedProposal:
         answer=answer or summary,
         summary=summary,
         rationale=rationale,
-        base_git_revision=_git_head(root),
+        base_git_revision=_git_head_or_unborn(root),
         payload={"version": PATCH_VERSION, "changes": normalized},
     )
 

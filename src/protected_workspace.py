@@ -64,6 +64,40 @@ def _path_fingerprint(path: Path) -> str:
     return f"special:{stat.S_IFMT(mode):o}"
 
 
+def unborn_head(root: Path) -> bool:
+    """Say whether HEAD names a branch that has no commit yet.
+
+    ``rev-parse --verify --quiet HEAD`` exits 1 for that, but also for a ref
+    file that is empty, corrupt or unreadable. Only a branch with neither a
+    loose ref file nor a packed entry counts as unborn, so a damaged checkout
+    still fails its checks.
+    """
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=10)
+
+    ref = git("symbolic-ref", "-q", "HEAD")
+    name = ref.stdout.strip()
+    if ref.returncode != 0 or not name.startswith("refs/heads/"):
+        return False
+    # A reftable repository keeps no ref files to look for.
+    storage = git("config", "--get", "extensions.refStorage")
+    if storage.returncode == 0 and storage.stdout.strip() not in {"", "files"}:
+        return False
+    loose = git("rev-parse", "--git-path", name)
+    packed = git("rev-parse", "--git-path", "packed-refs")
+    if loose.returncode != 0 or packed.returncode != 0:
+        return False
+    if os.path.lexists(root / loose.stdout.strip()):
+        return False
+    try:
+        lines = (root / packed.stdout.strip()).read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return True
+    except (OSError, UnicodeDecodeError):
+        return False
+    return not any(line.split(" ", 1)[-1] == name for line in lines if not line.startswith(("#", "^")))
+
+
 def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
     # A project binding is a path grant, so the registered leaf must still be
     # the directory it was approved as; otherwise a symlink swap could make a
@@ -77,7 +111,7 @@ def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
     rev = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD"], capture_output=True, text=True,
     )
-    if rev.returncode not in (0, 1):
+    if rev.returncode != 0 and not (rev.returncode == 1 and unborn_head(root)):
         rev.check_returncode()
     head = rev.stdout.strip()
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain=v1"], check=True, capture_output=True, text=True).stdout

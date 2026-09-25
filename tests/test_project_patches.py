@@ -96,6 +96,44 @@ def test_prepare_apply_and_rollback_atomic_text_patch(workspace, database):
     assert not (workspace / "notes.md").exists()
 
 
+def test_a_proposal_works_before_the_first_commit(workspace, database):
+    import shutil
+
+    shutil.rmtree(workspace / ".git")
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    prepared = prepare_proposal(workspace, _answer([
+        {"operation": "create", "path": "notes.md", "content": "New note\n"},
+    ]))
+    assert prepared.base_git_revision == ""
+    row = _persist(database, prepared)
+
+    assert apply_change_set(database, row, workspace, expected_revision=1)["status"] == "applied"
+    assert (workspace / "notes.md").read_text() == "New note\n"
+    assert rollback_change_set(database, row, workspace, expected_revision=3)["status"] == "rolled_back"
+    assert not (workspace / "notes.md").exists()
+
+
+@pytest.mark.parametrize("content", ["", "not-a-commit\n"])
+def test_a_damaged_branch_ref_is_not_taken_for_a_new_repository(workspace, content):
+    # Git reports an empty or corrupt branch ref the same way as a branch
+    # with no commit yet. A checkout with history in that state is damaged,
+    # and its checks must refuse it rather than compare two empty HEADs.
+    from src.protected_workspace import snapshot_workspace
+
+    branch = subprocess.run(
+        ["git", "-C", str(workspace), "symbolic-ref", "HEAD"], check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    (workspace / ".git" / branch).write_text(content, encoding="utf-8")
+
+    with pytest.raises(PatchError) as refused:
+        prepare_proposal(workspace, _answer([
+            {"operation": "update", "path": "README.md", "content": "# After\n"},
+        ]))
+    assert refused.value.code == "proposal_invalid"
+    with pytest.raises(subprocess.CalledProcessError):
+        snapshot_workspace(workspace)
+
+
 def test_create_file_in_missing_directories_and_remove_them_on_rollback(workspace, database):
     prepared = prepare_proposal(workspace, _answer([
         {"operation": "create", "path": "documents/guides/g2b-test.md", "content": "Project summary\n"},
