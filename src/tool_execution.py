@@ -59,6 +59,10 @@ NO_TOOL_SECURITY_CONTEXT = _NoToolSecurityContext()
 _AGENT_WORKDIR = AGENT_WORKSPACE_DIR
 
 
+# Returned when the session row exists in principle but could not be read.
+_SCOPE_UNREADABLE = "__unreadable__"
+
+
 def _scope_kind_for_session(session_id: Optional[str]) -> Optional[str]:
     """Return a persisted session scope for executor-level capability checks.
 
@@ -67,9 +71,9 @@ def _scope_kind_for_session(session_id: Optional[str]) -> Optional[str]:
     lookup prevents an alternate caller from restoring a global-memory or
     cross-chat tool merely by omitting it from ``disabled_tools``.
 
-    Failure to read the session is non-authoritative: ordinary route-level
-    denials remain in force, and this helper only adds a deny when the durable
-    Companion scope can be established.
+    A missing row is an ordinary chat. A failed read returns
+    ``_SCOPE_UNREADABLE``, because treating it as ordinary chat would send a
+    granted project edit to the unrecorded writer and skip the host-shell ban.
     """
     if not session_id:
         return None
@@ -84,7 +88,7 @@ def _scope_kind_for_session(session_id: Optional[str]) -> Optional[str]:
             db.close()
     except Exception:
         logger.warning("Could not resolve tool executor session scope", exc_info=True)
-        return None
+        return _SCOPE_UNREADABLE
 
 
 def _session_capability_enabled(session_id: Optional[str], capability: str) -> bool:
@@ -1140,9 +1144,23 @@ async def _execute_tool_block_impl(
     # legacy global memory, learned skills, and raw cross-chat search in the
     # shared executor too, so an alternate caller cannot reopen them merely by
     # omitting the route-level ``disabled_tools`` set.
-    from src.companion_capabilities import legacy_tool_denied_for_scope
+    from src.companion_capabilities import legacy_tool_denied_for_scope, scope_dependent_tools
 
     companion_scope = _scope_kind_for_session(session_id) or "general"
+    if companion_scope == _SCOPE_UNREADABLE:
+        # Without the scope, a tool whose meaning depends on it could run
+        # with ordinary-chat authority inside a Companion home.
+        if tool in scope_dependent_tools() or any(
+            legacy_tool_denied_for_scope(name, "project") for name in policy_names
+        ):
+            logger.warning("Scope unreadable, blocked tool=%s session_id=%s", tool, session_id)
+            return f"{tool}: BLOCKED", {
+                "error": "Could not confirm this chat's permissions. Try again in a moment.",
+                "exit_code": 1,
+                "blocked": True,
+                "policy": "scope_unreadable",
+            }
+        companion_scope = "general"
     if any(legacy_tool_denied_for_scope(name, companion_scope) for name in policy_names):
         desc = f"{tool}: BLOCKED"
         result = {

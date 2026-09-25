@@ -163,6 +163,11 @@ def grant_for_tool(tool: str) -> str | None:
     return _TOOL_GRANT.get(str(tool or ""))
 
 
+def scope_dependent_tools() -> frozenset[str]:
+    """Tools whose authority differs between a Companion home and ordinary chat."""
+    return frozenset(_TOOL_GRANT) | _COMPANION_HOST_TOOLS | _COMPANION_LEGACY_DENIED_TOOLS
+
+
 def companion_tool_denial(tool: str, scope_kind: str, granted) -> str:
     """Return why the executor must refuse ``tool``, or ``""`` to allow it.
 

@@ -117,6 +117,28 @@ def test_executor_refuses_host_shell_in_every_companion_home(monkeypatch):
             assert result.get("blocked") is True, (scope, tool)
 
 
+def test_executor_refuses_scoped_tools_when_the_chat_cannot_be_read(monkeypatch):
+    # A database error must not turn a Companion home into ordinary chat, where
+    # edits skip the recorded transaction and host shell is allowed.
+    class _Broken:
+        def query(self, *_args, **_kwargs):
+            raise RuntimeError("database is locked")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(database_module, "SessionLocal", _Broken)
+    for tool, content in (
+        ("write_file", '{"path": "a.txt", "content": "x"}'),
+        ("bash", "id"),
+        ("update_memory", "{}"),
+        ("manage_memory", "{}"),
+    ):
+        _desc, result = _run(Block(tool, content))
+        assert result.get("policy") == "scope_unreadable", tool
+        assert "Try again" in result["error"]
+
+
 def test_executor_refuses_companion_tools_in_ordinary_chat(monkeypatch):
     monkeypatch.setattr(tool_execution, "_scope_kind_for_session", lambda _sid: "general")
     _desc, result = _run(Block("project_shell", '{"command": "id"}'))
