@@ -3,8 +3,11 @@
 **Status:** Companion foundations, reviewed patches, scoped working artifacts,
 and the safe read-only broker are implemented. Semantic continuity integrity,
 conversation transfer, and provider-backed scoped recall are the active path.
+Since 2026-09-25 project chats run on the built-in agent with tools the owner
+switches on per chat (see [Native agent with owner-chosen tools](#native-agent-with-owner-chosen-tools)).
+Qwen stays available as an optional read-only worker.
 
-**Last reconciled with the implementation:** 2026-08-27
+**Last reconciled with the implementation:** 2026-09-25
 
 **Product specification:** [`ODYSSEUS_PRODUCT_SPEC.md`](ODYSSEUS_PRODUCT_SPEC.md)
 
@@ -61,7 +64,46 @@ Progress labels are deliberately non-temporal:
 | Computer Help read-only diagnostics | **Partial** | Safe snapshots and private incident records exist. The command-only Podman broker is implemented but **not qualified yet**: rootless Podman is available, but no reviewed pinned image is configured and no passing containment report exists, so it admits no commands. The same fixed System inspection broker is available to any chat only after that owner enables its per-chat grant; it is not shell access. User-level task execution, filtered egress, and reversible transactions do not. |
 | G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
-| Writable tools, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No project writes, unrestricted shell, package/service mutation, or autonomous workflows |
+| Native agent with owner-chosen tools | **Implemented, owner canary pending** | Per-chat **Can see** and **Can do** grants. An offline project shell, file edits recorded as undoable project changes, and memory updates saved as brief revisions. Evidence: focused tests and a scripted end-to-end run on 2026-09-25. Canary 4 in the owner guide is the real-model check. |
+| Host shell, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No host shell, network from the project shell, package or service changes, or autonomous workflows. Project writes exist only through the recorded transaction above. |
+
+## Native agent with owner-chosen tools
+
+The owner set this direction on 2026-09-25, after seeing that current models do
+most work with a plain shell:
+
+> Important thing is that users can choose what agent can see (readonly
+> project) and do (edit files, edit memories?). But if everything is on, the
+> model is not choked.
+
+What this settles, and what it does not:
+
+- **Harness.** Project chats default to the built-in agent. Qwen Serve is kept
+  as an optional read-only worker and is no longer a prerequisite for project
+  work. Removing it is a separate decision.
+- **Grants.** Each Companion chat has a **Can see** group (`workspace_read`,
+  `web_search`, `system_observe`, `sandbox_read`) and a **Can do** group
+  (`project_shell`, `project_write`, `memory_write`). The server owns the
+  grants and the readiness checks. The browser only names a grant.
+- **No per-action approval inside a grant.** A granted edit or memory update
+  runs without an approval card while the run has read only the owner's own
+  checkout. Web pages, fetched text and context carried in from earlier runs
+  put it back behind approval. This answers the open question on auto-approval
+  semantics for project edits, as far as the owner's quote goes. Anything
+  broader, such as approval by another model, stays open.
+- **Containment.** `project_shell` runs bash in an offline Bubblewrap overlay of
+  the checkout: no network, no host home, secrets masked, credentials removed
+  from `.git/config`, and every write discarded when the command ends. Real
+  changes go through `write_file`, `edit_file` and `apply_patch`, which a
+  project chat routes to `src/project_patches.py` as a recorded change the owner
+  can undo from **Review project changes**. `update_memory` writes accepted
+  brief revisions marked `agent_edit_v1`. Host `bash`, `python` and background
+  jobs stay refused in every Companion home.
+- **Known limits.** Edits need a Git checkout. A change whose undo met a
+  conflict stays in that state, so an older change behind it cannot be undone
+  from the list. Tool descriptions for MCP servers and integrations are left
+  out of a home's prompt unless those tools are offered in that turn, because
+  that outside text would otherwise cancel every grant.
 
 ## Immediate validation queue
 

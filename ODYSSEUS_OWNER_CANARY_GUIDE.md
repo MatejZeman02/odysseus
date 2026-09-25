@@ -1,6 +1,6 @@
 # Owner Canary Guide
 
-This guide records the three checks that cannot be truthfully completed by
+This guide records the four checks that cannot be truthfully completed by
 automated tests alone. Run them only from the normal owner account, using a
 disposable project or harmless documentation fixture. None of the checks
 authorizes broader tools when it fails.
@@ -92,6 +92,38 @@ installation, nor **Approve for me**.
 > report version gate retired it. A launcher default makes this canary's
 > decision on the owner's behalf.
 
+## 4. Native agent with owner-chosen tools
+
+Project chats run on the built-in agent by default. What it may see and do is
+set per chat in **More tools → Chat capabilities**, under **Can see** and
+**Can do**. Anything switched on works without asking each time. Edits and
+memory changes are recorded so they can be undone.
+
+Use a throwaway Git project with one harmless Markdown file and a real model.
+
+1. Open the project chat, select **Agent**, and open **Chat capabilities**.
+   Leave **Read project files** and **Run commands** on, switch **Edit project
+   files** and **Update memory** on.
+2. Ask for something that needs a command and an edit, for example: "Check the
+   last commit with git, then rename the README title and remember the new
+   title." The model should run `project_shell`, edit the file, and save one
+   memory item, with no approval card in between.
+3. Confirm in a terminal that only the requested file changed, and that any
+   file the command created inside the sandbox did not reach the checkout.
+4. Open **Chat capabilities → Review project changes**. The edit is listed as
+   applied. Use **Undo** and confirm the working tree is clean again.
+5. Open **Companion context** and confirm the memory item is there as a new
+   brief revision.
+6. Switch **Edit project files** off and repeat the request. The model must say
+   it cannot edit, or ask to enable the capability, and must not fall back to
+   another write path.
+7. Ask it to fetch a web page and then edit a file in the same turn. The edit
+   must stop at an approval card, because web text can steer the model.
+
+If a command reaches the network, reads `.env` or a private key, or leaves a
+file behind in the checkout, stop and report it. Do not work around it by
+turning on host shell access.
+
 ## Recorded results
 
 | Canary | Last run | Result |
@@ -99,7 +131,8 @@ installation, nor **Approve for me**.
 | 1. Semantic continuity | never | Not run. Needs an owner: a configured model, browser interaction, and a real provider call. |
 | 2. Reviewed project patch | never | Not run. Needs an owner: a throwaway Git checkout and a Qwen turn. |
 | 3. Computer Help containment | probe run 2026-08-27 against the cached Qwen image | Does not count. That image is rejected for Computer Help, and the report predates the `command_inventory` gate. Readiness for it now reads `sandbox_report_outdated`. No approved image has been chosen. |
+| 4. Native agent with owner-chosen tools | scripted run 2026-09-25 | Does not count as the owner canary, because a scripted stand-in model made the calls. It did run the real server, sandbox and database: the command saw the project and its history, `.env` was unreadable, the network was unreachable, the sandbox's scratch file never reached the checkout, the edit applied with no approval card and was listed, **Undo** restored the file, and memory saved a new revision. |
 
-Gates 1 and 2 have not run at any point on this branch. Automated coverage is
-not a substitute: 6135 passing tests say the parts behave, not that the product
+Gates 1, 2 and 4 have not run with a real model on this branch. Automated coverage is
+not a substitute: 6315 passing tests say the parts behave, not that the product
 flow works end to end.
