@@ -117,6 +117,23 @@ def test_sandbox_has_no_network_no_secrets_and_no_host_home(checkout):
 
 
 @LIVE
+def test_no_open_handle_reaches_the_real_checkout(checkout):
+    # Bubblewrap mounts the checkout from an inherited directory handle. Any
+    # process in the sandbox that still holds it could read past the masks
+    # and write into the real checkout, for example a git hook.
+    result = project_shell.run(
+        checkout,
+        'for f in /proc/*/fd/*; do [ -d "$f" ] || continue; echo "dir $f"; '
+        'cat "$f/.env" "$f/.git/config" 2>/dev/null; touch "$f/escaped" 2>/dev/null; done; true',
+    )
+    assert result.exit_code == 0
+    assert "do-not-leak" not in result.output
+    assert "secret-token" not in result.output
+    assert not (checkout / "escaped").exists()
+    assert not (checkout / ".git" / "escaped").exists()
+
+
+@LIVE
 def test_timeout_stops_the_command_and_keeps_its_output(checkout):
     result = project_shell.run(checkout, "echo started; sleep 30", timeout=1)
     assert result.timed_out is True

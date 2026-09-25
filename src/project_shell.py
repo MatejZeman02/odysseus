@@ -373,7 +373,12 @@ def run(workspace: str | Path, command: str, *, timeout: int = DEFAULT_TIMEOUT_S
             ]
             # ``eval "$1"`` runs the model's text in the shell that already
             # applied the limits, so a command cannot raise them again.
+            # Bubblewrap needs the checkout handle only to mount it and then
+            # leaves it open in this shell. Through /proc/self/fd it reaches
+            # the real checkout past the overlay and the masks, so it is
+            # closed before the model's text runs.
             wrapper = (
+                f"exec {fd}<&-; "
                 f"ulimit -c 0 2>/dev/null; ulimit -f {_FILE_SIZE_LIMIT_KIB} 2>/dev/null; "
                 'eval "$1"'
             )
