@@ -105,8 +105,9 @@ What this settles, and what it does not:
   the system prompt to about 7,400, so the first request of a turn costs about
   5,000 prompt tokens (measured 2026-09-25). App administration tools (API
   tokens, endpoints, webhooks, MCP servers, settings, other chats) are never
-  pulled into a home by
-  keywords. The Qwen switch and **Patch** appear only where Qwen is set up.
+  pulled into a home by keywords, and a project home keeps its project tools
+  on every turn instead of picking up calendar, notes or task tools. The Qwen
+  switch and **Patch** appear only where Qwen is set up.
 - **Hardening found by review, 2026-09-25.** The checkout handle Bubblewrap
   mounts from stayed open in the sandbox shell, so a command could read `.env`
   and write a Git hook into the real checkout through `/proc`. It is now closed
