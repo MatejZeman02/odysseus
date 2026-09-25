@@ -72,7 +72,14 @@ def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
     root = pin_directory(root).path
     if not (root / ".git").exists():
         raise ValueError("protected workspace must be a Git checkout")
-    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    # A new repository has no HEAD until its first commit. That is still a
+    # state to compare against: a commit made meanwhile changes it.
+    rev = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD"], capture_output=True, text=True,
+    )
+    if rev.returncode not in (0, 1):
+        rev.check_returncode()
+    head = rev.stdout.strip()
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain=v1"], check=True, capture_output=True, text=True).stdout
     files = {
         str(path.relative_to(root)): _path_fingerprint(path)

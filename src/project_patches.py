@@ -86,6 +86,22 @@ def _git_head(root: Path) -> str:
     return result.stdout.strip()
 
 
+def _git_head_or_unborn(root: Path) -> str:
+    """Return HEAD, or ``""`` in a new repository that has no commit yet."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--verify", "--quiet", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise PatchError("proposal_invalid", "Project revision could not be read", 409) from exc
+    if result.returncode == 0:
+        return result.stdout.strip()
+    if result.returncode == 1 and not result.stdout.strip():
+        return ""
+    raise PatchError("proposal_invalid", "Project revision could not be read", 409)
+
+
 def _project_lock(project_id: str) -> threading.Lock:
     with _project_locks_guard:
         return _project_locks.setdefault(project_id, threading.Lock())
@@ -694,7 +710,7 @@ def apply_agent_edit(
         status="proposed",
         summary=str(summary or "")[:500] or "Agent edit",
         rationale="",
-        base_git_revision=_git_head(root),
+        base_git_revision=_git_head_or_unborn(root),
         proposal_json=json.dumps(
             {"version": PATCH_VERSION, "origin": "agent_edit", "changes": normalized},
             ensure_ascii=False, separators=(",", ":"),

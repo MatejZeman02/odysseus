@@ -206,6 +206,25 @@ def test_agent_edit_is_applied_recorded_and_undoable(project):
     assert (root / "app.py").read_text(encoding="utf-8") == "print('before')\n"
 
 
+def test_agent_edit_works_before_the_first_commit(project):
+    # A freshly initialised project has no HEAD yet. Its first files must
+    # still be recorded and undoable.
+    import shutil
+
+    root, local = project
+    shutil.rmtree(root / ".git")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    result = _edit("write_file", {"path": "notes.md", "content": "# Notes\n"})
+    assert result["exit_code"] == 0, result
+    assert (root / "notes.md").read_text(encoding="utf-8") == "# Notes\n"
+
+    db = local()
+    row = db.query(ProjectChangeSet).one()
+    rollback_change_set(db, row, root, expected_revision=row.revision)
+    db.close()
+    assert not (root / "notes.md").exists()
+
+
 def test_agent_edit_builds_on_uncommitted_work(project):
     root, _local = project
     (root / "app.py").write_text("print('before')\nprint('draft')\n", encoding="utf-8")
