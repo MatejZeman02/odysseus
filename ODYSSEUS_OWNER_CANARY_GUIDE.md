@@ -1,6 +1,6 @@
 # Owner Canary Guide
 
-This guide records the four checks that cannot be truthfully completed by
+This guide records the checks that cannot be truthfully completed by
 automated tests alone. Run them only from the normal owner account, using a
 disposable project or harmless documentation fixture. None of the checks
 authorizes broader tools when it fails.
@@ -26,30 +26,12 @@ question; avoid real secrets or sensitive personal material.
 Record only the outcome and any safe failure code in a normal bug report; do
 not paste raw conversation data into Git.
 
-## 2. Reviewed project patch canary
+## 2. Reviewed project patch canary (retired)
 
-Use a throwaway Git project with one harmless Markdown file. Project **Patch**
-mode is an owner-scoped browser-session choice: after it is enabled, a clear
-edit request is proposed by read-only Qwen and automatically applied only
-through Odysseus's validated transaction. Read-only questions remain read-only.
-
-1. Open that project in a Qwen Companion chat, select **Agent**, and enable
-   **Patch**.
-2. Ask for one small new Markdown file such as `.artifacts/canary.md` with a
-   fixed one-sentence body.
-3. Inspect the persistent Patch card: exact paths, diff, summary, and
-   transaction record must match the request. Confirm the change is the only
-   working-tree difference.
-4. Reload the browser and confirm the same Process and Patch card reconstruct.
-5. Use **Review applied change**; the new read-only turn may report concerns
-   but must not silently create another patch.
-6. Use **Roll back**. Confirm the file and its parent directory disappear when
-   they were created by the patch, and the working tree returns to its original
-   state.
-
-If a path is stale, dirty, a symlink, or outside the registered project, the
-transaction must fail without changing any workspace file. Do not retry by
-turning on native shell access.
+Retired on 2026-09-29 together with Qwen Serve. Qwen's **Patch** mode is gone.
+The same transaction now records the native agent's edits, and canary 4 checks
+it, **Undo** included. A Patch card saved in an older chat still shows its diff
+and can still be applied, rejected or rolled back.
 
 ## 3. Computer Help containment qualification
 
@@ -129,7 +111,7 @@ turning on host shell access.
 | Canary | Last run | Result |
 | --- | --- | --- |
 | 1. Semantic continuity | never | Not run. Needs an owner: a configured model, browser interaction, and a real provider call. |
-| 2. Reviewed project patch | never | Not run. Needs an owner: a throwaway Git checkout and a Qwen turn. |
+| 2. Reviewed project patch | retired 2026-09-29 | Never run. Retired with Qwen Serve. Canary 4 covers the same transaction for native edits. |
 | 3. Computer Help containment | probe run 2026-08-27 against the cached Qwen image | Does not count. That image is rejected for Computer Help, and the report predates the `command_inventory` gate. Readiness for it now reads `sandbox_report_outdated`. No approved image has been chosen. |
 | 4. Native agent with owner-chosen tools | scripted run 2026-09-25 | Does not count as the owner canary, because a scripted stand-in model made the calls. It did run the real server, sandbox and database: the command saw the project and its history, `.env` was unreadable, the network was unreachable, the sandbox's scratch file never reached the checkout, the edit applied with no approval card and was listed, **Undo** restored the file, and memory saved a new revision. A review the same day found that the sandbox shell still held the handle the checkout was mounted from, which reached `.env` and the real checkout through `/proc`. That is fixed and covered by a live test, so the `.env` result above held only for the path the run tried. A second run the same day, with DeepSeek flash driven by Claude in a scratch instance, found and fixed three bugs (the model could not ask for a switched-off grant, follow-ups lost the earlier turns, and a commit made in the sandbox was reported as real). It still does not count: the owner has not run it on their own install. |
 

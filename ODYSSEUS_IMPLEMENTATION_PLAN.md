@@ -63,10 +63,10 @@ Progress labels are deliberately non-temporal:
 | G2C scoped chat memory and working artifacts | **Active** | C1/C2 implementation proof, local scope-filtered recall, revisioned artifacts, long-paste capture, Documents bridge, grants, bounded checkpoint transfer/synthesis, and owner-confirmed exact/manual-home legacy migration with rollback exist. Duplicate-policy and any external-provider switch remain gated. |
 | Computer Help read-only diagnostics | **Partial** | Safe snapshots and private incident records exist. The command-only Podman broker is implemented but **not qualified yet**: rootless Podman is available, but no reviewed pinned image is configured and no passing containment report exists, so it admits no commands. The same fixed System inspection broker is available to any chat only after that owner enables its per-chat grant; it is not shell access. User-level task execution, filtered egress, and reversible transactions do not. |
 | G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
-| G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
+| G2B reviewed project patches | **Complete, the transaction now serves native edits** | Odysseus validates, atomically applies, displays, verifies and conditionally rolls back complete text changes. Qwen's Patch mode, which proposed them, was removed with Qwen Serve. A proposal saved earlier can still be applied, rejected or rolled back. |
 | Native agent with owner-chosen tools | **Implemented, owner canary pending** | Per-chat **Can see** and **Can do** grants. An offline project shell, file edits recorded as undoable project changes, and memory updates saved as brief revisions. Evidence: focused tests and a scripted end-to-end run on 2026-09-25. Canary 4 in the owner guide is the real-model check. |
 | Auto approver (Jev or similar) | **Design agreed, shadow length open** | Owner chose on 2026-09-25 to let a second model approve some held actions, and on 2026-09-29 widened it to memory updates. `ODYSSEUS_AUTO_APPROVER_DESIGN.md` approves project edits and memory updates, one exact action at a time, after a shadow period. Memory updates first need an undo for an agent's brief revision. Nothing is built. |
-| Qwen Serve removal | **Decided, not started** | Owner decided on 2026-09-25. It runs on its own branch and merges only after canary 4 passes. |
+| Qwen Serve removal | **Built on `feat/remove-qwen-serve`, merge waits on canary 4** | Owner decided on 2026-09-25. On 2026-09-29 the branch removed the Qwen switch, Patch mode, the worker, the model bridge and their routes. Older chats keep their saved Process and Patch cards. `tests/test_qwen_serve_removed.py` keeps the modules and routes out. The browser UI audit still expects the Qwen controls and needs a rewrite before its next run. |
 | Host shell, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No host shell, network from the project shell, package or service changes, or autonomous workflows. Project writes exist only through the recorded transaction above. |
 
 ## Native agent with owner-chosen tools
@@ -720,8 +720,9 @@ contract is in [`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md
 ## Qwen Serve adapter
 
 > [!NOTE]
-> The owner decided on 2026-09-25 to remove Qwen Serve. This section describes
-> the code that the removal branch will delete.
+> The owner decided on 2026-09-25 to remove Qwen Serve, and the
+> `feat/remove-qwen-serve` branch deleted this code on 2026-09-29. The section
+> stays as a record of what the worker did until that branch merges.
 
 Odysseus implements a narrow, capability-gated client rather than mirroring the
 complete Qwen API.
@@ -924,7 +925,9 @@ canonical in this plan, the product spec, and the executable tests.
 - [x] Preserve raw transcripts and always compile continuity for project-scoped
   native turns; keep the legacy unscoped path behind its compatibility flag.
 
-### Phase 1B — ModelBridge and Qwen runtime harness — **Complete**
+### Phase 1B — ModelBridge and Qwen runtime harness — **Complete, removed 2026-09-29**
+
+The removal branch deleted these modules with Qwen Serve.
 
 - [x] Implement the narrow integration as `src/model_bridge.py`,
   `src/qwen_harness.py`, `src/qwen_supervisor.py`, and

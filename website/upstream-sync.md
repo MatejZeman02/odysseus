@@ -86,7 +86,7 @@ For example, after the 2026-08-04 Vault/Webhook route move:
   tests/test_webhook_routes_shim.py \
   tests/test_webhook_provider_aliases.py \
   tests/test_g1_continuity_routes.py \
-  tests/test_scoped_turn_service.py
+  tests/test_g15_project_wiring.py
 ```
 
 Keep the merge commit on the feature branch. Push or open a pull request only

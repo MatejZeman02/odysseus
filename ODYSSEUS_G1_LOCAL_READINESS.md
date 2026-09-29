@@ -5,6 +5,11 @@ pending.
 
 **Date:** 2026-08-04
 
+> [!NOTE]
+> This records the state of 2026-08-04. The `feat/remove-qwen-serve` branch
+> (2026-09-29) deletes the ModelBridge and the read-only Qwen worker described
+> below. Project chats there run on the native agent with per-chat grants.
+
 ## Delivered boundary
 
 - Scoped projects, stable conversation-home bindings, and the two permitted

@@ -2,6 +2,12 @@
 
 **State:** Implemented; owner acceptance testing active
 
+> [!NOTE]
+> The `feat/remove-qwen-serve` branch (2026-09-29) removes Qwen's Patch mode
+> together with Qwen Serve. The transaction described here stays, now records
+> the native agent's edits, and canary 4 checks it. Once that branch merges,
+> the Qwen flow below is history.
+
 **Authority boundary:** Qwen remains on `project_read` and never receives file
 write, Shell, network, approval, or patch-application authority. The
 authenticated owner authorizes automatic application by enabling **Patch** for
