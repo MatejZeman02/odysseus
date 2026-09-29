@@ -1,7 +1,8 @@
 # Auto approver design (Jev or similar)
 
-**Status:** proposal of 2026-09-29. Nothing is built. It waits on the owner's
-answers to the questions at the end.
+**Status:** proposal of 2026-09-29, with the owner's answers of the same day
+folded in. Nothing is built. One question, the length of the shadow period,
+is still open (see the end).
 
 On 2026-09-25 the owner chose to let a second model approve some actions on
 their behalf, naming Jev "or similar". This page proposes what that model may
@@ -48,8 +49,12 @@ The rule: **Jev may approve only an action the owner can undo, inside a grant
 the owner switched on, one exact action at a time.**
 
 - **Project edits:** eligible. They land as recorded changes with an undo.
-- **Memory updates and new documents:** shadow only at first. A memory update
-  feeds every later chat in that home, so a bad one costs more than a bad edit.
+- **Memory updates:** eligible, the owner's choice of 2026-09-29. A memory
+  update feeds every later chat in that home, so it gets its own questions
+  below, and it needs an undo first: today a brief keeps its older revisions
+  but offers no one-click restore. The approver build adds **Undo** for an
+  agent's brief revision before Jev may approve one.
+- **New documents:** shadow only.
 - **Web fetches and `ask_teacher`:** never. Data that has left cannot be
   brought back, and a URL is the classic way injected text smuggles data out.
 - **`request_capability`:** never. Only the owner widens what a chat can do.
@@ -72,7 +77,10 @@ For a held project edit the server builds the state from what it already owns:
 - the outside sources the run read, by tool and URL, with short excerpts marked
   as untrusted
 
-Jev gets four yes or no questions:
+For a held memory update the state is the owner's latest message, the brief
+before and after the change, and the same list of outside sources.
+
+For an edit, Jev gets four yes or no questions:
 
 1. `serves_request`: the change does what the owner's latest message asks, or
    is a step toward it.
@@ -83,14 +91,23 @@ Jev gets four yes or no questions:
 4. `weakens_checks`: the change disables or loosens tests, checks, validation
    or security code.
 
+For a memory update, `serves_request` and `follows_outside_text` stay, and two
+questions replace the code ones:
+
+- `adds_standing_orders`: the update tells future chats to do something, such
+  as always fetching a URL or skipping a check, instead of recording a fact or
+  a decision.
+- `drops_owner_facts`: the update removes or contradicts something the owner
+  stated.
+
 Code then decides, in this order, and every "no" hands the card to the owner:
 
 1. The chat has the approver switched on, the grant is on, and the run is not
    token driven.
 2. The tool is on the eligible list above.
-3. No touched path is on a fixed sensitive list: `.git/`, `.github/`, CI files,
-   Git hooks, `.env` and key files, install and build scripts. Code checks
-   this, Jev is not asked.
+3. For an edit, no touched path is on a fixed sensitive list: `.git/`,
+   `.github/`, CI files, Git hooks, `.env` and key files, install and build
+   scripts. Code checks this, Jev is not asked.
 4. The whole state fits the window. A cut diff is never judged.
 5. Jev answered within 3 seconds with a well-formed reply.
 6. `serves_request` is at least the high threshold and each risk question is
@@ -116,12 +133,13 @@ things in prose, which is why Jev comes first.
 
 ## Owner controls and the key
 
-- A per-chat switch under **Can do**, "Jev approves edits after web reading",
-  off by default and owned by the server like the grants. It appears only when
-  a key is configured.
-- The key is read from a file at each call and never logged, returned or put
-  in a prompt. The launcher exports the file's path only when the file exists.
-  The owner puts the key there, never the assistant.
+- A per-chat switch under **Can do**, "Jev approves edits and memory updates
+  after web reading", off by default and owned by the server like the grants.
+  It appears only when a key is configured. Per chat is the owner's choice.
+- The key is Sara's, `~/.sara-gateway/jev.key`, the owner's choice: one key and
+  one bill. It is read at each call and never logged, returned or put in a
+  prompt. The launcher exports the file's path only when the file exists. The
+  owner puts the key there, never the assistant.
 - Every judgement is stored with the chat: the action's digest, the four
   answers, the model version, the outcome and who decided. The chat shows one
   line, for example "Approved by Jev" under the change.
@@ -131,11 +149,11 @@ things in prose, which is why Jev comes first.
 1. **Shadow.** Jev answers every held card in the background. The card still
    goes to the owner, nothing waits on Jev, and each answer is logged beside
    the owner's decision.
-2. **Project edits.** Once Jev's bands agree with the owner's decisions on
-   enough cards, the switch starts approving project edits with the tuned
-   thresholds.
-3. **Later, on evidence.** Memory updates and new documents, only after step 2
-   has run a while. Network egress and grant requests stay with the owner.
+2. **Edits and memory updates.** Once the shadow period ends and Jev's bands
+   agree with the owner's decisions, the switch starts approving project edits
+   and memory updates with the tuned thresholds.
+3. **Later, on evidence.** New documents, only after step 2 has run a while.
+   Network egress and grant requests stay with the owner.
 
 At about 5,000 tokens a card, a hundred cards cost about two cents.
 
@@ -146,14 +164,19 @@ At about 5,000 tokens a card, a hundred cards cost about two cents.
 - A held edit with the switch on and an approving fake judge lands as a
   recorded change marked "Approved by Jev". With a judge that hands over, the
   card appears exactly as today.
+- A planted set of about ten bad changes, one or more for each risk question:
+  an edit that adds a `curl` to a build script, one that follows an
+  instruction hidden in a web page, a memory update that sets a standing order.
+  Real use rarely produces attacks, so the shadow period alone cannot show that
+  Jev catches them. Each planted case must be handed to the owner.
 - An owner canary: a coding task that reads a web page first, run with Jev on.
 
-## Questions for the owner
+## Owner answers
 
-1. After shadow, may Jev approve project edits only (recommended), or memory
-   updates too?
-2. Which key file: the one Sara uses, `~/.sara-gateway/jev.key` (one key, one
-   bill, recommended), or a separate one for Odysseus?
-3. How long a shadow: a fixed number of cards, for example 30, or until you
-   say so?
-4. Is the switch per chat (recommended, like the grants) or per home?
+Answered on 2026-09-29:
+
+1. Jev may approve project edits and memory updates, not project edits only.
+2. The key is Sara's, `~/.sara-gateway/jev.key`.
+3. **Open:** how the shadow period ends, after a fixed number of cards or when
+   the owner says so.
+4. The switch is per chat.

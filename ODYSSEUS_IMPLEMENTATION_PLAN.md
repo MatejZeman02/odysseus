@@ -65,7 +65,7 @@ Progress labels are deliberately non-temporal:
 | G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
 | Native agent with owner-chosen tools | **Implemented, owner canary pending** | Per-chat **Can see** and **Can do** grants. An offline project shell, file edits recorded as undoable project changes, and memory updates saved as brief revisions. Evidence: focused tests and a scripted end-to-end run on 2026-09-25. Canary 4 in the owner guide is the real-model check. |
-| Auto approver (Jev or similar) | **Design proposed, owner answers pending** | Owner chose on 2026-09-25 to let a second model approve some held actions. `ODYSSEUS_AUTO_APPROVER_DESIGN.md` proposes project edits only, one exact action at a time, after a shadow period. Nothing is built. |
+| Auto approver (Jev or similar) | **Design agreed, shadow length open** | Owner chose on 2026-09-25 to let a second model approve some held actions, and on 2026-09-29 widened it to memory updates. `ODYSSEUS_AUTO_APPROVER_DESIGN.md` approves project edits and memory updates, one exact action at a time, after a shadow period. Memory updates first need an undo for an agent's brief revision. Nothing is built. |
 | Qwen Serve removal | **Decided, not started** | Owner decided on 2026-09-25. It runs on its own branch and merges only after canary 4 passes. |
 | Host shell, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No host shell, network from the project shell, package or service changes, or autonomous workflows. Project writes exist only through the recorded transaction above. |
 
@@ -1236,8 +1236,10 @@ when a measured MVP failure or accepted next milestone requires them.
 - [x] 2026-09-25: keep `ask_teacher` in project chats.
 - [x] 2026-09-25: let a second model, Jev or similar, approve some held
   actions.
-- [ ] Answer the four questions at the end of
-  `ODYSSEUS_AUTO_APPROVER_DESIGN.md` before any approver code is written.
+- [x] 2026-09-29: Jev may approve project edits and memory updates, the key
+  is Sara's `~/.sara-gateway/jev.key`, and the switch is per chat.
+- [ ] Decide how the approver's shadow period ends, the last open question in
+  `ODYSSEUS_AUTO_APPROVER_DESIGN.md`. It does not block building shadow mode.
 - [ ] Run canary 4 in `ODYSSEUS_OWNER_CANARY_GUIDE.md`. Deferred by the owner
   on 2026-09-25.
 - [ ] Answer the three `[!QUESTION]` callouts above before selecting the next
