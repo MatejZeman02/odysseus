@@ -65,6 +65,8 @@ Progress labels are deliberately non-temporal:
 | G2A sandboxed project inspection | **Rejected as Qwen runtime design; replacement complete** | Qwen 0.21.3 Podman cannot meet the boundary. The separate owner-controlled broker now supplies opt-in, read-only snapshot inspection to native Agent. |
 | G2B reviewed project patches | **Complete; owner testing active** | Qwen proposes complete text changes while physically read-only; an owner-enabled per-project browser mode lets Odysseus validate, atomically apply, display, verify, and conditionally roll them back |
 | Native agent with owner-chosen tools | **Implemented, owner canary pending** | Per-chat **Can see** and **Can do** grants. An offline project shell, file edits recorded as undoable project changes, and memory updates saved as brief revisions. Evidence: focused tests and a scripted end-to-end run on 2026-09-25. Canary 4 in the owner guide is the real-model check. |
+| Auto approver (Jev or similar) | **Design proposed, owner answers pending** | Owner chose on 2026-09-25 to let a second model approve some held actions. `ODYSSEUS_AUTO_APPROVER_DESIGN.md` proposes project edits only, one exact action at a time, after a shadow period. Nothing is built. |
+| Qwen Serve removal | **Decided, not started** | Owner decided on 2026-09-25. It runs on its own branch and merges only after canary 4 passes. |
 | Host shell, Codex-grade sandbox, and the `_HUGE` plan | **Deferred** | No host shell, network from the project shell, package or service changes, or autonomous workflows. Project writes exist only through the recorded transaction above. |
 
 ## Native agent with owner-chosen tools
@@ -80,7 +82,9 @@ What this settles, and what it does not:
 
 - **Harness.** Project chats default to the built-in agent. Qwen Serve is kept
   as an optional read-only worker and is no longer a prerequisite for project
-  work. Removing it is a separate decision.
+  work. On 2026-09-25 the owner decided to remove it. The removal runs on its
+  own branch and merges only after the owner's canary 4 passes, because that
+  run is what shows the built-in agent is enough on the owner's install.
 - **Grants.** Each Companion chat has a **Can see** group (`workspace_read`,
   `web_search`, `system_observe`, `sandbox_read`) and a **Can do** group
   (`project_shell`, `project_write`, `memory_write`). The server owns the
@@ -89,8 +93,10 @@ What this settles, and what it does not:
   runs without an approval card while the run has read only the owner's own
   checkout. Web pages, fetched text and context carried in from earlier runs
   put it back behind approval. This answers the open question on auto-approval
-  semantics for project edits, as far as the owner's quote goes. Anything
-  broader, such as approval by another model, stays open.
+  semantics for project edits, as far as the owner's quote goes. On
+  2026-09-25 the owner also chose to let a second model, Jev or similar,
+  approve some held actions. `ODYSSEUS_AUTO_APPROVER_DESIGN.md` proposes the
+  terms, and nothing approves on the owner's behalf until they answer it.
 - **Containment.** `project_shell` runs bash in an offline Bubblewrap overlay of
   the checkout: no network, no host home, secrets masked, credentials removed
   from `.git/config`, and every write discarded when the command ends. Real
@@ -107,7 +113,8 @@ What this settles, and what it does not:
   tokens, endpoints, webhooks, MCP servers, settings, other chats) are never
   pulled into a home by keywords, and a project home keeps its project tools
   on every turn instead of picking up calendar, notes or task tools. The Qwen
-  switch and **Patch** appear only where Qwen is set up.
+  switch and **Patch** appear only where Qwen is set up. `ask_teacher` stays
+  in project chats, the owner's choice of 2026-09-25.
 - **Hardening found by review, 2026-09-25.** The checkout handle Bubblewrap
   mounts from stayed open in the sandbox shell, so a command could read `.env`
   and write a Git hook into the real checkout through `/proc`. It is now closed
@@ -712,6 +719,10 @@ contract is in [`ODYSSEUS_G2C_EXECUTION_PLAN.md`](ODYSSEUS_G2C_EXECUTION_PLAN.md
 
 ## Qwen Serve adapter
 
+> [!NOTE]
+> The owner decided on 2026-09-25 to remove Qwen Serve. This section describes
+> the code that the removal branch will delete.
+
 Odysseus implements a narrow, capability-gated client rather than mirroring the
 complete Qwen API.
 
@@ -1221,5 +1232,13 @@ when a measured MVP failure or accepted next milestone requires them.
   configuration was exposed or changed. No local AgentMemory configuration was
   discovered. Dynamic aggregate counts deliberately remain in the owner-only
   runtime inventory rather than this tracked plan.
+- [x] 2026-09-25: remove Qwen Serve, on its own branch, merged after canary 4.
+- [x] 2026-09-25: keep `ask_teacher` in project chats.
+- [x] 2026-09-25: let a second model, Jev or similar, approve some held
+  actions.
+- [ ] Answer the four questions at the end of
+  `ODYSSEUS_AUTO_APPROVER_DESIGN.md` before any approver code is written.
+- [ ] Run canary 4 in `ODYSSEUS_OWNER_CANARY_GUIDE.md`. Deferred by the owner
+  on 2026-09-25.
 - [ ] Answer the three `[!QUESTION]` callouts above before selecting the next
   capability milestone. They do not block ordinary G1.5 stabilization.
