@@ -25,7 +25,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Modules that convert an owner-supplied path into read or write authority.
 _GUARDED = (
     "src/protected_workspace.py",
-    "src/qwen_harness.py",
     "src/project_patches.py",
     "routes/computer_help_routes.py",
     "routes/g1_continuity_routes.py",

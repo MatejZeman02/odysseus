@@ -1256,7 +1256,6 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 "model": destination.model,
                 "headers": destination.headers or {},
                 "endpoint_id": destination.endpoint_id or "",
-                "harness_kind": destination.harness_kind or "native",
             }
         finally:
             db.close()
@@ -1335,7 +1334,7 @@ def setup_companion_memory_routes(session_manager=None, *, memory_manager=None, 
                 row = db.query(DbSession).filter(DbSession.id == session_id, DbSession.owner == owner).one()
                 row.headers = resolved["headers"]
                 row.scope_kind, row.project_id = resolved["scope_kind"], resolved["project_id"]
-                row.endpoint_id, row.harness_kind, row.is_scope_primary = resolved["endpoint_id"], resolved["harness_kind"], False
+                row.endpoint_id, row.is_scope_primary = resolved["endpoint_id"], False
                 row.capability_grants = defaults_for_scope(resolved["scope_kind"])
                 row.updated_at = utcnow_naive()
                 db.commit()

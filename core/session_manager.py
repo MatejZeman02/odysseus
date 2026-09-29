@@ -153,8 +153,6 @@ class SessionManager:
             scope_kind=getattr(db_session, "scope_kind", None) or "general",
             project_id=getattr(db_session, "project_id", None),
             endpoint_id=getattr(db_session, "endpoint_id", None),
-            harness_kind=getattr(db_session, "harness_kind", None) or "native",
-            capability_profile=getattr(db_session, "capability_profile", None) or "project_read",
             capability_grants=getattr(db_session, "capability_grants", None) or {},
             is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
@@ -218,8 +216,6 @@ class SessionManager:
             scope_kind=getattr(db_session, "scope_kind", None) or "general",
             project_id=getattr(db_session, "project_id", None),
             endpoint_id=getattr(db_session, "endpoint_id", None),
-            harness_kind=getattr(db_session, "harness_kind", None) or "native",
-            capability_profile=getattr(db_session, "capability_profile", None) or "project_read",
             capability_grants=getattr(db_session, "capability_grants", None) or {},
             is_scope_primary=bool(getattr(db_session, "is_scope_primary", False)),
         )
@@ -528,8 +524,6 @@ class SessionManager:
             session.scope_kind = getattr(db_session, "scope_kind", None) or "general"
             session.project_id = getattr(db_session, "project_id", None)
             session.endpoint_id = getattr(db_session, "endpoint_id", None)
-            session.harness_kind = getattr(db_session, "harness_kind", None) or "native"
-            session.capability_profile = getattr(db_session, "capability_profile", None) or "project_read"
             session.capability_grants = getattr(db_session, "capability_grants", None) or {}
             session.is_scope_primary = bool(getattr(db_session, "is_scope_primary", False))
             return True

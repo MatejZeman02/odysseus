@@ -86,21 +86,6 @@ logger = logging.getLogger(__name__)
 _active_streams: Dict[str, dict] = {}
 
 
-def _qwen_project_harness_enabled(owner: str | None, session_id: str) -> bool:
-    """Return the durable harness choice without trusting browser toggle state."""
-    if not owner or not session_id:
-        return False
-    db = SessionLocal()
-    try:
-        row = db.query(DBSession.scope_kind, DBSession.harness_kind).filter(
-            DBSession.id == session_id,
-            DBSession.owner == owner,
-        ).first()
-        return bool(row and row.scope_kind == "project" and row.harness_kind == "qwen")
-    finally:
-        db.close()
-
-
 def _stream_failure_status(chunk: str) -> Optional[int]:
     """Extract a provider status without retaining provider-supplied detail."""
 
@@ -418,10 +403,9 @@ def _resolve_stored_project_workspace(request, session_id: str, owner: str | Non
     if not row or not row.workspace_root:
         return "", ""
 
-    # Match the existing native-workspace privilege boundary.  Qwen has its
-    # own rootless read-only containment path; this helper only binds native
-    # Odysseus tools.  A bearer token resolves to the admin who minted it, so
-    # ask about the credential itself as well as about its owner.
+    # Match the existing native-workspace privilege boundary.  A bearer token
+    # resolves to the admin who minted it, so ask about the credential itself
+    # as well as about its owner.
     from src.tool_security import owner_is_admin_or_single_user
     if is_delegated_credential(request) or not owner_is_admin_or_single_user(owner):
         return "", ""
@@ -1265,15 +1249,6 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = effective_user(request)
-            # The Qwen toggle is a persisted harness choice. A stale or
-            # duplicate browser submission must not silently turn an enabled
-            # read-only Qwen project turn into a native Agent turn. Native
-            # *Chat* remains available when the user deliberately chooses it.
-            if chat_mode == "agent" and _qwen_project_harness_enabled(owner, session):
-                raise HTTPException(
-                    409,
-                    "Qwen Companion is enabled for this project. The duplicate native Agent request was blocked.",
-                )
             if tool_approval_id:
                 _reject_delegated_tool_approval(request)
                 pending_tool_approval = tool_approval_store.peek(tool_approval_id)

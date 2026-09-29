@@ -327,7 +327,7 @@ def test_long_paste_threshold_matches_real_companion_pastes(store):
         )
 
 
-def test_long_project_paste_stays_out_of_workspace_and_is_qwen_context(store, tmp_path):
+def test_long_project_paste_stays_out_of_workspace_and_is_project_context(store, tmp_path):
     continuity, memory = store
     workspace = tmp_path / "dust"
     workspace.mkdir()

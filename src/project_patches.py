@@ -1,6 +1,7 @@
 """Validated, owner-approved project patch transactions.
 
-Qwen may propose bytes, but only this module can change a project checkout.
+The agent's edit tools name the bytes, but only this module can change a
+project checkout.
 It deliberately supports a small surface: complete UTF-8 contents for an
 existing regular file or a new regular file in safe project-relative
 directories.
@@ -12,7 +13,6 @@ import difflib
 import hashlib
 import json
 import os
-import re
 import stat
 import subprocess
 import tempfile
@@ -32,12 +32,6 @@ MAX_PATCH_FILES = 20
 MAX_FILE_BYTES = 512 * 1024
 MAX_PATCH_BYTES = 1024 * 1024
 MAX_PATH_LENGTH = 1024
-PATCH_START = "<odysseus-change-set>"
-PATCH_END = "</odysseus-change-set>"
-_ENVELOPE = re.compile(
-    re.escape(PATCH_START) + r"\s*(\{.*?\})\s*" + re.escape(PATCH_END),
-    re.DOTALL,
-)
 _project_locks_guard = threading.Lock()
 _project_locks: dict[str, threading.Lock] = {}
 
@@ -51,10 +45,8 @@ class PatchError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class PreparedProposal:
-    answer: str
+class PreparedChangeSet:
     summary: str
-    rationale: str
     base_git_revision: str
     payload: dict[str, Any]
 
@@ -215,47 +207,22 @@ def _unified_diff(path: str, old: str, new: str, operation: str) -> tuple[str, i
     return rendered, added, removed
 
 
-def proposal_instructions() -> str:
-    """Machine-readable response contract appended only to patch turns."""
-    return f"""# Reviewed patch proposal
-You remain read-only. Inspect every affected existing file before proposing a change. Do not call Edit, Write, Shell, web, MCP, memory, skills, or extensions.
-End with exactly one envelope in this form:
-{PATCH_START}
-{{"version":1,"summary":"short summary","rationale":"why this is coherent","changes":[{{"operation":"update","path":"relative/file.md","content":"complete new UTF-8 contents"}}]}}
-{PATCH_END}
-Allowed operations are update and create. Include complete file contents, never a partial diff. Do not include absolute paths, deletion, rename, binary data, permissions, commands, or more than {MAX_PATCH_FILES} files. Put ordinary user-facing explanation before the envelope."""
+def prepare_change_set(workspace: Path, changes: list[Any], *, summary: str) -> PreparedChangeSet:
+    """Validate complete-content changes against the checkout as it is now.
 
-
-def prepare_proposal(workspace: Path, raw_answer: str) -> PreparedProposal:
-    matches = list(_ENVELOPE.finditer(raw_answer or ""))
-    if len(matches) != 1:
-        raise PatchError("proposal_invalid", "Qwen did not return one valid patch proposal")
-    try:
-        envelope = json.loads(matches[0].group(1))
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise PatchError("proposal_invalid", "Qwen returned malformed patch data") from exc
-    if not isinstance(envelope, dict) or envelope.get("version") != PATCH_VERSION:
-        raise PatchError("proposal_invalid", "Patch proposal version is unsupported")
-    summary = str(envelope.get("summary") or "").strip()
-    rationale = str(envelope.get("rationale") or "").strip()
-    changes = envelope.get("changes")
-    if not summary or len(summary) > 500 or len(rationale) > 4000:
-        raise PatchError("proposal_invalid", "Patch summary or rationale is invalid")
-    if not isinstance(changes, list) or not changes or len(changes) > MAX_PATCH_FILES:
-        code = "proposal_too_large" if isinstance(changes, list) and len(changes) > MAX_PATCH_FILES else "proposal_invalid"
-        raise PatchError(code, "Patch must contain between 1 and 20 files", 413 if code == "proposal_too_large" else 400)
-
+    Each file gets its preimage hash and a server-generated diff here, so the
+    change set can only ever replace the exact bytes that were read.
+    """
     root = _project_root(workspace)
     if not (root / ".git").exists():
         raise PatchError("proposal_invalid", "Project is not a Git checkout", 409)
+    if not isinstance(changes, list) or not changes or len(changes) > MAX_PATCH_FILES:
+        raise PatchError("proposal_too_large", "An edit must touch between 1 and 20 files", 413)
     normalized = _normalize_changes(root, changes)
-    answer = (raw_answer[:matches[0].start()] + raw_answer[matches[0].end():]).strip()
-    return PreparedProposal(
-        answer=answer or summary,
-        summary=summary,
-        rationale=rationale,
+    return PreparedChangeSet(
+        summary=str(summary or "")[:500] or "Agent edit",
         base_git_revision=_git_head_or_unborn(root),
-        payload={"version": PATCH_VERSION, "changes": normalized},
+        payload={"version": PATCH_VERSION, "origin": "agent_edit", "changes": normalized},
     )
 
 
@@ -675,7 +642,7 @@ def apply_agent_edit(
     """Record and apply one native agent edit through the same transaction.
 
     The owner switched on "Edit project files" for the chat, which is the
-    approval. Everything else is the Qwen patch path unchanged: validated
+    approval. Everything else is the reviewed patch transaction: validated
     paths, preimage hashes, a durable rollback journal, atomic writes,
     verification that nothing outside the targets moved, and Undo through
     ``rollback_change_set``. One difference: uncommitted changes in a target
@@ -683,11 +650,7 @@ def apply_agent_edit(
     preimage hash proves it is replacing exactly them.
     """
     root = _project_root(workspace)
-    if not (root / ".git").exists():
-        raise PatchError("proposal_invalid", "Project is not a Git checkout", 409)
-    if not isinstance(changes, list) or not changes or len(changes) > MAX_PATCH_FILES:
-        raise PatchError("proposal_too_large", "An edit must touch between 1 and 20 files", 413)
-    normalized = _normalize_changes(root, changes)
+    prepared = prepare_change_set(root, changes, summary=summary)
     row = ProjectChangeSet(
         id=str(uuid.uuid4()),
         owner=owner,
@@ -698,13 +661,10 @@ def apply_agent_edit(
         endpoint_id=str(endpoint_id or "")[:200] or AGENT_EDIT_ENDPOINT,
         revision=1,
         status="proposed",
-        summary=str(summary or "")[:500] or "Agent edit",
+        summary=prepared.summary,
         rationale="",
-        base_git_revision=_git_head_or_unborn(root),
-        proposal_json=json.dumps(
-            {"version": PATCH_VERSION, "origin": "agent_edit", "changes": normalized},
-            ensure_ascii=False, separators=(",", ":"),
-        ),
+        base_git_revision=prepared.base_git_revision,
+        proposal_json=json.dumps(prepared.payload, ensure_ascii=False, separators=(",", ":")),
         result_json="{}",
     )
     db.add(row)

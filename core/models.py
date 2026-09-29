@@ -121,8 +121,6 @@ class Session:
     scope_kind: str = "general"
     project_id: Optional[str] = None
     endpoint_id: Optional[str] = None
-    harness_kind: str = "native"
-    capability_profile: str = "project_read"
     capability_grants: Optional[Dict[str, bool]] = None
     is_scope_primary: bool = False
 

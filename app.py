@@ -188,7 +188,6 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
     "/api/memory/audit",    # retains own 120s LLM inactivity timeout
-    "/api/g1/project-turn", # supervised Qwen turn has its own bounded deadlines
 )
 
 
@@ -888,19 +887,15 @@ app.include_router(setup_contacts_routes())
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
 
-# Experimental project continuity worker and reviewed-patch API. Both share a
-# single admission registry so Stop and one-turn-per-session also cover patch
-# proposals. The worker remains unavailable unless the local Qwen harness is
-# explicitly enabled.
-from src.companion_runs import CompanionRunRegistry
+# Companion homes, projects and their grants, plus the change sets that
+# project edits leave behind for review and Undo.
 from routes.g1_continuity_routes import setup_g1_continuity_routes
 from routes.companion_patch_routes import setup_companion_patch_routes
 from routes.companion_memory_routes import setup_companion_memory_routes
 from routes.computer_help_routes import setup_computer_help_routes
 
-companion_run_registry = CompanionRunRegistry()
-app.include_router(setup_g1_continuity_routes(session_manager, companion_run_registry))
-app.include_router(setup_companion_patch_routes(session_manager, companion_run_registry))
+app.include_router(setup_g1_continuity_routes(session_manager))
+app.include_router(setup_companion_patch_routes())
 app.include_router(setup_companion_memory_routes(
     session_manager, memory_manager=memory_manager, memory_vector=memory_vector,
 ))

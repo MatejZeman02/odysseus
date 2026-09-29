@@ -40,7 +40,7 @@ def _git_visible_paths(root: Path) -> list[Path]:
 
     Runtime state inside a checkout (for example Odysseus ``data/`` and log
     files) is commonly ignored. Hashing it made the application mistake its
-    own database/log writes for a Qwen workspace mutation. The integrity
+    own database/log writes for a workspace mutation. The integrity
     boundary should cover the project's Git-visible working tree instead.
     """
     result = subprocess.run(
@@ -100,9 +100,9 @@ def unborn_head(root: Path) -> bool:
 
 def snapshot_workspace(root: Path) -> WorkspaceSnapshot:
     # A project binding is a path grant, so the registered leaf must still be
-    # the directory it was approved as; otherwise a symlink swap could make a
-    # read-only Qwen worker inspect an unrelated tree.  ``PathIdentityError``
-    # is a ``ValueError``, so existing callers keep their handling.
+    # the directory it was approved as. Otherwise a symlink swap could point a
+    # read-only snapshot at an unrelated tree.  ``PathIdentityError`` is a
+    # ``ValueError``, so existing callers keep their handling.
     root = pin_directory(root).path
     if not (root / ".git").exists():
         raise ValueError("protected workspace must be a Git checkout")

@@ -185,9 +185,8 @@ class ScopedMemoryProvider(ABC):
 class ScopedMemoryProviderRegistry:
     """Select a continuity-safe provider for the synchronous prompt compiler.
 
-    ``ContextCompiler`` is intentionally synchronous because it is used by
-    both the native chat and Qwen paths, including while their async loops are
-    already active.  A scoped provider may opt into that bounded path by
+    ``ContextCompiler`` is intentionally synchronous because the native chat
+    path calls it while its async loop is already active.  A scoped provider may opt into that bounded path by
     exposing ``recall_scoped_sync``.  Providers that only expose asynchronous
     I/O are never run with a nested event loop; they require a future async
     compiler integration instead of becoming an accidental prompt authority.

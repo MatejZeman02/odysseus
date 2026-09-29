@@ -541,8 +541,8 @@ def vet_workspace(raw: str) -> Optional[str]:
     expanded = os.path.expanduser(raw)
     # A workspace is an authority boundary.  ``realpath`` would silently turn
     # a symlink selected in the browser into whichever directory it currently
-    # targets, including after a replacement.  Companion project, Qwen, and
-    # patch paths already reject their leaf binding when it is a symlink; the
+    # targets, including after a replacement.  Companion project and patch
+    # paths already reject their leaf binding when it is a symlink, and the
     # shared native-tool binding must provide the same guarantee.
     try:
         metadata = os.lstat(expanded)

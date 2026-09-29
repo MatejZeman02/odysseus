@@ -249,10 +249,12 @@ class Session(TimestampMixin, Base):
     # G1.5 companion state.  These are intentionally additive so old chats
     # remain ordinary native/general sessions until explicitly adopted.
     endpoint_id = Column(String, nullable=True, index=True)
+    # Nothing reads these two since Qwen Serve was removed. They stay because
+    # a database created with them holds NOT NULL columns with no server
+    # default, and a row inserted without them would be refused.
     harness_kind = Column(String, nullable=False, default="native")
     capability_profile = Column(String, nullable=False, default="project_read")
-    # Product-level tool grants are deliberately distinct from the Qwen
-    # capability profile.  They are owner-controlled session state, never a
+    # Product-level tool grants are owner-controlled session state, never a
     # browser-only affordance or a provider/model instruction.
     capability_grants = Column(JSON, nullable=False, default=dict)
     is_scope_primary = Column(Boolean, nullable=False, default=False)

@@ -3,8 +3,6 @@
 set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$repo_root"
-export ODYSSEUS_QWEN_HARNESS=1
-export ODYSSEUS_QWEN_BINARY="${ODYSSEUS_QWEN_BINARY:-$repo_root/data/qwen/0.21.3/node_modules/.bin/qwen}"
 # Computer Help's base image is an owner decision: a reviewed image pinned by
 # digest, reviewed and pulled deliberately. The launcher must never make that
 # choice, so it only forwards an image the owner already exported. With none

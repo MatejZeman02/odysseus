@@ -390,10 +390,10 @@ class CompanionMemoryStore:
                 workspace_root = project.workspace_root
             finally:
                 db.close()
-            # Project artifacts are source-controlled workspace files.  Qwen
-            # never writes them directly; G2B's transaction can create them
-            # under .artifacts. Captured user pastes remain in owner-private
-            # Odysseus storage and are merged into this read-only index.
+            # Project artifacts are source-controlled workspace files.  Only
+            # G2B's transaction can create them, under .artifacts. Captured
+            # user pastes remain in owner-private Odysseus storage and are
+            # merged into this read-only index.
             try:
                 root = _project_workspace_root_no_follow(workspace_root)
             except (MemoryScopeError, RuntimeError):
@@ -536,8 +536,8 @@ class CompanionMemoryStore:
         """Persist one large user paste without adding it to the raw transcript.
 
         The server chooses the path and scope. Project captures live in
-        Odysseus data rather than the checkout, so this does not weaken the
-        read-only Qwen workspace boundary.
+        Odysseus data rather than the checkout, so a paste never changes the
+        project.
         """
         if not isinstance(content, str) or len(content) < LONG_PASTE_ARTIFACT_THRESHOLD:
             raise MemoryScopeError(
