@@ -434,24 +434,6 @@ def test_qwen_project_prompt_treats_this_project_as_mounted_workspace():
     assert "Never ask the user to set a workspace" in prompt
 
 
-def test_reopening_project_does_not_force_qwen_or_race_native_selection():
-    source = open("static/js/sessions.js", encoding="utf-8").read()
-    select_session = source[source.index("export async function selectSession"):]
-
-    assert "body: JSON.stringify({ harness_kind: 'qwen' })" not in select_session
-    posture = select_session.index("const qwenActive")
-    first_yield = select_session.index("await import('./presets.js')")
-    assert posture < first_yield
-
-
-def test_explicit_qwen_toggle_updates_cached_route_before_reloading_sessions():
-    source = open("static/app.js", encoding="utf-8").read()
-    toggle = source[source.index("const qwenBtn = el('qwen-toggle-btn')"):source.index("const createCompanionProject")]
-
-    assert "cached.harness_kind = result.harness_kind" in toggle
-    assert toggle.index("cached.harness_kind = result.harness_kind") < toggle.index("await window.sessionModule?.loadSessions?.()")
-
-
 def test_qwen_turn_endpoint_rejects_a_native_project_session(monkeypatch):
     import routes.g1_continuity_routes as project_routes
 
@@ -500,14 +482,6 @@ def test_native_agent_route_uses_durable_qwen_harness_fence(monkeypatch):
     monkeypatch.setattr(chat_routes, "SessionLocal", lambda: Db())
 
     assert chat_routes._qwen_project_harness_enabled("alice", "project-session") is True
-
-
-def test_project_send_refreshes_harness_from_the_server_before_dispatch():
-    source = open("static/js/chat.js", encoding="utf-8").read()
-    qwen_branch = source[source.index("let _g15Session ="):source.index("if (_g15AgentMode")]
-
-    assert "/api/g1/sessions/${encodeURIComponent(streamSessionId)}/harness" in qwen_branch
-    assert "Object.assign(cached, harness)" in qwen_branch
 
 
 def test_stateful_chat_and_session_modules_have_one_browser_identity():
@@ -844,18 +818,6 @@ async def test_qwen_turn_is_rejected_before_admission_when_containment_is_not_re
     assert str(tmp_path) not in raised.value.detail
 
 
-def test_companion_sidebar_renders_safe_qwen_readiness_status():
-    source = open("static/js/sessions.js", encoding="utf-8").read()
-
-    assert "/api/g1/status" in source
-    assert "Qwen ready · project read-only" in source
-    assert "inspection unavailable" in source
-    # Qwen is optional, so a missing worker reads as a note, not a warning.
-    assert "Qwen optional · not set up" in source
-    assert "components?.qwen_binary" in source
-    assert "components?.bubblewrap" in source
-
-
 def test_qwen_timeout_error_is_specific_and_safe():
     import routes.g1_continuity_routes as project_routes
 
@@ -892,12 +854,10 @@ def test_companion_scope_is_disclosed_above_the_composer():
 
     assert index.index('id="companion-scope-banner"') < index.index('class="chat-input-bar"')
     assert "Project · ${projectName}" in sessions
-    assert "effectiveCapability === 'project_inspect'" in sessions
-    assert "'sandboxed inspection' : 'read-only'" in sessions
-    # A native project states what its grants allow, not a fixed label.
+    # A project states what its grants allow, not a fixed label.
     assert "_accessSummary(meta.chat_capabilities)" in sessions
     assert "Native · personal scope" in sessions
-    assert "Native · Qwen coming next" in sessions
+    assert "Native · diagnostics" in sessions
 
 
 def test_sidebar_research_recovery_uses_quiet_idle_status():

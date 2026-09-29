@@ -12,8 +12,8 @@ import presetsModule from './js/presets.js';
 import searchModule from './js/search.js';
 // Stateful chat modules must use one canonical URL. A query variant is a
 // distinct ES module, which previously split renderer/session state.
-import chatModule from './js/chat.js?v=20260925qwencontrols2';
-import compareModule from './js/compare/index.js?v=20260925qwencontrols2';
+import chatModule from './js/chat.js?v=20260929noqwen1';
+import compareModule from './js/compare/index.js?v=20260929noqwen1';
 import documentModule from './js/document.js?v=20260818artifactedit2';
 import searchChatModule from './js/search-chat.js';
 import { makeWindowDraggable } from './js/windowDrag.js';
@@ -24,7 +24,7 @@ import {
   settleSessionHydration
 } from './js/startupShell.js';
 import markdownModule from './js/markdown.js';
-import chatRenderer from './js/chatRenderer.js?v=20260925qwencontrols2';
+import chatRenderer from './js/chatRenderer.js?v=20260929noqwen1';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js?v=20260722memoryloading1';
 import voiceRecorderModule from './js/voiceRecorder.js';
@@ -1809,10 +1809,6 @@ function initializeEventListeners() {
       // Slide the pill to the active button
       const toggle = agentBtn.closest('.mode-toggle');
       if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
-      const companionBtn = el('qwen-toggle-btn');
-      if (companionBtn) companionBtn.style.display = mode === 'agent' && !companionBtn.hidden ? '' : 'none';
-      const patchBtn = el('project-patch-btn');
-      if (patchBtn) patchBtn.style.display = patchBtn.hidden ? 'none' : '';
       // Workspace pill + overflow entry are agent-only - hide immediately (no flash).
       try { workspaceModule.applyMode(mode); } catch (_) {}
       // Delay tool glow-up for a staggered effect
@@ -1958,76 +1954,9 @@ function initializeEventListeners() {
     });
   }
   setupToggle('web-toggle-btn', 'web-toggle', 'web');
-  // G1.5 removes native shell from the normal composer. The terminal-shaped
-  // control is now a server-owned Qwen harness switch, never a permission bit.
+  // The fork removes native shell from the normal composer. Clear the stale
+  // preference so no later code reads it as a permission bit.
   try { localStorage.removeItem('odysseus-tool-bash'); } catch (_) {}
-  const qwenBtn = el('qwen-toggle-btn');
-  if (qwenBtn) qwenBtn.addEventListener('click', async () => {
-    if (qwenBtn.disabled) return;
-    const sid = window.sessionModule?.getCurrentSessionId?.();
-    if (!sid) return uiModule.showToast?.('Open a project chat first', 1800);
-    qwenBtn.disabled = true;
-    try {
-      const rows = await fetch('/api/sessions', { credentials: 'same-origin' }).then(r => r.json());
-      const current = rows.find(s => s.id === sid);
-      if (!current || current.scope_kind !== 'project') throw new Error('Qwen is available in project homes only');
-      const next = current.harness_kind === 'qwen' ? 'native' : 'qwen';
-      if (next === 'qwen') {
-        const readinessResponse = await fetch('/api/g1/status', { credentials: 'same-origin', cache: 'no-store' });
-        const readiness = await readinessResponse.json().catch(() => ({}));
-        if (!readinessResponse.ok || !readiness.qwen_ready) {
-          const missing = [];
-          if (!readiness.enabled) missing.push('harness');
-          if (!readiness.components?.qwen_binary) missing.push('Qwen binary');
-          if (!readiness.components?.bubblewrap) missing.push('Bubblewrap');
-          throw new Error(`Qwen setup needed${missing.length ? `: ${missing.join(' + ')}` : ''}`);
-        }
-      }
-      const response = await fetch(`/api/g1/sessions/${encodeURIComponent(sid)}/harness`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ harness_kind: next }), credentials: 'same-origin'
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || 'Could not change Companion mode');
-      const cached = window.sessionModule?.getSessions?.().find(session => session.id === sid);
-      if (cached) cached.harness_kind = result.harness_kind;
-      qwenBtn.classList.toggle('active', result.harness_kind === 'qwen');
-      qwenBtn.setAttribute('aria-pressed', String(result.harness_kind === 'qwen'));
-      const patchBtn = el('project-patch-btn');
-      if (patchBtn) {
-        const patchAvailable = result.harness_kind === 'qwen';
-        patchBtn.hidden = false;
-        patchBtn.style.display = '';
-        patchBtn.disabled = !patchAvailable;
-        patchBtn.title = patchAvailable
-          ? 'Enable automatic reviewed project changes'
-          : 'Enable Qwen Companion to propose project changes';
-        if (!patchAvailable) {
-          patchBtn.classList.remove('active');
-          patchBtn.setAttribute('aria-pressed', 'false');
-          window.__odysseusPatchProposalSessionId = null;
-        }
-      }
-      uiModule.showToast?.(result.harness_kind === 'qwen' ? 'Qwen Companion: read-only' : 'Built-in agent · Chat capabilities apply', 1800);
-      if (result.harness_kind === 'qwen' && typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode('agent');
-      await window.sessionModule?.loadSessions?.();
-    } catch (error) { uiModule.showToast?.(error.message || 'Qwen Companion unavailable', 2500); }
-    finally { qwenBtn.disabled = false; }
-  });
-  const projectPatchBtn = el('project-patch-btn');
-  if (projectPatchBtn) projectPatchBtn.addEventListener('click', () => {
-    if (projectPatchBtn.disabled || projectPatchBtn.hidden) return;
-    if (typeof window.__odysseusSetChatMode === 'function') window.__odysseusSetChatMode('agent');
-    const sid = window.sessionModule?.getCurrentSessionId?.();
-    if (!sid) return;
-    const active = window.__odysseusPatchProposalSessionId !== sid;
-    projectPatchBtn.classList.toggle('active', active);
-    projectPatchBtn.setAttribute('aria-pressed', String(active));
-    projectPatchBtn.title = active
-      ? 'Automatic project changes enabled — click to return to read-only'
-      : 'Enable automatic reviewed project changes';
-    window.__odysseusPatchProposalSessionId = active ? sid : null;
-    uiModule.showToast?.(active ? 'Automatic project changes enabled · diffs and Undo remain available' : 'Returned to read-only project mode', 2400);
-  });
   const computerObserveBtn = el('computer-observe-btn');
   if (computerObserveBtn) computerObserveBtn.addEventListener('click', async () => {
     if (computerObserveBtn.disabled || computerObserveBtn.hidden) return;
@@ -2070,7 +1999,7 @@ function initializeEventListeners() {
         <input id="companion-project-name" name="project_name" class="styled-prompt-input" maxlength="120" autocomplete="off" required>
         <label for="companion-project-workspace">Git workspace folder</label>
         <div class="companion-project-workspace-row"><input id="companion-project-workspace" name="workspace_root" class="styled-prompt-input" readonly required placeholder="Choose an existing Git checkout"><button type="button" class="confirm-btn confirm-btn-secondary companion-project-browse">Browse…</button></div>
-        <p class="muted">Qwen will receive this checkout as one read-only mount. The project binding is saved by Odysseus, not browser storage.</p>
+        <p class="muted">Project chats read this checkout, and change it only through the grants you switch on. The project binding is saved by Odysseus, not browser storage.</p>
         <div class="companion-project-route"><span>Model</span><strong>${uiModule.esc(current.model)}</strong></div>
       </div>
       <div class="modal-footer"><button type="button" class="confirm-btn confirm-btn-secondary companion-project-cancel">Cancel</button><button type="submit" class="confirm-btn confirm-btn-primary">Create project</button></div>

@@ -5,20 +5,6 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_project_patch_action_is_project_qwen_only_and_uses_version_neutral_api():
-    index = (ROOT / "static/index.html").read_text()
-    sessions = (ROOT / "static/js/sessions.js").read_text()
-    chat = (ROOT / "static/js/chat.js").read_text()
-
-    assert 'id="project-patch-btn"' in index
-    assert "patchBtn.hidden = !qwenOffered" in sessions
-    assert "patchBtn.disabled = projectScope && !qwenActive" in sessions
-    assert "Enable Qwen Companion to propose project changes" in sessions
-    assert "window.__odysseusPatchProposalSessionId === streamSessionId" in chat
-    assert "/api/companion/projects/${encodeURIComponent(_g15Session.project_id)}/patch-turn/stream" in chat
-    assert "{ session_id: streamSessionId, message: _finalMsgWithInject }" in chat
-
-
 def test_patch_card_fetches_trusted_diff_and_sends_only_revision_on_mutation():
     renderer = (ROOT / "static/js/chatRenderer.js").read_text()
     card = renderer[renderer.index("export function buildProjectPatchCard"):renderer.index("export function stripToolBlocks")]
@@ -31,22 +17,6 @@ def test_patch_card_fetches_trusted_diff_and_sends_only_revision_on_mutation():
     assert "Roll back" in card
     assert "Review applied change" in card
     assert "replacement" not in card
-
-
-def test_automatic_mode_applies_only_the_server_proposal_revision():
-    chat = (ROOT / "static/js/chat.js").read_text()
-    assert "/api/companion/patches/${encodeURIComponent(proposalData.id)}/apply" in chat
-    assert "body: JSON.stringify({expected_revision: proposalData.revision})" in chat
-    assert "Project change applied and verified · diff and Undo available" in chat
-    assert "Concurrent changes preserved" in chat
-
-
-def test_automatic_project_changes_only_requests_a_patch_for_a_change_intent():
-    chat = (ROOT / "static/js/chat.js").read_text()
-    assert "function _requestLikelyNeedsProjectPatch" in chat
-    assert "_automaticProjectChanges" in chat
-    assert "&& _requestLikelyNeedsProjectPatch(_finalMsgWithInject)" in chat
-    assert "this question will stay read-only" in chat
 
 
 def test_patch_card_is_reconstructed_from_persisted_assistant_metadata():

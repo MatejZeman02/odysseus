@@ -1157,27 +1157,27 @@ export function roleTimestamp(when) {
   return ts;
 }
 
-function _qwenElapsed(seconds) {
+function _processElapsed(seconds) {
   const total = Math.max(0, Math.round(Number(seconds) || 0));
   return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
-/** Rebuild the compact, sanitized Qwen tool trace saved with its reply. */
-export function buildQwenProcessCard(process) {
+/** Rebuild the compact, sanitized tool trace saved with a reply. */
+export function buildProcessCard(process) {
   if (!process || typeof process !== 'object') return null;
   const events = Array.isArray(process.events) ? process.events : [];
   const card = document.createElement('details');
   const outcome = String(process.outcome || 'worked');
-  card.className = `qwen-process-card complete qwen-process-${outcome}`;
+  card.className = `process-card complete process-card-${outcome}`;
   const summary = document.createElement('summary');
   const title = document.createElement('span');
-  title.className = 'qwen-process-title';
-  title.textContent = `Process · ${outcome} for ${_qwenElapsed(process.elapsed_seconds)}`;
+  title.className = 'process-card-title';
+  title.textContent = `Process · ${outcome} for ${_processElapsed(process.elapsed_seconds)}`;
   summary.appendChild(title);
   const detail = document.createElement('div');
-  detail.className = 'qwen-process-detail';
+  detail.className = 'process-card-detail';
   const tools = createProcessThread();
-  tools.classList.add('qwen-process-timeline');
+  tools.classList.add('process-card-timeline');
 
   for (const rawEvent of events.slice(0, 100)) {
     if (!rawEvent || typeof rawEvent !== 'object') continue;
@@ -1200,7 +1200,7 @@ export function buildQwenProcessCard(process) {
   detail.appendChild(tools);
   if (process.failure_code) {
     const failure = document.createElement('p');
-    failure.className = 'qwen-process-failure';
+    failure.className = 'process-card-failure';
     const failureDetail = String(process.failure_detail || '').trim();
     failure.textContent = failureDetail || `Turn failed · ${String(process.failure_code).replaceAll('_', ' ')}`;
     detail.appendChild(failure);
@@ -3390,10 +3390,12 @@ export function addMessage(role, content, modelName, metadata) {
       wrap.appendChild(createUserMsgFooter(wrap));
     }
 
-    // Qwen progress is transcript data, not a live-only UI decoration.  Put
-    // its compact process block directly before the corresponding reply.
+    // Process traces are transcript data, not a live-only UI decoration. Put
+    // the compact process block directly before the corresponding reply.
+    // ``qwen_process`` and ``project_patch`` come from the removed Qwen
+    // worker. They stay readable so older chats keep their cards.
     if (role === 'assistant' && (metadata?.qwen_process || metadata?.computer_process)) {
-      const processCard = buildQwenProcessCard(metadata.qwen_process || metadata.computer_process);
+      const processCard = buildProcessCard(metadata.qwen_process || metadata.computer_process);
       if (processCard) box.appendChild(processCard);
     }
     box.appendChild(wrap);
@@ -3406,7 +3408,7 @@ export function addMessage(role, content, modelName, metadata) {
       if (patchCard) box.appendChild(patchCard);
     }
     if (role === 'user' && (metadata?.qwen_process || metadata?.computer_process)) {
-      const processCard = buildQwenProcessCard(metadata.qwen_process || metadata.computer_process);
+      const processCard = buildProcessCard(metadata.qwen_process || metadata.computer_process);
       if (processCard) box.appendChild(processCard);
     }
 
@@ -3437,7 +3439,7 @@ const chatRenderer = {
   updateSessionCostUI,
   recordSessionMetricsCost,
   roleTimestamp,
-  buildQwenProcessCard,
+  buildProcessCard,
   buildProjectPatchCard,
   stripToolBlocks,
   copyMessageText,

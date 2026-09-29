@@ -89,9 +89,9 @@ export function appendProcessCommentary(thread, value) {
   const text = String(value || '').trim();
   if (!thread || !text) return null;
   const last = thread.lastElementChild;
-  if (last?.classList.contains('qwen-process-commentary') && last.textContent === text) return last;
+  if (last?.classList.contains('process-card-commentary') && last.textContent === text) return last;
   const row = document.createElement('div');
-  row.className = 'qwen-process-commentary';
+  row.className = 'process-card-commentary';
   const body = document.createElement('p');
   body.textContent = text;
   row.appendChild(body);

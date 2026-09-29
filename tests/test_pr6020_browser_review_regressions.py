@@ -492,8 +492,6 @@ def test_superseded_stream_cleanup_leaves_replacement_state_alone():
     )
     script = f"""
       let currentAbort = null;
-      let _qwenAbortController = null;
-      let _qwenActiveSessionId = null;
       let isStreaming = false;
       let currentHolder = null;
       let _sendInFlight = false;
@@ -744,8 +742,6 @@ def test_stop_during_replacement_preflight_never_borrows_old_controller():
     )
     script = f"""
       let currentAbort = null;
-      let _qwenAbortController = null;
-      let _qwenActiveSessionId = null;
       let isStreaming = false;
       let currentHolder = null;
       let _sendInFlight = false;

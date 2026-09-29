@@ -60,10 +60,7 @@ function _syncCompanionScopeBanner(meta) {
     const projectName = meta.project_name || meta.name || 'Project';
     const workspaceName = String(meta.workspace_root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
     title.textContent = `Project · ${projectName}`;
-    const effectiveCapability = meta.effective_capability || meta.capability_profile || 'project_read';
-    detail.textContent = meta.harness_kind === 'qwen'
-      ? `Qwen · ${effectiveCapability === 'project_inspect' ? 'sandboxed inspection' : 'read-only'}${workspaceName ? ` · ${workspaceName}` : ''}`
-      : `${_accessSummary(meta.chat_capabilities)}${workspaceName ? ` · ${workspaceName}` : ''}`;
+    detail.textContent = `${_accessSummary(meta.chat_capabilities)}${workspaceName ? ` · ${workspaceName}` : ''}`;
   } else if (scope === 'personal') {
     title.textContent = 'Personal Advisor';
     detail.textContent = meta.chat_capabilities?.memory_write?.effective
@@ -71,7 +68,7 @@ function _syncCompanionScopeBanner(meta) {
       : 'Native · personal scope';
   } else {
     title.textContent = 'Computer Help';
-    detail.textContent = 'Native · Qwen coming next';
+    detail.textContent = 'Native · diagnostics';
   }
   banner.hidden = false;
   const supportsMemory = ['project', 'personal', 'computer'].includes(scope);
@@ -244,9 +241,8 @@ const _CHANGE_STATUS = {
   stale: 'Stale', apply_failed: 'Failed, restored', rollback_conflict: 'Undo blocked by later edits',
 };
 
-// Every change to a project checkout is a recorded change set, whether the
-// agent made it with an edit tool or the owner approved a Qwen proposal.
-// This list is where the owner reviews them and undoes one.
+// Every change to a project checkout is a recorded change set. This list is
+// where the owner reviews them and undoes one.
 async function openProjectChanges(meta) {
   if (!meta?.project_id) return;
   let rows;
@@ -2107,68 +2103,6 @@ function _appendFavoriteSessionItems(frag, items) {
 }
 
 let _renderRAF = null;
-let _g15Readiness = null;
-let _g15ReadinessPromise = null;
-
-function _loadG15Readiness() {
-  if (_g15ReadinessPromise) return _g15ReadinessPromise;
-  _g15ReadinessPromise = fetch(`${API_BASE}/api/g1/status`, {
-    credentials: 'same-origin', cache: 'no-store',
-  }).then(async response => {
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
-    _g15Readiness = result;
-    return result;
-  }).catch(error => {
-    _g15Readiness = { error: error?.message || 'unavailable', qwen_ready: false, components: {} };
-    return _g15Readiness;
-  }).finally(() => {
-    _g15ReadinessPromise = null;
-    // Session hydration owns the bootstrap row. A parallel readiness request
-    // must not replace that row with stale cached sessions after hydration
-    // failed (or before it has authoritatively completed).
-    if (!document.getElementById('session-list-loading')) renderSessionList();
-  });
-  return _g15ReadinessPromise;
-}
-
-// Qwen is an optional project worker. Its switch, and the Patch mode that
-// needs it, appear only in project chats where Qwen is set up or already on.
-function _syncQwenControls(meta, id) {
-  const projectScope = !!meta && meta.scope_kind === 'project';
-  const qwenActive = projectScope && meta.harness_kind === 'qwen';
-  const qwenOffered = qwenActive || (projectScope && !!_g15Readiness?.qwen_ready);
-  const chatMode = !!document.getElementById('mode-chat-btn')?.classList.contains('active');
-  const qwenBtn = document.getElementById('qwen-toggle-btn');
-  if (qwenBtn) {
-    qwenBtn.hidden = !qwenOffered;
-    qwenBtn.style.display = qwenOffered && !chatMode ? '' : 'none';
-    qwenBtn.classList.toggle('active', qwenActive);
-    qwenBtn.setAttribute('aria-pressed', String(qwenActive));
-    qwenBtn.title = qwenActive ? 'Qwen Companion · read-only project access' : 'Qwen Companion (project read-only)';
-  }
-  const patchBtn = document.getElementById('project-patch-btn');
-  if (!patchBtn) return;
-  patchBtn.hidden = !qwenOffered;
-  patchBtn.style.display = qwenOffered ? '' : 'none';
-  patchBtn.disabled = projectScope && !qwenActive;
-  patchBtn.title = qwenActive
-    ? 'Enable automatic reviewed project changes'
-    : 'Enable Qwen Companion to propose project changes';
-  if (window.__odysseusPatchProposalSessionId && window.__odysseusPatchProposalSessionId !== id) {
-    window.__odysseusPatchProposalSessionId = null;
-  }
-  const patchActive = qwenActive && window.__odysseusPatchProposalSessionId === id;
-  patchBtn.classList.toggle('active', patchActive);
-  patchBtn.setAttribute('aria-pressed', String(patchActive));
-  if (!qwenActive && window.__odysseusPatchProposalSessionId === id) window.__odysseusPatchProposalSessionId = null;
-}
-
-export function refreshG15Readiness() {
-  _g15Readiness = null;
-  return _loadG15Readiness();
-}
-
 export function renderSessionList() {
   // Debounce rapid re-renders within the same frame
   if (_renderRAF) cancelAnimationFrame(_renderRAF);
@@ -2296,44 +2230,13 @@ function _renderSessionListImpl() {
     else { const button = document.createElement('button'); button.className = 'list-item companion-home'; button.textContent = 'Computer Help · diagnostics'; button.onclick = () => openBuiltinHome('computer'); _frag.appendChild(button); }
     const projectsHeading = document.createElement('div');
     projectsHeading.className = 'date-section-header'; projectsHeading.textContent = 'Projects'; _frag.appendChild(projectsHeading);
-    const readiness = document.createElement('div');
-    readiness.id = 'companion-qwen-readiness';
-    readiness.className = 'companion-qwen-readiness';
-    readiness.setAttribute('role', 'status');
-    readiness.setAttribute('aria-live', 'polite');
-    if (!_g15Readiness) {
-      readiness.textContent = 'Qwen status · checking…';
-      _loadG15Readiness();
-    } else if (_g15Readiness.qwen_ready) {
-      readiness.classList.add('ready');
-      if (_g15Readiness.inspection?.enabled && !_g15Readiness.inspection?.ready) {
-        readiness.textContent = 'Qwen ready · project read-only · inspection unavailable';
-        readiness.title = 'The pinned Qwen Podman sandbox did not pass the G2A isolation gate';
-      } else {
-        readiness.textContent = 'Qwen ready · project read-only';
-      }
-    } else if (_g15Readiness.error) {
-      readiness.classList.add('unavailable');
-      readiness.textContent = 'Qwen status unavailable';
-      readiness.title = 'Odysseus could not read the local Qwen readiness status';
-    } else {
-      const missing = [];
-      if (!_g15Readiness.enabled) missing.push('harness');
-      if (!_g15Readiness.components?.qwen_binary) missing.push('Qwen binary');
-      if (!_g15Readiness.components?.bubblewrap) missing.push('Bubblewrap');
-      // Project chats run on the built-in agent. Qwen is an optional worker,
-      // so its missing parts are a note, not a warning.
-      readiness.textContent = 'Qwen optional · not set up';
-      readiness.title = `Project chats use the built-in agent. The optional Qwen worker needs: ${missing.join(', ') || 'local setup'}`;
-    }
-    _frag.appendChild(readiness);
     const newProject = document.createElement('button'); newProject.type = 'button'; newProject.className = 'list-item companion-home'; newProject.textContent = '+ New project';
     newProject.onclick = () => window.__odysseusCreateCompanionProject?.(); _frag.appendChild(newProject);
     companionProjects.forEach(project => {
       const home = companion.find(s => s.scope_kind === 'project' && s.project_id === project.id && s.is_scope_primary);
       const row = document.createElement('div'); row.className = 'list-item companion-home'; row.dataset.projectId = project.id;
       const open = document.createElement('button'); open.type = 'button'; open.className = 'grow';
-      open.textContent = `${project.name}${home?.harness_kind === 'qwen' ? ' · Qwen' : home ? '' : ' · no chat'}`;
+      open.textContent = `${project.name}${home ? '' : ' · no chat'}`;
       open.addEventListener('click', () => openProjectHome(project));
       const thread = document.createElement('button'); thread.type = 'button'; thread.className = 'msg-action-btn';
       thread.title = 'New project thread'; thread.setAttribute('aria-label', `New thread in ${project.name}`); thread.textContent = '+';
@@ -3130,13 +3033,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     // per-chat grants.  Do not silently turn Web/System access on merely
     // because a different session was opened.
     // Apply it before the first await so a fast send cannot use the previous
-    // chat's mode. Harness selection itself is durable server state and is
-    // never changed merely by reopening a project.
-    const qwenActive = !!meta && meta.scope_kind === 'project' && meta.harness_kind === 'qwen';
-    _syncQwenControls(meta, id);
-    if (!_g15Readiness && meta?.scope_kind === 'project' && !qwenActive) {
-      _loadG15Readiness().then(() => { if (currentSessionId === id) _syncQwenControls(meta, id); });
-    }
+    // chat's mode.
     const setModeReliably = (mode) => {
       const toggleState = Storage.loadToggleState(); toggleState.mode = mode; Storage.saveToggleState(toggleState);
       const agent = document.getElementById('mode-agent-btn'), chat = document.getElementById('mode-chat-btn');

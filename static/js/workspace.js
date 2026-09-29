@@ -220,7 +220,7 @@ export async function openWorkspaceBrowser(options = {}) {
   const use = modal.querySelector('#workspace-use');
   if (title) title.lastChild.textContent = _browserMode === 'project' ? 'Select project Git checkout' : 'Select workspace';
   if (note) note.textContent = _browserMode === 'project'
-    ? 'Choose the Git checkout this project may read. The saved project binding is server-owned; Qwen mounts it read-only.'
+    ? 'Choose the Git checkout this project may read. The saved project binding is server-owned.'
     : 'File tools are confined to this folder. Shell commands start here but are not sandboxed and can reach outside it. A workspace scopes the tools; it is not a security boundary.';
   if (use) use.textContent = _browserMode === 'project' ? 'Use for project' : 'Use this folder';
   modal.style.display = 'flex';

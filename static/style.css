@@ -9537,8 +9537,8 @@ body.fullwidth-chat .chat-history {
   line-height: 1.5;
 }
 
-/* Qwen Companion exposes only its sanitized read-only progress. */
-.qwen-process-card {
+/* A saved, sanitized tool trace, shown above a Computer Help reply. */
+.process-card {
   display: block;
   margin: 8px 0 8px 28px;
   width: min(900px, calc(85% - 20px));
@@ -9547,7 +9547,7 @@ body.fullwidth-chat .chat-history {
   background: transparent;
   overflow: visible;
 }
-.qwen-process-card > summary {
+.process-card > summary {
   cursor: pointer;
   padding: 5px 8px;
   color: color-mix(in srgb, var(--fg) 78%, transparent);
@@ -9558,23 +9558,23 @@ body.fullwidth-chat .chat-history {
   background: color-mix(in srgb, var(--red) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--red) 22%, transparent);
 }
-.qwen-process-card > summary:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
-.qwen-process-card > summary::-webkit-details-marker { display: none; }
-.qwen-process-card > summary::before { content: '◌'; margin-right: 8px; color: var(--red); }
-.qwen-process-card.complete > summary::before { content: '✓'; }
-.qwen-process-card.qwen-process-failed > summary::before { content: '×'; color: var(--color-error, #ef5350); }
-.qwen-process-card.qwen-process-stopped > summary::before { content: '■'; }
-.qwen-process-detail { position: relative; margin: 3px 0 0; padding: 0; border: 0; }
-.qwen-process-timeline.agent-thread { margin: 0; max-width: none; width: 100%; }
-.qwen-process-timeline .agent-thread-header { font-size: 1em; }
-.qwen-process-timeline .agent-thread-tool { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; font-size: 1em; font-weight: 400; text-transform: none; letter-spacing: normal; }
-.qwen-process-timeline .agent-thread-status { flex: 0 0 auto; }
-.qwen-process-commentary { position: relative; margin: 5px 8px 5px 0; padding: 3px 8px 3px 0; color: var(--fg); font-family: inherit; font-size: 1em; line-height: 1.45; text-align: left; }
-.qwen-process-commentary::before { content: ''; position: absolute; left: -20px; top: 12px; width: 8px; height: 8px; box-sizing: border-box; border: 2px solid var(--bg); border-radius: 50%; background: color-mix(in srgb, var(--red) 65%, var(--bg)); z-index: 1; }
-.qwen-process-commentary p { margin: 0; max-width: 78ch; }
-.qwen-process-failure { margin: 6px 0 4px 22px; color: var(--color-error, #ef5350); font-size: .9em; }
+.process-card > summary:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
+.process-card > summary::-webkit-details-marker { display: none; }
+.process-card > summary::before { content: '◌'; margin-right: 8px; color: var(--red); }
+.process-card.complete > summary::before { content: '✓'; }
+.process-card.process-card-failed > summary::before { content: '×'; color: var(--color-error, #ef5350); }
+.process-card.process-card-stopped > summary::before { content: '■'; }
+.process-card-detail { position: relative; margin: 3px 0 0; padding: 0; border: 0; }
+.process-card-timeline.agent-thread { margin: 0; max-width: none; width: 100%; }
+.process-card-timeline .agent-thread-header { font-size: 1em; }
+.process-card-timeline .agent-thread-tool { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; font-size: 1em; font-weight: 400; text-transform: none; letter-spacing: normal; }
+.process-card-timeline .agent-thread-status { flex: 0 0 auto; }
+.process-card-commentary { position: relative; margin: 5px 8px 5px 0; padding: 3px 8px 3px 0; color: var(--fg); font-family: inherit; font-size: 1em; line-height: 1.45; text-align: left; }
+.process-card-commentary::before { content: ''; position: absolute; left: -20px; top: 12px; width: 8px; height: 8px; box-sizing: border-box; border: 2px solid var(--bg); border-radius: 50%; background: color-mix(in srgb, var(--red) 65%, var(--bg)); z-index: 1; }
+.process-card-commentary p { margin: 0; max-width: 78ch; }
+.process-card-failure { margin: 6px 0 4px 22px; color: var(--color-error, #ef5350); font-size: .9em; }
 @media (max-width: 700px) {
-  .qwen-process-card { margin-left: 8px; width: calc(100% - 16px); max-width: none; }
+  .process-card { margin-left: 8px; width: calc(100% - 16px); max-width: none; }
 }
 .project-patch-toggle { width: auto; gap: 5px; padding-inline: 8px; }
 .project-patch-toggle span { font-size: 11px; }
@@ -9630,15 +9630,6 @@ body.fullwidth-chat .chat-history {
 .companion-project-workspace-row input { flex: 1; min-width: 0; }
 .companion-project-route { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .companion-project-route strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.companion-qwen-readiness {
-  margin: 1px 8px 6px;
-  padding: 4px 6px;
-  color: var(--muted, var(--fg));
-  font-size: .84em;
-  line-height: 1.25;
-}
-.companion-qwen-readiness.ready { color: #63b56b; }
-.companion-qwen-readiness.unavailable { color: #d79a5b; }
 .live-reply-content {
   animation: fadeSlideIn 0.3s ease-out;
 }

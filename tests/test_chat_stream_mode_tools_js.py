@@ -1,8 +1,8 @@
 """A model-driven switch to Agent mode keeps hidden composer controls hidden.
 
-The Qwen and Patch buttons carry `hidden` in chats where Qwen is not set up,
-but their `.input-icon-btn` class sets `display: flex`, which beats the
-attribute. Clearing the inline `display: none` would show them anyway.
+The Inspect button carries `hidden` in chats without System inspection, but
+its `.input-icon-btn` class sets `display: flex`, which beats the attribute.
+Clearing the inline `display: none` would show it anyway.
 """
 
 import json
@@ -36,8 +36,7 @@ function button(id, hidden) {
 }
 const buttons = [
   button('web-toggle-btn', false),
-  button('qwen-toggle-btn', true),
-  button('project-patch-btn', true),
+  button('computer-observe-btn', true),
 ];
 globalThis.document = {
   addEventListener() {},
@@ -71,5 +70,5 @@ def test_switching_to_agent_mode_leaves_hidden_controls_hidden():
 
     assert result.returncode == 0, result.stderr
     seen = json.loads(result.stdout)
-    assert seen["agent"] == {"web-toggle-btn": "", "qwen-toggle-btn": "none", "project-patch-btn": "none"}
-    assert seen["chat"] == {"web-toggle-btn": "none", "qwen-toggle-btn": "none", "project-patch-btn": "none"}
+    assert seen["agent"] == {"web-toggle-btn": "", "computer-observe-btn": "none"}
+    assert seen["chat"] == {"web-toggle-btn": "none", "computer-observe-btn": "none"}
