@@ -1,6 +1,8 @@
 from pathlib import Path
 import re
 
+from tests.helpers.stylesheets import app_css
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,7 +25,7 @@ def test_patch_card_is_reconstructed_from_persisted_assistant_metadata():
     renderer = (ROOT / "static/js/chatRenderer.js").read_text()
     assert "metadata?.project_patch" in renderer
     assert "buildProjectPatchCard(metadata.project_patch)" in renderer
-    assert ".project-patch-card" in (ROOT / "static/style.css").read_text()
+    assert ".project-patch-card" in app_css()
 
 
 def test_failed_process_replays_its_actionable_safe_detail():

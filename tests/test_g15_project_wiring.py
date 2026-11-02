@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from tests.helpers.stylesheets import app_css
+
 
 
 def _browser_request():
@@ -251,7 +253,7 @@ def test_chats_header_has_a_stable_regular_chat_action_and_project_creation_stay
     index = open("static/index.html", encoding="utf-8").read()
     app = open("static/app.js", encoding="utf-8").read()
     sessions = open("static/js/sessions.js", encoding="utf-8").read()
-    styles = open("static/style.css", encoding="utf-8").read()
+    styles = app_css()
 
     assert 'id="chats-new-chat-btn"' in index
     assert 'id="companion-new-project-btn"' not in index
@@ -260,7 +262,10 @@ def test_chats_header_has_a_stable_regular_chat_action_and_project_creation_stay
     assert "newProject.textContent = '+ New project'" in sessions
     assert "window.__odysseusCreateCompanionProject?.()" in sessions
     assert ".section-header-flex:hover .chats-manage-btn .list-item-plus-label" in styles
-    assert "opacity: 0.58 !important" in styles
+    # The manage button fades at rest and reveals on section hover. Upstream
+    # owns the resting value, so assert the rule exists rather than its number.
+    manage = re.search(r"#sessions-section \.chats-manage-btn \{([^}]*)\}", styles)
+    assert manage and "opacity:" in manage.group(1)
 
 
 def test_message_fork_uses_fresh_project_thread_for_project_scopes():
@@ -299,13 +304,20 @@ def test_stateful_chat_and_session_modules_have_one_browser_identity():
     index = open("static/index.html", encoding="utf-8").read()
 
     chat_import = re.search(r"from './js/chat\.js(?P<query>\?v=[^']+)?';", app)
-    chat_preload = re.search(r'href="/static/js/chat\.js(?P<query>\?v=[^"]+)?"', index)
-    assert chat_import and chat_preload
-    assert chat_import.group("query") == chat_preload.group("query")
+    assert chat_import
     assert "from './js/sessions.js';" in app
-    assert "sessions.js?v=" not in index
-    assert 'type="module" src="/static/js/chat.js' not in index
-    assert 'type="module" src="/static/js/sessions.js' not in index
+    # A module is one instance per URL, query string included, so two URLs for
+    # one file give each copy its own current-session and streaming state. The
+    # fork used to forbid the top-level script tags outright. Upstream loads
+    # these modules both ways on purpose, so the browser can start fetching
+    # them before app.js has been parsed, and pins the keys together in
+    # tests/test_stream_completion_scroll_stability.py. Check the identity the
+    # fork depends on instead: every URL index.html gives a stateful module,
+    # preload and tag alike, is the one app.js imports.
+    chat_urls = set(re.findall(r'"/static/js/chat\.js([^"]*)"', index))
+    assert chat_urls == {chat_import.group("query") or ""}
+    session_urls = set(re.findall(r'"/static/js/sessions\.js([^"]*)"', index))
+    assert session_urls == {""}
     assert "from './js/workspace.js';" in app
     assert "from './workspace.js';" in open("static/js/sessions.js", encoding="utf-8").read()
     assert "workspace.js?v=" not in app

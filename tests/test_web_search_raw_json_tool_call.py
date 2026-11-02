@@ -10,16 +10,7 @@ only recognized fenced blocks, [TOOL_CALL], XML invoke, and tool_code markup.
 """
 import json
 
-from tests.helpers.import_state import temporary_import_stubs
-
-with temporary_import_stubs(
-    'sqlalchemy', 'sqlalchemy.orm', 'sqlalchemy.ext', 'sqlalchemy.ext.declarative',
-    'sqlalchemy.ext.hybrid', 'sqlalchemy.sql', 'sqlalchemy.sql.expression',
-    'src.database', 'core.models', 'core.database', 'core.auth'
-):
-    import src.agent_tools  # noqa: E402, F401
-    from src.tool_parsing import parse_tool_blocks, strip_tool_blocks  # noqa: E402
-
+from src.tool_parsing import parse_tool_blocks, strip_tool_blocks
 
 def test_raw_json_after_web_search_phrase_runs_as_web_search():
     text = (

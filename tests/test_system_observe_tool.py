@@ -58,8 +58,17 @@ def test_system_observe_is_registered_and_gated_by_chat_capability(monkeypatch):
 
     monkeypatch.setattr(execution, "_scope_kind_for_session", lambda _session_id: "personal")
     monkeypatch.setattr(execution, "_session_capability_enabled", lambda _session_id, _name: False)
+    # The executor needs an owner and a covering authority before it reaches
+    # scope policy, exactly as stream_agent_loop supplies them in production.
+    from src.agent_runtime.authority import OperationGrant, RequestAuthority
+
+    authority = RequestAuthority(
+        "system-observe-test", "admin", "personal", "",
+        (OperationGrant("system_observe"),), resource_roots=(),
+    )
     _description, blocked = asyncio.run(execute_tool_block(
-        ToolBlock("system_observe", "{}"), session_id="personal", security_context=NO_TOOL_SECURITY_CONTEXT,
+        ToolBlock("system_observe", "{}"), owner="admin", session_id="personal",
+        security_context=NO_TOOL_SECURITY_CONTEXT, request_authority=authority,
     ))
     assert blocked["policy"] == "chat_capability"
 

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 import json
 import subprocess
 from collections import namedtuple
@@ -94,9 +96,30 @@ def test_shell_grant_explains_a_missing_sandbox():
 
 # -- executor backstop ------------------------------------------------------
 
+_EXECUTOR_WORKSPACE = Path(tempfile.mkdtemp(prefix="companion-executor-"))
+
+
 def _run(block, session_id="chat"):
+    """Call the shared executor the way a Companion turn reaches it.
+
+    The executor refuses an operation the request authority does not cover,
+    and refuses an owned operation with no owner, before any scope policy
+    runs. Production arms both in stream_agent_loop, so these tests arm them
+    too. The grant covers exactly the tool under test, and its sealed root is
+    a throwaway directory, so neither ever stands in for the owner's
+    capability grant or for the project checkout.
+    """
+    from src.agent_runtime.authority import OperationGrant, RequestAuthority
+
+    workspace = str(_EXECUTOR_WORKSPACE)
+    authority = RequestAuthority(
+        "companion-backstop-test", "admin", session_id, workspace,
+        (OperationGrant(block.tool_type),),
+    )
     return asyncio.run(tool_execution.execute_tool_block(
-        block, session_id=session_id, security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        block, owner="admin", session_id=session_id, workspace=workspace,
+        security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        request_authority=authority,
     ))
 
 
@@ -135,6 +158,14 @@ def test_executor_refuses_scoped_tools_when_the_chat_cannot_be_read(monkeypatch)
         ("manage_memory", "{}"),
     ):
         _desc, result = _run(Block(tool, content))
+        assert result.get("blocked") is True, tool
+        if result.get("failure_kind") == "resource_identity_denied":
+            # The global memory tool resolves its backend through the same
+            # database, so upstream's resource-identity gate fails closed
+            # ahead of scope policy. Both refusals keep a Companion home from
+            # degrading into ordinary chat, which is what this test is for.
+            assert tool == "manage_memory", tool
+            continue
         assert result.get("policy") == "scope_unreadable", tool
         assert "Try again" in result["error"]
 
@@ -416,15 +447,19 @@ def _run_agent(monkeypatch, calls, prompt="Rename the README title.", **kwargs):
     return executed, offered, chunks
 
 
-def test_granted_edit_runs_after_a_project_command_in_the_same_run(monkeypatch):
+def test_granted_edit_runs_after_a_project_command_in_the_same_run(monkeypatch, tmp_path):
     # Every round rescans the conversation. The project command's own result
     # must not read as outside content on that rescan and cancel the grant.
+    # A project chat always has a checkout attached, and the file tools are
+    # only offered when one is: without it the calls would be dropped as
+    # unoffered and the test would prove nothing about the grant.
     executed, _offered, chunks = _run_agent(
         monkeypatch,
         [
             ("project_shell", {"command": "cat README.md"}),
             ("edit_file", {"path": "README.md", "old_string": "# Demo", "new_string": "# Demo project"}),
         ],
+        workspace=str(tmp_path),
         relevant_tools={"project_shell", "edit_file"},
         owner_granted_tools={"edit_file"},
     )
@@ -432,20 +467,24 @@ def test_granted_edit_runs_after_a_project_command_in_the_same_run(monkeypatch):
     assert not any("approval_required" in chunk for chunk in chunks)
 
 
-def test_granted_edit_still_needs_the_owner_after_a_web_page(monkeypatch):
-    executed, _offered, _chunks = _run_agent(
+def test_granted_edit_still_needs_the_owner_after_a_web_page(monkeypatch, tmp_path):
+    executed, offered, _chunks = _run_agent(
         monkeypatch,
         [
             ("web_fetch", {"url": "https://example.invalid/"}),
             ("edit_file", {"path": "README.md", "old_string": "# Demo", "new_string": "# Owned"}),
         ],
+        workspace=str(tmp_path),
         relevant_tools={"web_fetch", "edit_file"},
         owner_granted_tools={"edit_file"},
     )
+    # The edit was held by the approval gate, not quietly missing from the
+    # tool surface: the checkout is attached and the editor was offered.
+    assert "edit_file" in offered[-1]
     assert executed == ["web_fetch"]
 
 
-def test_forced_companion_tools_are_offered_when_retrieval_misses_them(monkeypatch):
+def test_forced_companion_tools_are_offered_when_retrieval_misses_them(monkeypatch, tmp_path):
     import src.tool_index as tool_index
 
     class _Retrieval:
@@ -456,6 +495,7 @@ def test_forced_companion_tools_are_offered_when_retrieval_misses_them(monkeypat
     _executed, offered, _chunks = _run_agent(
         monkeypatch,
         [],
+        workspace=str(tmp_path),
         forced_tools={"update_memory", "project_shell", "write_file"},
         disabled_tools={"write_file"},
     )

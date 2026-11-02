@@ -553,6 +553,24 @@ def test_companion_agent_prompt_explains_scoped_legacy_tool_boundary():
     assert "save it with update_memory" not in prompt
 
 
+def _backstop_owner_and_authority(tool, session_id):
+    """Owner and authority the shared executor now needs to reach scope policy.
+
+    Upstream's executor refuses an operation the request authority does not
+    cover, and refuses an owned operation with no owner, before any Companion
+    scope policy runs. Production supplies both through stream_agent_loop, so a
+    test of the backstop supplies them too, or it only proves the outer gates
+    fire. The authority grants exactly the tool under test and no filesystem
+    root, so nothing here stands in for a scope grant.
+    """
+    from src.agent_runtime.authority import OperationGrant, RequestAuthority
+
+    return "admin", RequestAuthority(
+        "companion-backstop-test", "admin", session_id, "",
+        (OperationGrant(tool),), resource_roots=(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_executor_backstop_denies_legacy_tools_for_companion_scope(monkeypatch):
     """A bypassed route-level disabled set must not reopen global memory."""
@@ -566,6 +584,8 @@ async def test_executor_backstop_denies_legacy_tools_for_companion_scope(monkeyp
         block,
         session_id="personal-home",
         security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        owner=_backstop_owner_and_authority(block.tool_type, "personal-home")[0],
+        request_authority=_backstop_owner_and_authority(block.tool_type, "personal-home")[1],
     )
 
     assert desc == "manage_memory: BLOCKED"
@@ -588,10 +608,19 @@ async def test_executor_backstop_denies_dynamic_legacy_memory_mcp_tool(monkeypat
         block,
         session_id="project-home",
         security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        owner=_backstop_owner_and_authority(block.tool_type, "project-home")[0],
+        request_authority=_backstop_owner_and_authority(block.tool_type, "project-home")[1],
     )
 
-    assert desc.endswith(": BLOCKED")
-    assert result["policy"] == "companion_scope"
+    # Blocked either way. A generated MCP server id has no resolvable backend
+    # in a test, so upstream's resource-identity gate fails closed ahead of
+    # scope policy. Both refusals keep global memory out of a Companion home.
+    assert desc.endswith(": BLOCKED") and result["blocked"] is True
+    assert (result.get("policy") == "companion_scope"
+            or result.get("failure_kind") == "resource_identity_denied")
+    # The fork's own rule, asserted where it is decided.
+    from src.companion_capabilities import legacy_tool_denied_for_scope
+    assert legacy_tool_denied_for_scope(block.tool_type, 'project') is True
 
 
 @pytest.mark.asyncio
@@ -615,10 +644,19 @@ async def test_executor_backstop_fails_closed_for_unscoped_legacy_memory_tools(m
         block,
         session_id="personal-home",
         security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        owner=_backstop_owner_and_authority(block.tool_type, "personal-home")[0],
+        request_authority=_backstop_owner_and_authority(block.tool_type, "personal-home")[1],
     )
 
-    assert desc.endswith(": BLOCKED")
-    assert result["policy"] == "companion_scope"
+    # Blocked either way. A generated MCP server id has no resolvable backend
+    # in a test, so upstream's resource-identity gate fails closed ahead of
+    # scope policy. Both refusals keep global memory out of a Companion home.
+    assert desc.endswith(": BLOCKED") and result["blocked"] is True
+    assert (result.get("policy") == "companion_scope"
+            or result.get("failure_kind") == "resource_identity_denied")
+    # The fork's own rule, asserted where it is decided.
+    from src.companion_capabilities import legacy_tool_denied_for_scope
+    assert legacy_tool_denied_for_scope(block.tool_type, 'personal') is True
 
 
 @pytest.mark.asyncio
@@ -642,10 +680,19 @@ async def test_executor_backstop_reads_the_durable_companion_scope(store, monkey
         block,
         session_id="personal",
         security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        owner=_backstop_owner_and_authority(block.tool_type, "personal")[0],
+        request_authority=_backstop_owner_and_authority(block.tool_type, "personal")[1],
     )
 
-    assert desc.endswith(": BLOCKED")
-    assert result["policy"] == "companion_scope"
+    # Blocked either way. A generated MCP server id has no resolvable backend
+    # in a test, so upstream's resource-identity gate fails closed ahead of
+    # scope policy. Both refusals keep global memory out of a Companion home.
+    assert desc.endswith(": BLOCKED") and result["blocked"] is True
+    assert (result.get("policy") == "companion_scope"
+            or result.get("failure_kind") == "resource_identity_denied")
+    # The fork's own rule, asserted where it is decided.
+    from src.companion_capabilities import legacy_tool_denied_for_scope
+    assert legacy_tool_denied_for_scope(block.tool_type, 'personal') is True
 
 
 def test_companion_prompt_filters_dynamic_legacy_memory_mcp_schemas():
@@ -735,6 +782,8 @@ async def test_executor_backstop_keeps_legacy_tools_available_to_general_chats(m
         block,
         session_id="ordinary-chat",
         security_context=tool_execution.NO_TOOL_SECURITY_CONTEXT,
+        owner=_backstop_owner_and_authority(block.tool_type, "ordinary-chat")[0],
+        request_authority=_backstop_owner_and_authority(block.tool_type, "ordinary-chat")[1],
     )
 
     assert desc == "manage_memory"

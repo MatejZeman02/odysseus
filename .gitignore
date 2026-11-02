@@ -26,6 +26,9 @@ secrets.env.*
 
 # Data — all user data stays local
 data/
+# Per-worktree runtime state written by `odysseus dev` (its own data dir,
+# logs and stop handle) — disposable, and never shared between checkouts.
+.odysseus-dev/
 !services/hwfit/data/
 !services/hwfit/data/hf_models.json
 logs/
@@ -52,6 +55,8 @@ services/data/
 .playwright-mcp/
 artifacts/browser-ui-audit/
 Odysseus.desktop
+test-results/
+playwright-report/
 
 # OS
 .DS_Store

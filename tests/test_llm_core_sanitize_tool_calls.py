@@ -26,7 +26,7 @@ with temporary_import_stubs(
     'src.database', 'src.agent_tools', 'core.models', 'core.database',
 ):
     from src.agent_loop import _append_tool_results
-    from src.llm_core import _sanitize_llm_messages
+    from src.llm_core import _REFERENCE_CONTEXT_BOUNDARY, _sanitize_llm_messages
 
 
 def test_sanitize_keeps_no_prose_assistant_tool_call_message():
@@ -102,7 +102,8 @@ def test_sanitize_merges_search_results_and_user_query():
     assert out[1]["content"] == (
         "UNTRUSTED SOURCE DATA\nSource: web search results\n<<<UNTRUSTED_SOURCE_DATA>>>\nHere are some web search results about python.\n<<<END_UNTRUSTED_SOURCE_DATA>>>"
     )
-    assert out[2] == {"role": "assistant", "content": "Reference context received."}
+    assert out[2] == {"role": "assistant", "content": _REFERENCE_CONTEXT_BOUNDARY}
+    assert "Reference context received" not in out[2]["content"]
     assert out[3] == {"role": "user", "content": "What is the latest version of python?"}
 
 
@@ -125,10 +126,46 @@ def test_sanitize_labels_current_request_after_untrusted_context():
     out = _sanitize_llm_messages(messages)
 
     assert [m["role"] for m in out] == ["system", "user", "assistant", "user"]
-    assert out[2] == {"role": "assistant", "content": "Reference context received."}
+    assert out[2] == {"role": "assistant", "content": _REFERENCE_CONTEXT_BOUNDARY}
+    assert "Reference context received" not in out[2]["content"]
     assert out[3]["content"] == "Why do I do this?"
     assert "UNTRUSTED SOURCE DATA" not in out[3]["content"]
     assert "prompt-injection" not in out[3]["content"]
+
+
+def test_sanitize_reference_context_boundary_is_not_visible_answer_text():
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "whats the ook by will darbyshire"},
+        {"role": "assistant", "content": "The book by Will Darbyshire is This Modern Love."},
+        {
+            "role": "user",
+            "content": (
+                "UNTRUSTED SOURCE DATA\n"
+                "Source: web search results\n"
+                "<<<UNTRUSTED_SOURCE_DATA>>>\n"
+                "This Modern Love was published in 2016 by Century.\n"
+                "<<<END_UNTRUSTED_SOURCE_DATA>>>"
+            ),
+        },
+        {"role": "user", "content": "what year was released and which publisher?"},
+    ]
+
+    out = _sanitize_llm_messages(messages)
+
+    assert [m["role"] for m in out] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
+    ]
+    boundary = out[4]["content"]
+    assert boundary == _REFERENCE_CONTEXT_BOUNDARY
+    assert boundary.strip() == boundary
+    assert "Reference context received" not in boundary
+    assert out[5]["content"] == "what year was released and which publisher?"
 
 
 def test_build_anthropic_payload_alternating_roles():
@@ -160,6 +197,4 @@ def test_build_anthropic_payload_alternating_roles():
     assert len(anth_messages) == 1
     assert anth_messages[0]["role"] == "user"
     assert anth_messages[0]["content"] == "web search results\n\nuser query"
-
-
 
