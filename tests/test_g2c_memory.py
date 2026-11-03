@@ -502,7 +502,8 @@ def test_scoped_recall_outage_does_not_break_exact_artifact_or_checkpoint_contex
 
 def test_context_compiler_uses_scoped_provider_contract_for_normal_recall(store):
     """Prompt assembly must not bypass the scoped provider with raw index I/O."""
-    from src.memory_provider import MemoryRecord, MemorySearchHit, ScopedMemoryScope
+    from src.memory_provider import MemoryRecord, MemorySearchHit
+    from src.scoped_memory_provider import ScopedMemoryScope
 
     continuity, _memory = store
     seen = {}
@@ -908,7 +909,7 @@ def test_episodic_recall_excludes_expired_records_and_rejects_ambiguous_scope(st
 
 
 def test_local_scoped_provider_enforces_complete_scope_and_provenance(store):
-    from src.memory_provider import ScopedMemoryQuery, ScopedMemoryScope
+    from src.scoped_memory_provider import ScopedMemoryQuery, ScopedMemoryScope
     from src.scoped_memory import LocalScopedMemoryProvider
 
     provider = LocalScopedMemoryProvider()
@@ -941,7 +942,7 @@ def test_local_scoped_provider_enforces_complete_scope_and_provenance(store):
 
 
 def test_local_scoped_provider_keeps_stored_expiry_and_rejects_expired_writes(store):
-    from src.memory_provider import ScopedMemoryQuery, ScopedMemoryScope
+    from src.scoped_memory_provider import ScopedMemoryQuery, ScopedMemoryScope
     from src.scoped_memory import LocalScopedMemoryProvider
 
     provider = LocalScopedMemoryProvider()

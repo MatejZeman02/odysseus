@@ -13,7 +13,8 @@ from typing import Any
 from sqlalchemy import or_
 
 from core.database import ScopedMemoryRecord, SessionLocal
-from src.memory_provider import MemoryRecord, MemorySearchHit, ScopedMemoryProvider, ScopedMemoryQuery, ScopedMemoryScope
+from src.memory_provider import MemoryRecord, MemorySearchHit
+from src.scoped_memory_provider import ScopedMemoryProvider, ScopedMemoryQuery, ScopedMemoryScope
 
 
 class ScopedMemoryIndex:

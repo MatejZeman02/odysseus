@@ -300,85 +300,6 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "system_observe",
-            "description": "Collect fixed, read-only diagnostic facts about this computer. It is not shell access and cannot change settings, install software, read files, or reach the network. Use only after System inspection is enabled for this chat.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "categories": {
-                        "type": "array",
-                        "maxItems": 5,
-                        "items": {"type": "string", "enum": ["system", "hardware", "storage", "graphics", "network"]},
-                        "description": "Optional diagnostic categories. Omit for the standard system, hardware, storage, and graphics snapshot.",
-                    },
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "sandbox_read",
-            "description": "Run a short read-only command pipeline inside the qualified Podman sandbox against a disposable snapshot of the attached working directory. This is not host shell access. Provide argv arrays only; no shell syntax, paths outside /inputs, redirects, loops, or write commands. Prefer ordinary structured read/list/search tools for simple requests.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "commands": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 4,
-                        "description": "One to four argv vectors, connected by a broker-owned pipe.",
-                        "items": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": {"type": "string"},
-                        },
-                    },
-                },
-                "required": ["commands"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "project_shell",
-            "description": "Run one bash command in an offline sandbox whose working directory is the project at /workspace. Use it for anything a terminal does: git log, git diff, grep, find, running tests, builds, scripts. The project and .git are visible, there is no network, and any file the command writes is thrown away when it ends. To change project files use write_file, edit_file or apply_patch.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "The bash command, run with bash -c in /workspace."},
-                    "timeout": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Seconds before the command is stopped. Default 120."},
-                },
-                "required": ["command"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_memory",
-            "description": "Change one item of this home's durable memory brief, the memory the owner sees in Context. Save only what stays true beyond this conversation: a confirmed fact, a decision, a preference, an open question, a plan, or an approach that failed. Quote an existing item exactly to remove or replace it.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["add", "remove", "replace"]},
-                    "section": {
-                        "type": "string",
-                        "enum": ["summary", "confirmed_facts", "accepted_decisions", "open_questions",
-                                 "current_plans", "failed_approaches", "preferences", "ongoing_goals", "commitments"],
-                        "description": "Project homes use summary, confirmed_facts, accepted_decisions, open_questions, current_plans, failed_approaches. Personal homes use summary, confirmed_facts, preferences, ongoing_goals, commitments, open_questions, failed_approaches.",
-                    },
-                    "text": {"type": "string", "description": "The new item, or the new summary. One short sentence per item."},
-                    "old_text": {"type": "string", "description": "For remove and replace: the existing item, quoted exactly."},
-                },
-                "required": ["action", "section"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "bash",
             "description": "Run a shell command (full access). Prefer a dedicated tool whenever one fits the job (reading, writing, editing, searching, or listing files); use bash only for what no dedicated tool covers (installs, git, builds, running programs, system info). Do NOT create or edit files via bash redirects/heredocs/sed -- use the dedicated file tools.",
             "parameters": {
@@ -403,21 +324,6 @@ FUNCTION_TOOL_SCHEMAS = [
                 },
                 "required": ["command"]
             }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "request_capability",
-            "description": "Request one disabled chat capability instead of claiming a tool is unavailable. This shows the user an Enable/Not now card and ends the turn. Use only when that capability is necessary to complete the current request.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "enum": ["web_search", "workspace_read", "system_observe", "sandbox_read", "project_shell", "project_write", "memory_write"]},
-                    "reason": {"type": "string", "description": "One short, user-facing reason it is needed."},
-                },
-                "required": ["name", "reason"],
-            },
         }
     },
     {
@@ -2095,6 +2001,13 @@ FUNCTION_TOOL_SCHEMAS = [
         }
     },
 ]
+
+# The Companion-only tools' schemas live in src/companion_tool_schemas.py,
+# beside the handlers that implement them, so a new one of them never edits
+# this literal again.
+from src.companion_tool_schemas import COMPANION_TOOL_SCHEMAS  # noqa: E402
+
+FUNCTION_TOOL_SCHEMAS.extend(COMPANION_TOOL_SCHEMAS)
 
 if os.getenv("ODYSSEUS_PRIVATE_BROWSER_LEGACY", "0").strip().lower() not in {"", "0", "false", "no", "off"}:
     # Restored pre-Wave-3 private_browser (see src.tool_execution._legacy_private_browser).

@@ -79,13 +79,6 @@ NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "stop_served_model",
     "cancel_download",
     "adopt_served_model",
-    # Companion tools. Each reads the owner's checkout or host state, or
-    # writes owner memory, so a non-admin or a bearer token gets none of them
-    # even when a chat grant is switched on.
-    "sandbox_read",
-    "system_observe",
-    "project_shell",
-    "update_memory",
     # Read-only Cookbook inspection tools. They look harmless, but every one
     # of them calls a require_admin route over the internal loopback with the
     # process-wide INTERNAL_TOOL_TOKEN and never checks the session owner, so
@@ -150,9 +143,6 @@ PLAN_MODE_READONLY_TOOLS = {
     "resolve_contact",
     "chat_with_model",
     "ask_teacher",
-    # The Companion project shell runs offline and discards every write, so
-    # it can investigate in plan mode without changing anything.
-    "project_shell",
     "get_editor_screenshot",
 }
 
@@ -196,9 +186,21 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "bash", "python",
     # Controls shell processes (kill); plan mode can't run bash anyway.
     "manage_bg_jobs",
-    # Writes the Companion home brief.
-    "update_memory",
 }
+
+# The fork's Companion tools answer all three sets above. They are named in
+# src/companion_capabilities.py and folded in here, in one place, so a merge
+# never has to reconcile fork entries inside an upstream set literal. Every
+# read of these sets below happens at call time, so it sees the union.
+from src.companion_capabilities import (  # noqa: E402
+    NON_ADMIN_BLOCKED as _COMPANION_NON_ADMIN_BLOCKED,
+    PLAN_MODE_MUTATORS as _COMPANION_PLAN_MODE_MUTATORS,
+    PLAN_MODE_READONLY as _COMPANION_PLAN_MODE_READONLY,
+)
+
+NON_ADMIN_BLOCKED_TOOLS = NON_ADMIN_BLOCKED_TOOLS | _COMPANION_NON_ADMIN_BLOCKED
+PLAN_MODE_READONLY_TOOLS = PLAN_MODE_READONLY_TOOLS | _COMPANION_PLAN_MODE_READONLY
+_PLAN_MODE_KNOWN_MUTATORS = _PLAN_MODE_KNOWN_MUTATORS | _COMPANION_PLAN_MODE_MUTATORS
 
 
 def plan_mode_disabled_tools() -> Set[str]:

@@ -267,7 +267,7 @@ class ContextCompiler:
         hits = tuple(dict(hit) for hit in episodic_hits)
         if not hits and scope.scope_kind in {"personal", "project"}:
             try:
-                from src.memory_provider import (
+                from src.scoped_memory_provider import (
                     ScopedMemoryProviderRegistry, ScopedMemoryQuery, ScopedMemoryScope,
                 )
                 from src.scoped_memory import LocalScopedMemoryProvider

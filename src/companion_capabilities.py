@@ -54,6 +54,22 @@ GRANT_TOOLS = {
 _TOOL_GRANT = {tool: grant for grant, tools in GRANT_TOOLS.items() for tool in tools}
 PROJECT_EDIT_TOOLS = GRANT_TOOLS[PROJECT_WRITE]
 
+# How the fork answers upstream's three tool-security sets. Named here, where
+# the Companion tools are defined, and unioned in by src/tool_security.py, so
+# a merge never has to reconcile fork names inside an upstream set literal.
+# Each of these reads the owner's checkout or host state, or writes owner
+# memory, so a non-admin or a bearer token gets none of them even when a chat
+# grant is switched on.
+NON_ADMIN_BLOCKED = frozenset({
+    "sandbox_read", "system_observe", "project_shell", "update_memory",
+})
+# project_shell runs offline and discards every write, so it can investigate
+# in plan mode without changing anything.
+PLAN_MODE_READONLY = frozenset({"project_shell"})
+# update_memory writes the Companion home brief.
+PLAN_MODE_MUTATORS = frozenset({"update_memory"})
+
+
 # Host-authority tools no Companion home gets, whatever its grants say. The
 # contained ``project_shell`` replaces them: it runs offline and cannot keep writes.
 _COMPANION_HOST_TOOLS = frozenset({"bash", "python", "manage_bg_jobs"})

@@ -182,9 +182,9 @@ def test_memory_provider_registry_rejects_tool_name_conflicts():
 
 
 def test_scoped_registry_filters_wrong_scope_and_limits_one_provider():
-    from src.memory_provider import (
-        MemoryRecord, MemorySearchHit, ScopedMemoryProviderRegistry,
-        ScopedMemoryQuery, ScopedMemoryScope,
+    from src.memory_provider import MemoryRecord, MemorySearchHit
+    from src.scoped_memory_provider import (
+        ScopedMemoryProviderRegistry, ScopedMemoryQuery, ScopedMemoryScope,
     )
 
     requested = ScopedMemoryScope(

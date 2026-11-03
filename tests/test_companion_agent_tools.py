@@ -657,3 +657,64 @@ def test_native_shell_call_reaches_the_tool_as_json():
     assert block.tool_type == "project_shell"
     assert json.loads(block.content)["command"] == "git status"
     assert function_call_to_tool_block("project_shell", json.dumps({"command": "  "})) is None
+
+
+def test_companion_tools_fold_into_every_upstream_tool_security_set():
+    """The fork's names reach upstream's three sets without living in them.
+
+    They used to be written inside the set literals in src/tool_security.py,
+    which is a bad place for a merge to land: upstream adds names to those
+    same literals. The fork now names its answer in companion_capabilities
+    and unions it in, so check the union actually happened rather than
+    trusting that it did.
+    """
+    import src.companion_capabilities as capabilities
+    import src.tool_security as tool_security
+
+    assert capabilities.NON_ADMIN_BLOCKED <= tool_security.NON_ADMIN_BLOCKED_TOOLS
+    assert capabilities.PLAN_MODE_READONLY <= tool_security.PLAN_MODE_READONLY_TOOLS
+    assert capabilities.PLAN_MODE_MUTATORS <= tool_security._PLAN_MODE_KNOWN_MUTATORS
+
+    # Every Companion tool is blocked for a non-admin or a bearer token, grant
+    # or no grant: each one reads the owner's checkout or host state, or
+    # writes owner memory.
+    every_companion_tool = set()
+    for tools in capabilities.GRANT_TOOLS.values():
+        every_companion_tool |= set(tools)
+    reachable_only_in_a_home = {"sandbox_read", "system_observe", "project_shell", "update_memory"}
+    assert reachable_only_in_a_home <= every_companion_tool
+    assert reachable_only_in_a_home <= tool_security.NON_ADMIN_BLOCKED_TOOLS
+
+
+def test_plan_mode_keeps_the_offline_shell_and_still_stops_memory_writes():
+    """The two Companion answers that differ, checked through the gate itself."""
+    import src.tool_security as tool_security
+
+    disabled = tool_security.plan_mode_disabled_tools()
+    assert "project_shell" not in disabled  # offline, discards every write
+    assert "update_memory" in disabled      # writes the home brief
+
+
+def test_the_capability_request_enum_lists_every_grant_that_exists():
+    """A new grant must not be invisible to the tool that asks for one.
+
+    The schema used to spell the seven names in a literal inside
+    src/tool_schemas.py, where nothing tied them to the grants themselves.
+    """
+    from src.companion_capabilities import ALL_CAPABILITIES
+    from src.companion_tool_schemas import REQUESTABLE_CAPABILITIES
+
+    assert set(REQUESTABLE_CAPABILITIES) == set(ALL_CAPABILITIES)
+    assert len(REQUESTABLE_CAPABILITIES) == len(set(REQUESTABLE_CAPABILITIES))
+
+
+def test_every_companion_tool_has_both_a_handler_and_a_schema():
+    """The two registrations are separate lines now, so check they agree."""
+    from src.agent_tools import TOOL_HANDLERS
+    from src.companion_tool_schemas import COMPANION_TOOL_SCHEMAS
+    from src.tool_schemas import FUNCTION_TOOL_SCHEMAS
+
+    described = {schema["function"]["name"] for schema in COMPANION_TOOL_SCHEMAS}
+    published = {schema["function"]["name"] for schema in FUNCTION_TOOL_SCHEMAS}
+    assert described <= published, sorted(described - published)
+    assert described <= set(TOOL_HANDLERS), sorted(described - set(TOOL_HANDLERS))
