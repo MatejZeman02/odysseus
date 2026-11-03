@@ -1,0 +1,55 @@
+# Everything this fork needs, on top of upstream's own requirement files.
+#
+# Those four files stay exactly as upstream wrote them. The fork never edits
+# them, so an upstream merge cannot conflict here, and a plain upstream run
+# still works from requirements.txt alone. Install this one instead to get a
+# checkout that can run the Companion layer and its whole test suite:
+#
+#   ./venv/bin/pip install -r requirements-companion.txt
+#
+# The Companion layer adds no Python package of its own. Its new modules import
+# only the standard library plus fastapi, pydantic and sqlalchemy, which
+# upstream already pins. What it does add is three things pip cannot install,
+# listed at the bottom.
+
+# The application, and the test tooling the suite assumes. requirements-dev
+# already pulls in requirements.txt, and brings pytest-xdist and the Python
+# side of playwright with it.
+-r requirements-dev.txt
+
+# Genuinely optional, and a large download (OCR models, OpenCV, pandas,
+# PyMuPDF). The suite passes without it: the handful of tests that reach
+# markitdown or pandas skip instead of failing. Uncomment to work on document
+# conversion, OCR, transcription or media download.
+# -r requirements-optional.txt
+
+
+# ---------------------------------------------------------------------------
+# Not installable with pip. Each one is needed by a part of the fork, and
+# each degrades honestly rather than breaking when it is absent.
+# ---------------------------------------------------------------------------
+#
+# bubblewrap          The offline project shell. Without bwrap, project_shell
+#                     reports bubblewrap_unavailable and the grant cannot be
+#                     switched on. Fedora: dnf install bubblewrap
+#
+# podman, rootless    Computer Help's sandbox broker. It must run rootlessly,
+#                     and it still needs an owner-selected digest-pinned image
+#                     exported as ODYSSEUS_COMPUTER_SANDBOX_IMAGE plus a passing
+#                     qualification probe before computer_assist will enable.
+#                     There is deliberately no default image anywhere.
+#                     Fedora: dnf install podman
+#
+# node, npm, acorn    scripts/check_frontend.mjs parses the frontend with acorn,
+#                     and the frontend tests shell out to node --test. One
+#                     install: npm ci --ignore-scripts --no-audit --no-fund
+#
+# playwright chromium The browser tests come in two shapes and share one
+#                     browser. The Python side is pinned above. The node side
+#                     needs the download:
+#                     node_modules/.bin/playwright install chromium
+#                     (about 170 MB under ~/.cache/ms-playwright)
+#
+# Readiness for the first two is reported, never assumed. src/project_shell.py
+# and src/computer_sandbox.py each expose a readiness() with a safe reason code,
+# and the capability drawer shows the owner which one is missing.
