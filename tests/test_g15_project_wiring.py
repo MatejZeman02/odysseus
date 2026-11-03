@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from tests.helpers.js_modules import session_ui_source
 from tests.helpers.stylesheets import app_css
 
 
@@ -242,7 +243,7 @@ def test_project_creation_uses_folder_browser_modal_not_window_prompts():
 
 
 def test_project_sidebar_exposes_fresh_thread_without_feedback_export_clutter():
-    source = open("static/js/sessions.js", encoding="utf-8").read()
+    source = session_ui_source()
 
     assert "/api/g1/projects/${encodeURIComponent(project.id)}/fork" in source
     assert "New project thread · shared brief, fresh transcript" in source
@@ -252,7 +253,7 @@ def test_project_sidebar_exposes_fresh_thread_without_feedback_export_clutter():
 def test_chats_header_has_a_stable_regular_chat_action_and_project_creation_stays_in_projects():
     index = open("static/index.html", encoding="utf-8").read()
     app = open("static/app.js", encoding="utf-8").read()
-    sessions = open("static/js/sessions.js", encoding="utf-8").read()
+    sessions = session_ui_source()
     styles = app_css()
 
     assert 'id="chats-new-chat-btn"' in index
@@ -435,7 +436,7 @@ def test_builtin_home_is_created_once_then_reopened(monkeypatch):
 
 def test_companion_scope_is_disclosed_above_the_composer():
     index = open("static/index.html", encoding="utf-8").read()
-    sessions = open("static/js/sessions.js", encoding="utf-8").read()
+    sessions = session_ui_source()
 
     assert index.index('id="companion-scope-banner"') < index.index('class="chat-input-bar"')
     assert "Project · ${projectName}" in sessions

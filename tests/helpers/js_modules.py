@@ -26,6 +26,27 @@ EMAIL_LIBRARY_PACKAGE = _STATIC_JS / "emailLibrary"
 EMAIL_LIBRARY_ENTRY = EMAIL_LIBRARY_PACKAGE / "index.js"
 
 
+SESSION_UI_PATHS = (
+    _STATIC_JS / "sessions.js",
+    _STATIC_JS / "companionHomes.js",
+)
+
+
+def session_ui_source() -> str:
+    """The session sidebar and the Companion UI it renders, as one string.
+
+    The Companion sidebar section, scope banner and modals used to sit inside
+    ``static/js/sessions.js``. They are now ``static/js/companionHomes.js``,
+    which ``sessions.js`` imports. A test that asserts a Companion label or
+    endpoint appears in the UI is asserting about that pair, not about which
+    of the two files the line happens to live in today, so it reads both.
+
+    The same reasoning as ``email_library_source`` and
+    ``tests.helpers.stylesheets.app_css``. Order is the load order.
+    """
+    return "\n".join(p.read_text(encoding="utf-8") for p in SESSION_UI_PATHS)
+
+
 def _package_paths(package: Path, entry: Path) -> list[Path]:
     if not entry.is_file():
         raise AssertionError(f"missing package entry module: {entry}")

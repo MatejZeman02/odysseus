@@ -17,6 +17,7 @@ from src.continuity.contracts import DeviceProfileV1, PersonalBriefV1, ProjectBr
 from src.continuity.store import ContinuityStore
 import src.companion_memory as memory_module
 import src.scoped_memory as scoped_memory_module
+from tests.helpers.js_modules import session_ui_source
 import src.continuity.store as store_module
 
 
@@ -967,7 +968,7 @@ def test_local_scoped_provider_keeps_stored_expiry_and_rejects_expired_writes(st
 
 def test_g2c_routes_and_ui_keep_scopes_explicit():
     routes = open("routes/companion_memory_routes.py", encoding="utf-8").read()
-    ui = open("static/js/sessions.js", encoding="utf-8").read()
+    ui = session_ui_source()
     page = open("static/index.html", encoding="utf-8").read()
     assert "/context-grants" in routes
     assert "/artifacts/personal" in routes
@@ -1054,7 +1055,7 @@ def test_companion_memory_routes_execute_the_owner_scoped_artifact_bridge(store,
 
 
 def test_personal_memory_ui_opens_the_shared_documents_library():
-    sessions_js = open("static/js/sessions.js", encoding="utf-8").read()
+    sessions_js = session_ui_source()
     assert "companion-open-documents" in sessions_js
     assert "documentApi.openLibrary({tab: 'documents'})" in sessions_js
     assert "companion-artifact-editor" not in sessions_js
