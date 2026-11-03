@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -35,26 +34,6 @@ class TimestampMixin:
     @declared_attr
     def updated_at(cls):
         return Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False)
-
-
-class Project(TimestampMixin, Base):
-    """Owner-scoped project identity for durable conversation continuity.
-
-    Workspace files remain the source of truth. This row only owns the stable
-    project identity, configured root, and direct related-project allowlist.
-    """
-    __tablename__ = "projects"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    name = Column(String, nullable=False)
-    workspace_root = Column(String, nullable=False)
-    settings_json = Column(Text, nullable=False, default="{}")
-
-    __table_args__ = (
-        Index("ix_projects_owner_name", "owner", "name", unique=True),
-    )
-
 
 # Ensure the writable data directory exists before SQLite connects.
 from src.constants import DATA_DIR, AUTH_FILE, MEMORY_FILE, USER_PREFS_FILE, SETTINGS_FILE
@@ -313,171 +292,6 @@ class Session(TimestampMixin, Base):
             'project_id': self.project_id,
         }
 
-
-class ContinuityArtifact(TimestampMixin, Base):
-    """Versioned derived context for one session or one project.
-
-    Artifacts deliberately live outside ``chat_messages``. They may summarize
-    messages, but are never a destructive replacement for raw transcript rows.
-    """
-    __tablename__ = "continuity_artifacts"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    project_id = Column(String, nullable=True, index=True)
-    session_id = Column(String, nullable=True, index=True)
-    kind = Column(String, nullable=False)
-    status = Column(String, nullable=False, default="active")
-    revision = Column(Integer, nullable=False, default=1)
-    payload_json = Column(Text, nullable=False)
-    source_through_message_id = Column(String, nullable=True)
-    source_hash = Column(String, nullable=False)
-
-    __table_args__ = (
-        Index("ix_continuity_artifacts_session_kind_revision", "session_id", "kind", "revision"),
-        Index("ix_continuity_artifacts_project_kind_revision", "project_id", "kind", "revision"),
-        Index("ix_continuity_artifacts_source", "session_id", "kind", "source_through_message_id", "source_hash"),
-    )
-
-
-class WorkingArtifact(TimestampMixin, Base):
-    """Revisioned Markdown working content for one Companion scope.
-
-    Personal artifacts are stored in Odysseus private data; project artifacts
-    are metadata mirrors for the project's ``.artifacts`` namespace and are
-    only mutated through the reviewed patch boundary.
-    """
-    __tablename__ = "working_artifacts"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    scope_kind = Column(String, nullable=False, index=True)
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
-    path = Column(String, nullable=False)
-    title = Column(String, nullable=False)
-    summary = Column(Text, nullable=False, default="")
-    content = Column(EncryptedText, nullable=False)
-    content_hash = Column(String, nullable=False)
-    revision = Column(Integer, nullable=False, default=1)
-    status = Column(String, nullable=False, default="active", index=True)
-    source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
-    # Personal artifacts can be edited in the established Documents pane.
-    # This is a bridge identifier rather than a foreign key so an owner may
-    # delete a document independently; opening the artifact then makes a new
-    # editor document without losing the private artifact itself.
-    document_id = Column(String, nullable=True, index=True)
-
-    __table_args__ = (
-        Index("ix_working_artifacts_owner_scope_path", "owner", "scope_kind", "project_id", "path"),
-    )
-
-
-class WorkingArtifactRevision(Base):
-    """Immutable prior bytes for diff/history/Undo."""
-    __tablename__ = "working_artifact_revisions"
-
-    id = Column(String, primary_key=True, index=True)
-    artifact_id = Column(String, ForeignKey("working_artifacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    revision = Column(Integer, nullable=False)
-    content = Column(EncryptedText, nullable=False)
-    content_hash = Column(String, nullable=False)
-    source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
-    action = Column(String, nullable=False, default="write")
-    created_at = Column(DateTime, default=utcnow_naive, nullable=False)
-
-    __table_args__ = (Index("ix_working_artifact_revisions_artifact_revision", "artifact_id", "revision", unique=True),)
-
-
-class ContextGrant(TimestampMixin, Base):
-    """Explicit, auditable Personal-to-project context authorization."""
-    __tablename__ = "context_grants"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    personal_session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True)
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    purpose = Column(Text, nullable=False)
-    information_classes_json = Column(Text, nullable=False, default="[]")
-    artifact_paths_json = Column(Text, nullable=False, default="[]")
-    request_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
-    status = Column(String, nullable=False, default="pending", index=True)
-    expires_at = Column(DateTime, nullable=True)
-    used_at = Column(DateTime, nullable=True)
-    decision_at = Column(DateTime, nullable=True)
-
-    __table_args__ = (Index("ix_context_grants_owner_personal_status", "owner", "personal_session_id", "status"),)
-
-
-class ScopedMemoryRecord(TimestampMixin, Base):
-    """Rebuildable, provider-neutral episodic retrieval record.
-
-    It indexes only validated compact artifacts, never raw transcripts or a
-    provider's free-form ``remember`` input.
-    """
-    __tablename__ = "scoped_memory_records"
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    scope_kind = Column(String, nullable=False, index=True)
-    project_id = Column(String, nullable=True, index=True)
-    session_id = Column(String, nullable=True, index=True)
-    source_kind = Column(String, nullable=False)
-    source_id = Column(String, nullable=False)
-    content = Column(EncryptedText, nullable=False)
-    sensitivity = Column(String, nullable=False, default="normal")
-    expires_at = Column(DateTime, nullable=True)
-    __table_args__ = (Index("ix_scoped_memory_scope_source", "owner", "scope_kind", "project_id", "source_kind", "source_id", unique=True),)
-
-
-class LegacyMemoryMigrationReview(TimestampMixin, Base):
-    """Encrypted, owner-reviewed staging record for legacy-memory migration.
-
-    This is deliberately *not* a memory provider and cannot make legacy data
-    retrievable.  It binds a future owner assignment/apply transaction to one
-    immutable owner-private backup digest and records a blank rollback journal
-    up front.  Candidate metadata is encrypted because even categories and
-    historical session references are private context.
-    """
-    __tablename__ = "legacy_memory_migration_reviews"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    backup_id = Column(String, nullable=False)
-    backup_sha256 = Column(String(64), nullable=False)
-    status = Column(String, nullable=False, default="review_ready", index=True)
-    revision = Column(Integer, nullable=False, default=1)
-    plan_json = Column(EncryptedText, nullable=False)
-    journal_json = Column(EncryptedText, nullable=False, default="[]")
-    failure_code = Column(String, nullable=True)
-
-    __table_args__ = (
-        Index("ix_legacy_memory_migration_review_owner_backup", "owner", "backup_id", unique=True),
-        Index("ix_legacy_memory_migration_review_owner_status", "owner", "status"),
-    )
-
-
-class ComputerTaskRoot(TimestampMixin, Base):
-    """One owner-selected future Computer Help write boundary.
-
-    Registering a root neither creates nor modifies a filesystem path.  The
-    encrypted resolved path is intentionally server-only: current UI/API
-    payloads expose just the owner label and final directory name.  A later
-    transaction broker must revalidate this record at use time; it is never a
-    blanket filesystem grant.
-    """
-    __tablename__ = "computer_task_roots"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    label = Column(String, nullable=False)
-    root_path = Column(EncryptedText, nullable=False)
-    status = Column(String, nullable=False, default="active", index=True)
-    revision = Column(Integer, nullable=False, default=1)
-
-    __table_args__ = (
-        Index("ix_computer_task_roots_owner_label", "owner", "label", unique=True),
-        Index("ix_computer_task_roots_owner_status", "owner", "status"),
-    )
-
 class ChatMessage(Base):
     """
     SQLAlchemy model for ChatMessage table.
@@ -522,39 +336,6 @@ class BackgroundToolJob(Base):
     message_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow_naive)
 
-
-class ProjectChangeSet(TimestampMixin, Base):
-    """Owner-approved, auditable project patch transaction."""
-    __tablename__ = "project_change_sets"
-
-    id = Column(String, primary_key=True, index=True)
-    owner = Column(String, nullable=False, index=True)
-    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    session_id = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
-    source_message_id = Column(String, ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True, index=True)
-    model = Column(String, nullable=False)
-    endpoint_id = Column(String, nullable=False)
-    revision = Column(Integer, nullable=False, default=1)
-    status = Column(String, nullable=False, default="proposed", index=True)
-    summary = Column(Text, nullable=False)
-    rationale = Column(Text, nullable=False, default="")
-    base_git_revision = Column(String, nullable=False)
-    # Patch bodies can contain unpublished project material. Keep both the
-    # proposal and rollback preimages encrypted at rest.
-    proposal_json = Column(EncryptedText, nullable=False)
-    rollback_json = Column(EncryptedText, nullable=True)
-    result_json = Column(Text, nullable=False, default="{}")
-    failure_code = Column(String, nullable=True)
-    approved_at = Column(DateTime, nullable=True)
-    applied_at = Column(DateTime, nullable=True)
-    verified_at = Column(DateTime, nullable=True)
-    rejected_at = Column(DateTime, nullable=True)
-    rolled_back_at = Column(DateTime, nullable=True)
-
-    __table_args__ = (
-        Index("ix_project_change_sets_project_created", "project_id", "created_at"),
-        Index("ix_project_change_sets_owner_status", "owner", "status"),
-    )
 
 class Document(TimestampMixin, Base):
     """Living document that the AI can create and edit in-place."""
@@ -2590,128 +2371,6 @@ def _migrate_seed_email_account():
             db.close()
 
 
-# Preserve the initial G2C pre-release schema if a user exercised it before
-# the public terminology was corrected from British ``artefact`` to American
-# ``artifact``. These are data-preserving SQLite renames, not a reset.
-def _migrate_artifact_table_spelling():
-    if not DATABASE_URL.startswith("sqlite:///"):
-        return
-    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
-    if not os.path.exists(db_path):
-        return
-    conn = None
-    try:
-        conn = sqlite3.connect(db_path)
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if "working_artefacts" in tables and "working_artifacts" not in tables:
-            conn.execute("ALTER TABLE working_artefacts RENAME TO working_artifacts")
-        if "working_artefact_revisions" in tables and "working_artifact_revisions" not in tables:
-            conn.execute("ALTER TABLE working_artefact_revisions RENAME TO working_artifact_revisions")
-        if "working_artifact_revisions" in tables:
-            revision_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(working_artifact_revisions)")
-            }
-            if "artefact_id" in revision_columns and "artifact_id" not in revision_columns:
-                conn.execute(
-                    "ALTER TABLE working_artifact_revisions "
-                    "RENAME COLUMN artefact_id TO artifact_id"
-                )
-        # The first private beta also used the old spelling for the optional
-        # artifact-path allowlist on grants. ``create_all`` never alters an
-        # existing table, so leave its data intact and rename the column here.
-        if "context_grants" in tables:
-            grant_columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(context_grants)")
-            }
-            if (
-                "artefact_paths_json" in grant_columns
-                and "artifact_paths_json" not in grant_columns
-            ):
-                conn.execute(
-                    "ALTER TABLE context_grants "
-                    "RENAME COLUMN artefact_paths_json TO artifact_paths_json"
-                )
-        conn.commit()
-    except Exception as e:
-        logger.warning("artifact table spelling migration failed: %s", e)
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def _migrate_add_working_artifact_document_id():
-    """Link existing Personal artifacts to Documents lazily and safely."""
-    if not DATABASE_URL.startswith("sqlite:///"):
-        return
-    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
-    if not os.path.exists(db_path):
-        return
-    conn = None
-    try:
-        conn = sqlite3.connect(db_path)
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if "working_artifacts" not in tables:
-            return
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(working_artifacts)")}
-        if "document_id" not in columns:
-            conn.execute("ALTER TABLE working_artifacts ADD COLUMN document_id VARCHAR")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS ix_working_artifacts_document_id "
-            "ON working_artifacts (document_id)"
-        )
-        conn.commit()
-    except Exception as exc:
-        logger.warning("working artifact document bridge migration failed: %s", exc)
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def _migrate_continuity_derivation_metadata():
-    """Classify pre-C0 continuity payloads without changing their content.
-
-    Older records do not reliably say whether they came from the automatic
-    heuristic or an owner edit. Marking them ``legacy_unclassified`` keeps
-    them inspectable while preventing a later reader from treating them as
-    owner-approved facts. Raw messages and artifact revisions are untouched.
-    """
-    if not DATABASE_URL.startswith("sqlite:///"):
-        return
-    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
-    if not os.path.exists(db_path):
-        return
-    conn = None
-    try:
-        conn = sqlite3.connect(db_path)
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if "continuity_artifacts" not in tables:
-            return
-        rows = conn.execute(
-            "SELECT id, payload_json FROM continuity_artifacts "
-            "WHERE kind IN ('thread_checkpoint_v1', 'project_brief_v1', 'personal_brief_v1')"
-        ).fetchall()
-        for artifact_id, payload_json in rows:
-            try:
-                payload = json.loads(payload_json)
-            except (TypeError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict) or "derivation_status" in payload:
-                continue
-            payload["derivation_status"] = "legacy_unclassified"
-            payload["derivation_version"] = 0
-            payload["derivation_method"] = "legacy_unclassified"
-            conn.execute(
-                "UPDATE continuity_artifacts SET payload_json = ? WHERE id = ?",
-                (json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False), artifact_id),
-            )
-        conn.commit()
-    except Exception as exc:
-        logger.warning("continuity derivation metadata migration failed: %s", exc)
-    finally:
-        if conn is not None:
-            conn.close()
-
-
 # WARNING: Foreign-key enforcement is enabled globally for all SQLite connections.
 # Any future migrations or schema changes that temporarily violate foreign-key
 # constraints will fail. To perform such operations, foreign_keys must be
@@ -2730,13 +2389,19 @@ def init_db():
     Initialize the database by creating all tables.
     Should be called when starting the application.
     """
+    # The fork's tables and their migrations live in src/companion_tables.py
+    # and src/companion_migrations.py, so an upstream merge stops conflicting
+    # in this file. Imported here rather than at module scope: companion_tables
+    # imports Base from this module, and this import is also what registers its
+    # tables before create_all runs. Touch no name on it, so that importing it
+    # first still works.
+    from src import companion_tables  # noqa: F401
+    from src.companion_migrations import run_companion_migrations
+
     _migrate_model_endpoints()
-    _migrate_artifact_table_spelling()
+    run_companion_migrations("before_create")
     Base.metadata.create_all(bind=engine)
-    _migrate_add_working_artifact_document_id()
-    _migrate_continuity_derivation_metadata()
-    _migrate_add_continuity_session_columns()
-    _migrate_add_g15_session_columns()
+    run_companion_migrations("after_create")
     # Lock the DB file (and any SQLite sidecars) to 0o600 — it holds bearer-token
     # + bcrypt hashes and encrypted provider keys. POSIX only; safe_chmod no-ops
     # on Windows (ACL-restricted profile dir) and the path helper returns None for
@@ -2959,65 +2624,6 @@ def _migrate_chat_messages_fts():
             conn.close()
         except Exception:
             pass
-
-
-def _migrate_add_continuity_session_columns():
-    """Add non-destructive continuity bindings to existing session tables."""
-    if not DATABASE_URL.startswith("sqlite:///"):
-        return
-    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
-    if not os.path.exists(db_path):
-        return
-    conn = None
-    try:
-        conn = sqlite3.connect(db_path)
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
-        if "scope_kind" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN scope_kind TEXT NOT NULL DEFAULT 'general'")
-        if "project_id" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS ix_sessions_scope_project ON sessions(scope_kind, project_id)"
-        )
-        conn.commit()
-    except Exception as e:
-        logger.warning("continuity session migration failed: %s", e)
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def _migrate_add_g15_session_columns():
-    """Add companion routing/home markers without changing legacy sessions."""
-    if not DATABASE_URL.startswith("sqlite:///"):
-        return
-    db_path = DATABASE_URL.replace("sqlite:///", "", 1)
-    if not os.path.exists(db_path):
-        return
-    conn = None
-    try:
-        conn = sqlite3.connect(db_path)
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
-        if "endpoint_id" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN endpoint_id TEXT")
-        if "harness_kind" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN harness_kind TEXT NOT NULL DEFAULT 'native'")
-        if "capability_profile" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN capability_profile TEXT NOT NULL DEFAULT 'project_read'")
-        if "capability_grants" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN capability_grants TEXT NOT NULL DEFAULT '{}'")
-        if "is_scope_primary" not in columns:
-            conn.execute("ALTER TABLE sessions ADD COLUMN is_scope_primary BOOLEAN NOT NULL DEFAULT 0")
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_scope_primary ON sessions(owner, scope_kind, is_scope_primary)")
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_sessions_owner_project_primary ON sessions(owner, project_id, is_scope_primary)")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_sessions_personal_computer_primary ON sessions(owner, scope_kind) WHERE is_scope_primary = 1 AND scope_kind IN ('personal', 'computer')")
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_sessions_project_primary ON sessions(owner, project_id) WHERE is_scope_primary = 1 AND scope_kind = 'project'")
-        conn.commit()
-    except Exception as e:
-        logger.warning("G1.5 session migration failed: %s", e)
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 def _scrub_legacy_chat_message_fts_media(conn) -> None:
@@ -3515,3 +3121,18 @@ def archive_session(session_id: str):
 
 
 init_db()
+
+
+def __getattr__(name: str):
+    """Serve the Companion models from the module that now defines them.
+
+    Lazy on purpose: ``src.companion_tables`` imports ``Base`` from here, so an
+    eager import at the bottom of this file would be a cycle. PEP 562 only
+    calls this for names this module does not define, so nothing upstream is
+    shadowed.
+    """
+    import src.companion_tables as companion_tables
+
+    if name in companion_tables.MODEL_NAMES:
+        return getattr(companion_tables, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
