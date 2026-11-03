@@ -147,9 +147,20 @@ Two upstream changes landed in the 2026-11-02 merge and both are easy to trip ov
   `scripts/build_frontend.py --check`. The browser still loads plain ES modules, so the no-build
   rule above still holds.
 
-**The Companion UI deliberately lives inside upstream modules** — `static/js/sessions.js` (scope
-banner, capability drawer, memory/context modals, task roots), `static/js/chat.js`,
-`static/js/chatRenderer.js`, `static/app.js`. Do not create a parallel companion bundle.
+**The Companion UI reuses upstream components, and keeps its own code in one place.** The sidebar
+section, scope banner, capability drawer and the memory/context, project-changes and task-roots
+modals live in `static/js/companionHomes.js`, which upstream does not have. It renders with
+`uiModule` and the shared modal/list classes exactly as it did when those thousand lines sat inside
+`static/js/sessions.js`, and it must keep doing so: the rule is one visual language, not one file.
+`companionHomes.js` never imports `sessions.js`. The live session list, the selected chat and the
+two navigation calls arrive through `bindCompanionHost`, called once near the top of `sessions.js`,
+so the dependency stays one-way and `sessions.js` keeps owning that state.
+`tests/test_companion_homes_module_js.py` pins the render contract (the recent-chat list comes back
+trimmed) and the one-way import.
+
+Fork UI still sits inside `static/js/chat.js`, `static/js/chatRenderer.js` and `static/app.js`,
+where it is interleaved with upstream logic rather than separable. Do not build a parallel companion
+bundle or a second visual language for those.
 
 ### Companion layer (fork-specific)
 
