@@ -129,3 +129,7 @@ compound.config.json
 *.error.log
 _scratch/
 /odysseus/
+
+# The agent guide is tracked on purpose. CLAUDE.md and AGENTS.md are both in
+# the author's global gitignore, and a repo rule outranks that file.
+!AGENTS.md
