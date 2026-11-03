@@ -16,6 +16,7 @@ import pytest
 
 _REPO = Path(__file__).resolve().parent.parent
 _SESSIONS = _REPO / "static" / "js" / "sessions.js"
+_COMPANION = _REPO / "static" / "js" / "companionHomes.js"
 _SHELL_URL = (_REPO / "static" / "js" / "startupShell.js").as_uri()
 _HAS_NODE = shutil.which("node") is not None
 
@@ -67,6 +68,20 @@ export default ui;
         "export const bindMenuDismiss = () => {};\n"
     ),
 }
+
+def _companion_source() -> str:
+    """companionHomes.js with its three imports pointed at the same stubs."""
+    source = _COMPANION.read_text(encoding="utf-8")
+    rewrites = (
+        (r"from './storage\.js(?:[?#][^']*)?';", "from './storage.mjs';"),
+        (r"from './ui\.js(?:[?#][^']*)?';", "from './ui.mjs';"),
+        (r"from './workspace\.js(?:[?#][^']*)?';", "from './workspace.mjs';"),
+    )
+    for pattern, replacement in rewrites:
+        source, count = re.subn(pattern, replacement, source, count=1)
+        assert count == 1, f"companionHomes import changed: {pattern}"
+    return source
+
 
 _HARNESS = r"""
 const SESSIONS_URL = 'SESSIONS_PATH';
@@ -349,6 +364,13 @@ def results(tmp_path_factory):
             r"import \{ registerEscapeLayer, bindMenuDismiss \} from './escMenuStack\.js(?:[?#][^']*)?';",
             "import { registerEscapeLayer, bindMenuDismiss } from './escMenuStack.mjs';",
         ),
+        # The companion UI is a module of its own. The real one is copied in
+        # beside the stubs, so the session list still renders the Companion
+        # section for real rather than against a placeholder.
+        (
+            r"from './companionHomes\.js(?:[?#][^']*)?';",
+            "from './companionHomes.mjs';",
+        ),
     )
     for pattern, replacement in versioned_rewrites:
         source, count = re.subn(pattern, replacement, source, count=1)
@@ -360,6 +382,9 @@ def results(tmp_path_factory):
     sessions_module.write_text(source, encoding="utf-8")
     for name, stub in _STUBS.items():
         (module_dir / name).write_text(stub, encoding="utf-8")
+    (module_dir / "companionHomes.mjs").write_text(
+        _companion_source(), encoding="utf-8"
+    )
 
     harness = _HARNESS.replace("SESSIONS_PATH", sessions_module.as_uri()).replace(
         "SHELL_PATH", _SHELL_URL

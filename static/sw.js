@@ -7,12 +7,12 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const BUILD_ID = '20261102upstreamsync1';
+const BUILD_ID = '20261103companionmodule1';
 // Two separate levers. The version number in CACHE_NAME drops the old cache on
 // activate, so bump it with the precache list. BUILD_ID is posted to open pages
 // and drives the update banner, so bump it with any shipped change. Keep both
 // as plain quoted literals: the editor suite reads them with a regex.
-const CACHE_NAME = 'odysseus-v1135-pr40-editor-precache';
+const CACHE_NAME = 'odysseus-v1136-pr40-editor-precache';
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -73,6 +73,7 @@ const PRECACHE = [
   '/static/js/ui.js?v=20260916largetoolscroll1',
   '/static/js/markdown.js',
   '/static/js/processTimeline.js',
+  '/static/js/companionHomes.js',
   '/static/js/dragSort.js',
   '/static/js/sessions.js',
   '/static/js/memory.js',
