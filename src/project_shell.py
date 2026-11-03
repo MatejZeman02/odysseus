@@ -37,6 +37,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.agent_runtime.path_policy import SENSITIVE_PATH_NAMES
 from src.path_identity import PathIdentityError, pin_directory
 
 DEFAULT_TIMEOUT_SECONDS = 120
@@ -52,11 +53,11 @@ _SENSITIVE_WALK_LIMIT = 20_000
 _SKIP_WALK_DIRS = frozenset({".git", "node_modules", ".venv", "venv", "__pycache__", ".tox", "target", "dist", "build"})
 
 # Files the native read tools refuse inside a workspace. The shell masks the
-# same names so granting it does not quietly widen what the model can read.
-_MASKED_NAMES = frozenset({
-    ".env", ".netrc", ".ssh", ".gnupg", ".gitconfig", ".git-credentials",
-    "authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa", "known_hosts",
-})
+# same names, from the same list, so granting it does not quietly widen what
+# the model can read. Two lists drifted apart once already: the native side
+# had grown auth.json, app.db, settings.json and the shell rc files while this
+# one kept eleven names and a comment claiming they matched.
+_MASKED_NAMES = SENSITIVE_PATH_NAMES
 
 # Loader and locale files a dynamically linked toolchain needs. Nothing here
 # names a user, a secret, or a service endpoint.

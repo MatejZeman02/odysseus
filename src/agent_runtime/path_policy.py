@@ -5,7 +5,7 @@ This is a deny predicate, not an authorization grant or a workspace scope.
 import os
 
 _SENSITIVE_BASENAMES: set[str] = {
-    ".ssh", ".gnupg", ".gitconfig",
+    ".ssh", ".gnupg", ".gitconfig", ".git-credentials",
     ".bashrc", ".bash_profile", ".bash_logout",
     ".zshrc", ".zprofile", ".zshenv",
     ".profile", ".tcshrc", ".cshrc", ".env", ".netrc",
@@ -16,6 +16,11 @@ _SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
 )
 _SENSITIVE_BASENAMES_CF = frozenset(b.casefold() for b in _SENSITIVE_BASENAMES)
 _SENSITIVE_FILE_PATTERNS_CF = frozenset(p.casefold() for p in _SENSITIVE_FILE_PATTERNS)
+
+# One list, case folded, for callers that match a single path component rather
+# than a whole path. The Companion project shell masks exactly these names
+# inside its sandbox, so granting the shell cannot widen what a chat may read.
+SENSITIVE_PATH_NAMES: frozenset[str] = _SENSITIVE_BASENAMES_CF | _SENSITIVE_FILE_PATTERNS_CF
 
 
 def _is_sensitive_path(resolved: str) -> bool:

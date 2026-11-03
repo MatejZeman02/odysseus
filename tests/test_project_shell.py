@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import src.agent_runtime.path_policy as path_policy
 import src.project_shell as project_shell
 
 
@@ -75,6 +76,29 @@ def test_secret_files_and_folders_are_masked(checkout):
     assert ("/dev/null", "/workspace/.env") in pairs
     assert ("/dev/null", "/workspace/sub/id_rsa") in pairs
     assert ("--tmpfs", "/workspace/sub/.ssh") in pairs
+
+
+def test_shell_masks_every_name_the_native_read_tools_refuse(tmp_path):
+    """The two lists drifted apart once. One list, checked from the other end.
+
+    A granted shell that reads a file the same chat's read_file refuses is a
+    widened grant, whatever the comment above either list says.
+    """
+    root = tmp_path / "checkout"
+    root.mkdir()
+    for index, name in enumerate(sorted(path_policy.SENSITIVE_PATH_NAMES)):
+        if index % 2:
+            (root / name).mkdir()
+        else:
+            (root / name).write_text("secret", encoding="utf-8")
+
+    args = project_shell._masks(root)
+    covered = {target for source, target in zip(args, args[1:]) if source in ("/dev/null", "--tmpfs")}
+    missing = sorted(
+        name for name in path_policy.SENSITIVE_PATH_NAMES
+        if f"/workspace/{name}" not in covered
+    )
+    assert missing == []
 
 
 def test_missing_bubblewrap_reports_a_readable_reason(monkeypatch):
