@@ -23,12 +23,10 @@ from .web_tools import WebSearchTool, WebFetchTool, PdfExtractTool, PrivateBrows
 from .weather_tools import WeatherTool
 from .media_tools import ExtractTextTool, InspectMediaTool, TranscribeMediaTool
 from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, ApplyPatchTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
-from .sandbox_tools import SandboxedReadTool
-from .system_observe_tools import SystemObserveTool
-from .companion_tools import ShellTool, UpdateMemoryTool
 from .coding_tools import TodoWriteTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
-from .interaction_tools import AskUserTool, RequestCapabilityTool, UpdatePlanTool
+from .interaction_tools import AskUserTool, UpdatePlanTool
+from .companion_tools import companion_tool_handlers
 from .model_interaction_tools import ChatWithModelTool, AskTeacherTool, ListModelsTool
 from .bg_job_tools import ManageBgJobsTool
 from .session_tools import CreateSessionTool, ListSessionsTool, SendToSessionTool, ManageSessionTool
@@ -66,12 +64,7 @@ TOOL_HANDLERS = {
     "suggest_document": SuggestDocumentTool().execute,
     "manage_documents": ManageDocumentTool().execute,
     "get_workspace": GetWorkspaceTool().execute,
-    "sandbox_read": SandboxedReadTool().execute,
-    "system_observe": SystemObserveTool().execute,
-    "project_shell": ShellTool().execute,
-    "update_memory": UpdateMemoryTool().execute,
     "ask_user": AskUserTool().execute,
-    "request_capability": RequestCapabilityTool().execute,
     "update_plan": UpdatePlanTool().execute,
     "chat_with_model": ChatWithModelTool().execute,
     "ask_teacher": AskTeacherTool().execute,
@@ -88,6 +81,10 @@ TOOL_HANDLERS = {
 }
 # Config/integration admin tools (manage_endpoints/mcp/webhooks/tokens/settings).
 TOOL_HANDLERS.update(ADMIN_TOOL_HANDLERS)
+# Companion-only tools (contained reads, host observations, the offline
+# project shell, brief edits, grant requests). The fork owns the list, so a
+# new one of these does not touch this file again.
+TOOL_HANDLERS.update(companion_tool_handlers())
 
 # ---------------------------------------------------------------------------
 # Constants (re-exported for backward compatibility — single source of truth

@@ -351,3 +351,38 @@ def can_change(
         shell_ready=shell_ready,
         shell_reason=shell_reason,
     )
+
+
+def current_readiness() -> dict[str, Any]:
+    """Probe the sandboxes a grant may depend on, in one place.
+
+    Two callers need this and they must agree. A route that refuses a change
+    the model has just offered the owner an Enable button for produces the
+    worst version of a disabled capability: the owner clicks Enable, nothing
+    happens, and nothing says why.
+    """
+    from src.computer_sandbox import readiness as sandbox_readiness
+    from src.project_shell import readiness as shell_readiness
+
+    sandbox = sandbox_readiness()
+    shell = shell_readiness()
+    return {
+        "sandbox_ready": sandbox.qualified,
+        "sandbox_reason": sandbox.reason,
+        "shell_ready": shell.ready,
+        "shell_reason": shell.reason,
+    }
+
+
+def changeable_now(name: str, *, scope_kind: str, workspace_attached: bool) -> tuple[bool, str]:
+    """Whether an owner could switch this grant on in this chat right now.
+
+    Same answer as ``can_change``, with the server resolving readiness instead
+    of the caller passing it in.
+    """
+    return can_change(
+        name,
+        scope_kind=scope_kind,
+        workspace_attached=workspace_attached,
+        **current_readiness(),
+    )

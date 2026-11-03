@@ -171,6 +171,72 @@ class UpdateMemoryTool:
         }
 
 
+class RequestCapabilityTool:
+    """Ask for a fixed chat capability without granting it from model text."""
+
+    async def execute(self, content: str, ctx: dict | None) -> tuple[str, dict]:
+        from src.companion_capabilities import (
+            ALL_CAPABILITIES, capability_label, changeable_now, grant_for_tool,
+        )
+
+        raw = (content or "").strip()
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (ValueError, TypeError):
+            parsed = {}
+        name = str(parsed.get("name") or "").strip() if isinstance(parsed, dict) else ""
+        reason = str(parsed.get("reason") or "").strip() if isinstance(parsed, dict) else ""
+        # Models often name the tool they want rather than the grant behind it.
+        name = grant_for_tool(name) or name
+        if name not in ALL_CAPABILITIES:
+            return "request_capability: invalid", {
+                "error": "Unknown chat capability. Use one of: " + ", ".join(sorted(ALL_CAPABILITIES)),
+                "exit_code": 1,
+            }
+        label = capability_label(name)
+        # A grant the owner cannot switch on must not be offered as a button.
+        # Contained reads in a Computer Help home are the real case: no
+        # reviewed image is pinned, so the card appeared, the owner pressed
+        # Enable, and the route refused the change with nothing on screen to
+        # explain it. Hand the model the owner-facing reason instead, so the
+        # turn says what is missing rather than asking again.
+        session = await asyncio.to_thread(_owned_session, (ctx or {}).get("session_id"), (ctx or {}).get("owner"))
+        if session:
+            allowed, blocked_reason = await asyncio.to_thread(
+                changeable_now,
+                name,
+                scope_kind=session["scope_kind"],
+                workspace_attached=bool(session["workspace_root"]),
+            )
+            if not allowed:
+                return f"request_capability: {name} unavailable", {
+                    "error": (
+                        f"{label} cannot be switched on in this chat. {blocked_reason} "
+                        "Do not ask again this turn. Tell the owner what is missing, "
+                        "and finish with what you have."
+                    ),
+                    "exit_code": 1,
+                }
+        question = f"Enable {label} for this chat?"
+        if reason:
+            question += f" {reason[:500]}"
+        return f"request_capability: {name}", {
+            "ask_user": {
+                "kind": "capability_request",
+                "capability": name,
+                "enable_label": f"Enable {label}",
+                "question": question,
+                "options": [
+                    {"label": f"Enable {label}", "description": "Enable it for this chat and continue."},
+                    {"label": "Not now", "description": "Keep this capability off."},
+                ],
+                "multi": False,
+            },
+            "output": f"Requested {label} for this chat.",
+            "exit_code": 0,
+        }
+
+
 def _project_path(raw: Any, workspace: str) -> str:
     """Turn a model-supplied path into a project-relative POSIX path.
 
@@ -336,3 +402,19 @@ async def run_project_edit(tool: str, content: str, *, session_id: str | None, o
     if not workspace:
         return {"error": f"{tool}: this chat has no usable project checkout.", "exit_code": 1}
     return await asyncio.to_thread(_apply, tool, content, session, session_id, workspace)
+
+
+# Fork-owned tool registration. ``src/agent_tools/__init__.py`` folds this into
+# TOOL_HANDLERS with one line, so adding a Companion tool never adds a hunk to
+# an upstream file that an upstream merge then has to reconcile.
+def companion_tool_handlers() -> dict[str, Any]:
+    from .sandbox_tools import SandboxedReadTool
+    from .system_observe_tools import SystemObserveTool
+
+    return {
+        "sandbox_read": SandboxedReadTool().execute,
+        "system_observe": SystemObserveTool().execute,
+        "project_shell": ShellTool().execute,
+        "update_memory": UpdateMemoryTool().execute,
+        "request_capability": RequestCapabilityTool().execute,
+    }

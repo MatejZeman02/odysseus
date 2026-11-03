@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from src.agent_tools.interaction_tools import RequestCapabilityTool
+from src.agent_tools.companion_tools import RequestCapabilityTool
 from src.tool_schemas import FUNCTION_TOOL_SCHEMAS, function_call_to_tool_block
 
 
@@ -56,3 +56,82 @@ def test_capability_card_ui_persists_before_continuing():
     assert "aq.kind === 'capability_request'" in renderer
     assert "/chat-capabilities" in renderer
     assert "odysseus:capability-updated" in renderer
+
+
+def test_an_unavailable_grant_is_explained_instead_of_offered(monkeypatch):
+    """No Enable button for a grant the route would then refuse.
+
+    Contained reads in a Computer Help home with no reviewed image pinned was
+    the real case: the card appeared, the owner pressed Enable, the change was
+    refused, and nothing on screen said why.
+    """
+    import src.agent_tools.companion_tools as companion_tools
+
+    monkeypatch.setattr(
+        companion_tools, "_owned_session",
+        lambda session_id, owner: {
+            "owner": "owner", "scope_kind": "computer", "project_id": None,
+            "model": "", "endpoint_id": "", "workspace_root": "",
+        },
+    )
+    monkeypatch.setattr(
+        "src.companion_capabilities.current_readiness",
+        lambda: {
+            "sandbox_ready": False, "sandbox_reason": "pinned_sandbox_image_required",
+            "shell_ready": False, "shell_reason": "",
+        },
+    )
+
+    _description, result = asyncio.run(RequestCapabilityTool().execute(
+        json.dumps({"name": "sandbox_read", "reason": "I need to read a log."}),
+        {"session_id": "s1", "owner": "owner"},
+    ))
+
+    assert "ask_user" not in result
+    assert result["exit_code"] == 1
+    assert "digest-pinned sandbox image" in result["error"]
+
+
+def test_a_switched_off_but_available_grant_still_gets_its_card(monkeypatch):
+    """The invariant the check above must not break."""
+    import src.agent_tools.companion_tools as companion_tools
+
+    monkeypatch.setattr(
+        companion_tools, "_owned_session",
+        lambda session_id, owner: {
+            "owner": "owner", "scope_kind": "computer", "project_id": None,
+            "model": "", "endpoint_id": "", "workspace_root": "",
+        },
+    )
+    monkeypatch.setattr(
+        "src.companion_capabilities.current_readiness",
+        lambda: {
+            "sandbox_ready": False, "sandbox_reason": "pinned_sandbox_image_required",
+            "shell_ready": False, "shell_reason": "",
+        },
+    )
+
+    _description, result = asyncio.run(RequestCapabilityTool().execute(
+        json.dumps({"name": "system_observe", "reason": "Check the graphics stack."}),
+        {"session_id": "s1", "owner": "owner"},
+    ))
+
+    assert result["exit_code"] == 0
+    assert result["ask_user"]["capability"] == "system_observe"
+
+
+def test_every_companion_tool_reaches_the_native_registry():
+    """The fork registers its tools in one line, so check the line works.
+
+    Five names used to be spelled into an upstream file by hand. If the fold
+    into TOOL_HANDLERS ever stops happening, a Companion home silently loses
+    its tools instead of failing here.
+    """
+    from src.agent_tools import TOOL_HANDLERS
+
+    missing = [
+        name for name in
+        ("sandbox_read", "system_observe", "project_shell", "update_memory", "request_capability")
+        if name not in TOOL_HANDLERS
+    ]
+    assert missing == []

@@ -14,8 +14,10 @@ from src.path_identity import PathIdentityError, pin_directory
 from src.auth_helpers import effective_user, is_delegated_credential, owner_filter, require_user
 from src.continuity.store import ContinuityStore, ScopeConflictError
 from src.endpoint_resolver import build_chat_url, build_headers, normalize_base
-from src.computer_sandbox import readiness as computer_sandbox_readiness
-from src.companion_capabilities import ALL_CAPABILITIES, capability_payload, can_change, defaults_for_scope, normalize
+from src.companion_capabilities import (
+    ALL_CAPABILITIES, capability_payload, can_change, current_readiness,
+    defaults_for_scope, normalize,
+)
 
 _home_locks_guard = threading.Lock()
 _home_locks: dict[tuple[str, str, str], threading.Lock] = {}
@@ -90,17 +92,12 @@ def _endpoint(owner: str, endpoint_id: str, model: str) -> tuple[str, dict]:
 
 
 def _capability_readiness() -> dict:
-    """Readiness facts the capability payload needs, with safe reason codes."""
-    from src.project_shell import readiness as shell_readiness
+    """Readiness facts the capability payload needs, with safe reason codes.
 
-    sandbox = computer_sandbox_readiness()
-    shell = shell_readiness()
-    return {
-        "sandbox_ready": sandbox.qualified,
-        "sandbox_reason": sandbox.reason,
-        "shell_ready": shell.ready,
-        "shell_reason": shell.reason,
-    }
+    One definition, shared with ``request_capability``. When the two disagreed,
+    the tool offered the owner an Enable button that this route then refused.
+    """
+    return current_readiness()
 
 
 def _session_payload(row: DbSession, project_name: str | None = None, workspace_root: str | None = None) -> dict:

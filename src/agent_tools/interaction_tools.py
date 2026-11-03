@@ -1,8 +1,6 @@
 import json
 import logging
 
-from src.companion_capabilities import ALL_CAPABILITIES, capability_label, grant_for_tool
-
 logger = logging.getLogger(__name__)
 
 class AskUserTool:
@@ -56,45 +54,6 @@ class AskUserTool:
         }
         logger.info("Tool executed: %s (%d options, multi=%s)", desc, len(options), multi)
         return desc, result
-
-
-class RequestCapabilityTool:
-    """Ask for a fixed chat capability without granting it from model text."""
-
-    async def execute(self, content, ctx):
-        raw = (content or "").strip()
-        try:
-            parsed = json.loads(raw) if raw else {}
-        except (ValueError, TypeError):
-            parsed = {}
-        name = str(parsed.get("name") or "").strip() if isinstance(parsed, dict) else ""
-        reason = str(parsed.get("reason") or "").strip() if isinstance(parsed, dict) else ""
-        # Models often name the tool they want rather than the grant behind it.
-        name = grant_for_tool(name) or name
-        if name not in ALL_CAPABILITIES:
-            return "request_capability: invalid", {
-                "error": "Unknown chat capability. Use one of: " + ", ".join(sorted(ALL_CAPABILITIES)),
-                "exit_code": 1,
-            }
-        label = capability_label(name)
-        question = f"Enable {label} for this chat?"
-        if reason:
-            question += f" {reason[:500]}"
-        return f"request_capability: {name}", {
-            "ask_user": {
-                "kind": "capability_request",
-                "capability": name,
-                "enable_label": f"Enable {label}",
-                "question": question,
-                "options": [
-                    {"label": f"Enable {label}", "description": "Enable it for this chat and continue."},
-                    {"label": "Not now", "description": "Keep this capability off."},
-                ],
-                "multi": False,
-            },
-            "output": f"Requested {label} for this chat.",
-            "exit_code": 0,
-        }
 
 class UpdatePlanTool:
     async def execute(self, content, ctx):
