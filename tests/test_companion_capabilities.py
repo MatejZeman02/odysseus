@@ -1,3 +1,4 @@
+from tests.helpers.js_modules import session_ui_source
 from src.companion_capabilities import (
     SANDBOX_READ,
     SYSTEM_OBSERVE,
@@ -60,7 +61,7 @@ def test_sandbox_reason_is_safe_and_explains_qualification_state():
 
 def test_companion_ui_uses_one_capability_drawer_and_native_documents_for_artifacts():
     index = open("static/index.html", encoding="utf-8").read()
-    sessions = open("static/js/sessions.js", encoding="utf-8").read()
+    sessions = session_ui_source()
     app = open("static/app.js", encoding="utf-8").read()
     assert 'id="overflow-chat-capabilities-btn"' in index
     assert "Chat capabilities" in index
