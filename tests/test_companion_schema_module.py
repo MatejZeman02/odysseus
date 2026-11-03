@@ -11,7 +11,6 @@ have to keep holding for that to be a move rather than a break:
   ``init_db`` while it is still importing.
 """
 
-import json
 import os
 import sqlite3
 import subprocess
@@ -165,62 +164,3 @@ def test_the_migrations_read_the_database_url_at_call_time(monkeypatch, tmp_path
     sqlite3.connect(target).close()
     monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{target}")
     assert companion_migrations._sqlite_path() == str(target)
-
-
-def test_the_artifact_rename_still_runs_before_create_all(tmp_path, monkeypatch):
-    """The British spelling migration only works before the new table exists."""
-    import core.database as database
-
-    target = tmp_path / "legacy.db"
-    conn = sqlite3.connect(target)
-    conn.execute("CREATE TABLE working_artefacts (id TEXT PRIMARY KEY, owner TEXT)")
-    conn.execute("INSERT INTO working_artefacts VALUES ('a1', 'owner')")
-    conn.execute("CREATE TABLE context_grants (id TEXT PRIMARY KEY, artefact_paths_json TEXT)")
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{target}")
-    companion_migrations.run_companion_migrations("before_create")
-
-    conn = sqlite3.connect(target)
-    try:
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        rows = conn.execute("SELECT id, owner FROM working_artifacts").fetchall()
-        grant_columns = {row[1] for row in conn.execute("PRAGMA table_info(context_grants)")}
-    finally:
-        conn.close()
-
-    assert "working_artifacts" in tables and "working_artefacts" not in tables
-    assert rows == [("a1", "owner")]
-    assert "artifact_paths_json" in grant_columns and "artefact_paths_json" not in grant_columns
-
-
-def test_legacy_continuity_payloads_are_still_classified(tmp_path, monkeypatch):
-    """An after-create migration, checked through the phase registry."""
-    import core.database as database
-
-    target = tmp_path / "continuity.db"
-    conn = sqlite3.connect(target)
-    conn.execute(
-        "CREATE TABLE continuity_artifacts (id TEXT PRIMARY KEY, kind TEXT, payload_json TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO continuity_artifacts VALUES ('c1', 'project_brief_v1', ?)",
-        (json.dumps({"summary": "something an owner never approved"}),),
-    )
-    conn.commit()
-    conn.close()
-
-    monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{target}")
-    companion_migrations.run_companion_migrations("after_create")
-
-    conn = sqlite3.connect(target)
-    try:
-        payload = json.loads(
-            conn.execute("SELECT payload_json FROM continuity_artifacts WHERE id='c1'").fetchone()[0]
-        )
-    finally:
-        conn.close()
-
-    assert payload["derivation_status"] == "legacy_unclassified"
-    assert payload["summary"] == "something an owner never approved"

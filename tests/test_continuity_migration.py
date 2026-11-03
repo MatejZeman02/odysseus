@@ -2,6 +2,7 @@ import sqlite3
 import json
 
 import core.database as database
+import src.companion_migrations as companion_migrations
 
 
 def test_legacy_sessions_gain_additive_continuity_columns(monkeypatch, tmp_path):
@@ -13,7 +14,7 @@ def test_legacy_sessions_gain_additive_continuity_columns(monkeypatch, tmp_path)
     conn.close()
 
     monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{path}")
-    database._migrate_add_continuity_session_columns()
+    companion_migrations._migrate_add_continuity_session_columns()
 
     conn = sqlite3.connect(path)
     row = conn.execute("SELECT id, name, scope_kind, project_id FROM sessions").fetchone()
@@ -36,7 +37,7 @@ def test_legacy_continuity_payloads_are_marked_unclassified_without_content_rewr
     conn.close()
 
     monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{path}")
-    database._migrate_continuity_derivation_metadata()
+    companion_migrations._migrate_continuity_derivation_metadata()
 
     conn = sqlite3.connect(path)
     payload = json.loads(conn.execute("SELECT payload_json FROM continuity_artifacts WHERE id = 'checkpoint'").fetchone()[0])
@@ -62,7 +63,7 @@ def test_legacy_sessions_gain_safe_project_capability_default(monkeypatch, tmp_p
     conn.close()
 
     monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{path}")
-    database._migrate_add_g15_session_columns()
+    companion_migrations._migrate_add_g15_session_columns()
 
     conn = sqlite3.connect(path)
     row = conn.execute(
@@ -93,7 +94,7 @@ def test_g2c_pre_release_artifact_column_is_renamed(monkeypatch, tmp_path):
     conn.close()
 
     monkeypatch.setattr(database, "DATABASE_URL", f"sqlite:///{path}")
-    database._migrate_artifact_table_spelling()
+    companion_migrations._migrate_artifact_table_spelling()
 
     conn = sqlite3.connect(path)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(context_grants)")}
